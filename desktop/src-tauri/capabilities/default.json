@@ -9,5 +9,11 @@
     "global-shortcut:default",
     "notification:default",
     "core:window:allow-set-badge-count"
-  ]
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:4527/*",
+      "http://127.0.0.1:4527/*"
+    ]
+  }
 }

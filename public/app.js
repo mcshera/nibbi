@@ -455,8 +455,10 @@ async function runLocalCommand(name, arg) {
     });
     case 'diff': return localTurn('/diff ' + arg, async (T) => {
       if (!arg) return { ok: false, text: 'Which one? `/diff <fixer-id>`' };
+      const f0 = fixerById(arg);
+      if (f0 && f0.status === 'merged') { const st0 = addStep(T, 'finding the merge commit'); let commits = []; try { commits = await api.get('/nibbi/git?project=' + encodeURIComponent(f0.game || f0.project) + '&n=30'); } catch { /* none */ } markStep(st0, 'done'); const title = fixerTitle(f0); const hit = commits.find((c) => c.msg.includes(f0.id) || c.msg.toLowerCase().includes(title.toLowerCase().slice(0, 24))); return { text: '**' + md.esc(title) + '** is already **merged** into **' + (f0.game || f0.project) + '**' + (hit ? ' — `' + hit.hash + '` ' + md.esc(hit.msg).slice(0, 120) + ' (' + relTime(hit.at) + ')' : '') + (f0.diffstat ? '\n\n```\n' + String(f0.diffstat).trim() + '\n```' : '') + '\n\nThe branch and worktree are gone; the change lives in the project history now.', acts: [{ label: 'play ' + (f0.game || f0.project), run: () => send('/play ' + (f0.game || f0.project)) }, { label: 'plan', run: () => send('/plan ' + (f0.game || f0.project)) }] }; }
       const st = addStep(T, 'reading the diff'); const d = await api.get('/api/fixer-diff?id=' + encodeURIComponent(arg)); markStep(st, 'done');
-      const f = fixerById(arg) || { id: arg, status: 'done' };
+      const f = f0 || { id: arg, status: 'done' };
       return { html: renderDiff(d), text: (d.diffstat || '').trim(), acts: fixerActs(f, { target: d.target }).filter((a) => a.label !== 'diff' && a.label !== 'what changed') };
     });
     case 'review': {
@@ -605,7 +607,8 @@ function postFixerBubble(f) {
   $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(stripMd(text));
 }
 function postAwayBubble(evs) {
-  const done = evs.filter((e) => ['done', 'failed', 'merged'].includes(e.to));
+  const latest = new Map(); for (const e of evs) latest.set(e.id, e);   // one line per fixer: its latest state
+  const done = [...latest.values()].filter((e) => ['done', 'failed', 'merged'].includes(e.to));
   if (!done.length) return;
   setMode('talk'); body.classList.remove('rest');
   const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
@@ -1225,7 +1228,7 @@ document.addEventListener('click', (e) => { const a = e.target.closest && e.targ
 /* live state report: the running app tells the host what it is showing (loopback-readable at /nibbi/state) */
 let stateTimer = 0;
 function snapshot() {
-  return { v: '0.6.1', mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
+  return { v: '0.6.1', client: window.__TAURI__ ? 'app' : 'browser', mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
     turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => s.textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
     chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), toast: $('#toast').hidden ? null : $('#toast').textContent };
 }

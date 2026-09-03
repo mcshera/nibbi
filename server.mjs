@@ -88,7 +88,7 @@ function probeGateway() {
 
 /* ---- event log: the host watches the gateway itself (always on) so the surface never misses a transition ---- */
 const EV_FILE = join(HOME, "nibbi-events.jsonl"), EV_STATE = join(HOME, "nibbi-events-state.json");
-const evClients = new Set(); let evRing = []; let liveState = null; const clientLog = [];
+const evClients = new Set(); let evRing = []; const liveStates = {}; const clientLog = [];
 try { evRing = readFileSync(EV_FILE, "utf8").trim().split("\n").filter(Boolean).slice(-500).map((l) => JSON.parse(l)); } catch { evRing = []; }
 let evState = null; try { evState = JSON.parse(readFileSync(EV_STATE, "utf8")); } catch { evState = null; }
 function gwGet(path) {
@@ -187,9 +187,9 @@ async function handle(req, res) {
     if (url.pathname === "/nibbi/setup") { html(res, 200, setupPage(req)); return; }
     if (url.pathname === "/nibbi/run" && req.method === "POST") { await runScript(req, res); return; }
     if (url.pathname === "/nibbi/state") { // the running surface reports its state here; read it back (loopback) to see the live app
-      if (req.method === "POST") { const p = await readJson(req); liveState = { ...p, at: Date.now(), from: req.socket.remoteAddress }; try { writeFileSync(join(HOME, "nibbi-state.json"), JSON.stringify(liveState)); } catch { /* disk */ } json(res, 200, { ok: true }); return; }
+      if (req.method === "POST") { const p = await readJson(req); const st = { ...p, at: Date.now(), from: req.socket.remoteAddress }; liveStates[p.client || "browser"] = st; try { writeFileSync(join(HOME, "nibbi-state.json"), JSON.stringify(liveStates)); } catch { /* disk */ } json(res, 200, { ok: true }); return; }
       if (!isLoopback(req)) { json(res, 403, { error: "loopback only" }); return; }
-      json(res, 200, liveState || { error: "no report yet" }); return;
+      const which = url.searchParams.get("client"); json(res, 200, (which ? liveStates[which] : (liveStates.app || liveStates.browser)) || { error: "no report yet", clients: Object.keys(liveStates) }); return;
     }
     if (url.pathname === "/nibbi/client-log" && req.method === "POST") { const p = await readJson(req); const line = JSON.stringify({ ts: Date.now(), ...p }); clientLog.push(line); if (clientLog.length > 300) clientLog.shift(); try { appendFileSync(join(HOME, "nibbi-client.log"), line + "\n"); } catch { /* disk */ } json(res, 200, { ok: true }); return; }
     if (url.pathname === "/nibbi/client-log") { if (!isLoopback(req)) { json(res, 403, { error: "loopback only" }); return; } json(res, 200, clientLog.slice(-Number(url.searchParams.get("n") || 50)).map((l) => JSON.parse(l))); return; }
