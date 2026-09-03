@@ -131,6 +131,52 @@ async function recoverTurnLimit(f) {
   finally { recovering = false; }
 }
 
+/* ---- goals + watchdog: keep a project's auto loop moving toward a goal for as long as it takes ---- */
+const GOALS = join(HOME, "nibbi-goals.json");
+function goals() { try { return JSON.parse(readFileSync(GOALS, "utf8")); } catch { return {}; } }
+function saveGoals(g) { try { writeFileSync(GOALS + ".tmp", JSON.stringify(g, null, 2)); execFileSync("mv", ["-f", GOALS + ".tmp", GOALS]); } catch { /* disk */ } }
+function gwPost(path, body) {
+  return new Promise((resolve) => {
+    const buf = Buffer.from(JSON.stringify(body || {}));
+    const req = httpRequest({ host: GATEWAY.hostname, port: GATEWAY.port, path, method: "POST", headers: { "content-type": "application/json", "content-length": buf.length }, timeout: 15 * 60_000 }, (r) => { let b = ""; r.on("data", (c) => (b += c)); r.on("end", () => { try { resolve(JSON.parse(b)); } catch { resolve({ text: b }); } }); });
+    req.on("error", (e) => resolve({ error: e.message })); req.on("timeout", () => { req.destroy(); resolve({ error: "timeout" }); }); req.write(buf); req.end();
+  });
+}
+let nudging = false;
+async function watchdog() {
+  if (nudging) return;
+  const [auto, fixers, status, ms] = await Promise.all([gwGet("/api/auto"), gwGet("/api/fixers"), gwGet("/api/status"), null]);
+  if (!auto || !fixers || !status) return;
+  if (status.busy || (status.rateLimit && status.rateLimit.status !== "allowed")) return;
+  const g = goals(); const now = Date.now();
+  for (const [project, a] of Object.entries(auto)) {
+    if (!a.on || a.mode === "suggest") continue;
+    const goal = g[project];
+    // goal reached? (focus milestone fully checked)
+    if (goal && goal.focus) {
+      const mil = await gwGet("/api/milestones?project=" + encodeURIComponent(project));
+      const m = (mil || []).find((x) => x.name.toLowerCase().startsWith(goal.focus.toLowerCase()));
+      if (m && m.total && m.done === m.total) { emitEvent({ kind: "goal", project, text: `goal reached — ${m.name}: ${m.done}/${m.total} tasks merged`, done: true, goal: goal.text }); delete g[project]; saveGoals(g); await gwPost("/api/auto", { project, focus: "" }); continue; }
+    }
+    if (a.inflight > 0 || a.pending === 0) continue;
+    const lastStart = Math.max(0, ...fixers.filter((f) => (f.game || f.project) === project).map((f) => Date.parse(f.startedAt || 0) || 0));
+    const quietMin = (now - lastStart) / 60000;
+    const lastNudge = goal && goal.lastNudgeAt ? (now - goal.lastNudgeAt) / 60000 : 999;
+    const stallMin = goal ? 8 : 15, nudgeGap = goal ? 20 : 45;
+    if (quietMin < stallMin || lastNudge < nudgeGap) continue;
+    nudging = true;
+    try {
+      const focus = (goal && goal.focus) || a.focus || "";
+      const msg = `[nibbi watchdog] Auto mode on ${project} is ${a.mode} with ${a.pending} tasks pending and nothing in flight for ${Math.round(quietMin)} min. Dispatch the next independent task(s) now with dispatch_fixer (up to ${a.maxConcurrent || 2})${focus ? `, staying inside milestone "${focus}"` : ""}. Facts: every task marked [x] in plans/${project}.md is merged into main; do not re-verify that. If a task truly blocks on unmerged work, dispatch the next one that does not. One line per dispatch.`;
+      emitEvent({ kind: "goal", project, text: `auto looked stalled (${Math.round(quietMin)} min quiet, ${a.pending} pending) — nudged Oracle to dispatch${focus ? " in " + focus : ""}`, goal: goal ? goal.text : null });
+      g[project] = { ...(goal || { text: "auto", startedAt: now }), lastNudgeAt: now, nudges: ((goal && goal.nudges) || 0) + 1 }; saveGoals(g);
+      const r = await gwPost("/api/send", { message: msg });
+      emitEvent({ kind: "goal", project, text: "Oracle: " + String(r.text || r.error || "").replace(/»[a-z]+:[^\n]*/gi, "").trim().slice(0, 240), goal: goal ? goal.text : null });
+    } finally { nudging = false; }
+  }
+}
+setTimeout(() => { watchdog().catch(() => {}); setInterval(() => { watchdog().catch(() => {}); }, 120_000); }, 30_000);
+
 async function pollGateway() {
   const [fixers, auto] = await Promise.all([gwGet("/api/fixers"), gwGet("/api/auto")]);
   if (!fixers) return;
@@ -245,6 +291,19 @@ async function handle(req, res) {
       if (!abs.startsWith(repo + "/") || !existsSync(abs) || !statSync(abs).isFile()) { json(res, 404, { error: "no such file" }); return; }
       const buf = readFileSync(abs); if (buf.length > 200_000 || buf.includes(0)) { json(res, 413, { error: "not a small text file" }); return; }
       json(res, 200, { path: rel, content: buf.toString("utf8") }); return;
+    }
+    if (url.pathname === "/nibbi/goal") {
+      if (req.method === "POST") {
+        const p = await readJson(req); const project = String(p.project || ""); const g = goals();
+        if (!project) { json(res, 400, { error: "project required" }); return; }
+        if (p.stop) { delete g[project]; saveGoals(g); await gwPost("/api/auto", { project, focus: "" }); json(res, 200, { ok: true, stopped: true }); return; }
+        const text = String(p.text || "").trim(); const fm = text.match(/\bM\d+(?:\.\d+)?\b/i); const focus = p.focus || (fm ? fm[0].toUpperCase() : "");
+        g[project] = { text, focus, startedAt: Date.now(), nudges: 0 }; saveGoals(g);
+        const cur = (await gwGet("/api/auto")) || {}; const mode = cur[project] && cur[project].on ? cur[project].mode : null;
+        await gwPost("/api/auto", { project, on: true, ...(mode ? {} : { mode: p.mode || "stage" }), focus });
+        json(res, 200, { ok: true, goal: g[project], mode: mode || p.mode || "stage" }); return;
+      }
+      json(res, 200, goals()); return;
     }
     if (url.pathname === "/nibbi/scaffold" && req.method === "POST") { await scaffold(req, res); return; }
     if (url.pathname === "/nibbi/vault-write" && req.method === "POST") { // creates folders; never protected files; logs the write

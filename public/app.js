@@ -350,6 +350,7 @@ const COMMANDS = [
   { cmd: '/review', args: '[project|all]', desc: 'walk staged fixers: j/k next/prev · a approve · x discard · p preview', local: true },
   { cmd: '/plan', args: '[project] | edit <instruction>', desc: 'milestones, progress and what auto is doing; `edit` asks Oracle to rewrite the plan', local: true },
   { cmd: '/auto', args: '<project> <off|suggest|stage|ship|pause|resume>', desc: 'steer autonomy for a project', local: true },
+  { cmd: '/goal', args: '<text> | stop', desc: 'run the active project toward a goal for as long as it takes (auto + a watchdog that unsticks it)', local: true },
   { cmd: '/play', args: '<project> [stop|status]', desc: 'launch the project\'s dev server and open it', local: true },
   { cmd: '/project', args: '[name]', desc: 'show or switch the active project', local: true },
   { cmd: '/new', args: '<name> [web|game]', desc: 'start a new project (git repo in ~/OracleProjects; web = vite scaffold, game = rules/design + plan)', local: true },
@@ -486,6 +487,17 @@ async function runLocalCommand(name, arg) {
       const text = proj + ' — ' + done + '/' + total + ' tasks. ' + ms.map((m) => m.name + ' ' + m.done + '/' + m.total).join('; ');
       return { html, text, acts: [next ? { label: 'dispatch next', run: () => send('dispatch the next task in "' + next.name + '" for ' + proj + ' as a fixer') } : null, { label: 'what\'s staged?', run: () => send('/artifacts ' + proj) }, auto && auto.on ? { label: 'pause auto', confirm: 'pause auto on ' + proj + '?', run: () => send('/auto ' + proj + ' pause') } : { label: 'turn auto on', run: () => send('/auto ' + proj + ' stage') }].filter(Boolean) };
     });
+    case 'goal': return localTurn('/goal' + (arg ? ' ' + arg : ''), async (T) => {
+      const proj = activeProject();
+      if (!arg) { const g = await api.get('/nibbi/goal'); const mine = g[proj]; const a = autoOf(proj); if (!mine) return { text: 'No goal on **' + proj + '**' + (a.on ? ' (auto is ' + a.mode + ' — it follows the whole plan)' : '') + '. Set one: `/goal finish M9` — I keep dispatching and merging toward it, and nudge Oracle if the loop stalls.', acts: [{ label: 'goal: next milestone', run: () => { ask.value = '/goal finish '; ask.focus(); autosize(); } }] };
+        let prog = ''; if (mine.focus) { try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const m = ms.find((x) => x.name.toLowerCase().startsWith(mine.focus.toLowerCase())); if (m) prog = ' · ' + m.done + '/' + m.total + ' tasks'; } catch { /* */ } }
+        return { text: 'Goal on **' + proj + '**: _' + md.esc(mine.text) + '_' + (mine.focus ? ' (milestone ' + mine.focus + prog + ')' : '') + ' — since ' + relTime(mine.startedAt) + ', auto **' + a.mode + '**, ' + a.inflight + ' in flight · ' + a.pending + ' pending' + (mine.nudges ? ' · nudged ' + mine.nudges + '×' : '') + '.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, { label: 'stop the goal', confirm: 'stop — sure?', run: () => send('/goal stop') }] }; }
+      if (/^stop$/i.test(arg)) { await api.post('/nibbi/goal', { project: proj, stop: true }); refreshStatus(); return { text: 'Goal on **' + proj + '** cleared. Auto stays as it was (' + autoOf(proj).mode + '); `/auto ' + proj + ' off` to stop everything.' }; }
+      const st = addStep(T, 'setting the goal and switching auto on');
+      const r = await api.post('/nibbi/goal', { project: proj, text: arg }); markStep(st, 'done'); refreshStatus();
+      let prog = ''; if (r.goal.focus) { try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const m = ms.find((x) => x.name.toLowerCase().startsWith(r.goal.focus.toLowerCase())); if (m) prog = ' — ' + m.name + ': ' + (m.total - m.done) + ' task' + (m.total - m.done === 1 ? '' : 's') + ' left'; } catch { /* */ } }
+      return { text: 'Goal on **' + proj + '**: _' + md.esc(arg) + '_' + prog + '.\n\nAuto is **' + r.mode + '**' + (r.mode === 'ship' ? ' — fixers dispatch, test and merge on their own' : ' — fixers dispatch on their own; you approve each merge') + '. I watch the loop: if nothing is in flight for 8 minutes while tasks remain, I nudge Oracle to dispatch. Every landing shows up here; `/goal` shows progress; `/goal stop` ends it.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, ...(r.mode !== 'ship' ? [{ label: 'switch to ship', confirm: 'ship = merges itself — sure?', warn: true, run: () => send('/auto ' + proj + ' ship') }] : [])] };
+    });
     case 'auto': { const m = arg.match(/^(\S+)\s+(off|suggest|stage|ship|pause|resume|on)$/i); return localTurn('/auto ' + arg, async () => {
       if (!m) return { ok: false, text: '`/auto <project> <off|suggest|stage|ship|pause|resume>`' };
       const proj = m[1], mode = m[2].toLowerCase();
@@ -581,6 +593,7 @@ function connectEvents() {
   try { evSource = new EventSource('/nibbi/events?since=' + since); } catch { return; }
   evSource.addEventListener('ready', () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; });
   evSource.addEventListener('fixer', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) { evReplay.push(ev); return; } onFixerEvent(ev); });
+  evSource.addEventListener('goal', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, (ev.done ? '🎯 ' : '') + '**' + md.esc(ev.project) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; if (ev.done) { nibbi.setMood('happy'); sound('land'); } refreshStatus(); });
   evSource.addEventListener('note', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, '**' + md.esc(ev.title || ev.id) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; });
   evSource.addEventListener('auto', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; refreshStatus(); toast('auto on ' + ev.project + ' → ' + (ev.to.on ? ev.to.mode : 'off'), 2500); });
   evSource.onerror = () => { /* EventSource reconnects on its own; replay resumes from lastEventTs */ evReady = false; };
@@ -975,7 +988,8 @@ function renderProject() {
   projectEl.hidden = !list.length;
   if (!list.length) return;
   const name = activeProject(); const a = autoOf(name);
-  pnameEl.textContent = name;
+  const goal = (S.goals || {})[name];
+  pnameEl.textContent = name + (goal && goal.focus ? ' · ' + goal.focus : '');
   pdotEl.dataset.mode = a.mode; pdotEl.classList.toggle('busy', a.inflight > 0);
   projectEl.title = name + (a.on ? ' · auto ' + a.mode + (a.inflight ? ' · ' + a.inflight + ' in flight' : '') : '');
   const running = (S.fixers || []).filter((f) => ACTIVE.has(f.status));
@@ -995,7 +1009,7 @@ function renderProject() {
     const capL = document.createElement('label'); capL.innerHTML = 'cap $<input type="number" min="0" step="1" placeholder="∞">'; const capI = capL.querySelector('input'); capI.value = pa.spendCap ? pa.spendCap : ''; capI.onclick = (e) => e.stopPropagation(); capI.onchange = (e) => { e.stopPropagation(); api.post('/api/auto', { project: p.name, spendCap: Number(capI.value) || 0 }).then(() => { toast(capI.value ? 'cap $' + capI.value + ' on ' + p.name : 'no spend cap on ' + p.name); refreshStatus(); }).catch((er) => toast(er.message)); };
     const modS = document.createElement('select'); for (const m of ['auto', 'haiku', 'sonnet', 'opus']) { const o = document.createElement('option'); o.value = m; o.textContent = m === 'auto' ? 'model: auto' : m; if ((pa.model || 'auto') === m) o.selected = true; modS.appendChild(o); } modS.onclick = (e) => e.stopPropagation(); modS.onchange = (e) => { e.stopPropagation(); api.post('/api/auto', { project: p.name, model: modS.value }).then(() => { toast('fixers on ' + p.name + ' use ' + modS.value); refreshStatus(); }).catch((er) => toast(er.message)); };
     tune.append(capL, modS);
-    const stat = document.createElement('div'); stat.className = 'pstat'; const rf = running.filter((f) => (f.game || f.project) === p.name).length; stat.textContent = [pa.on ? pa.inflight + ' in flight · ' + pa.pending + ' pending · ' + pa.staged + ' staged' : (rf ? rf + ' fixer' + (rf > 1 ? 's' : '') + ' running' : ''), pa.spend ? '$' + pa.spend.toFixed(2) + ' auto spend' : ''].filter(Boolean).join(' · ');
+    const stat = document.createElement('div'); stat.className = 'pstat'; const rf = running.filter((f) => (f.game || f.project) === p.name).length; const pg = (S.goals || {})[p.name]; stat.textContent = [pg ? 'goal: ' + pg.text.slice(0, 40) : '', pa.on ? pa.inflight + ' in flight · ' + pa.pending + ' pending · ' + pa.staged + ' staged' : (rf ? rf + ' fixer' + (rf > 1 ? 's' : '') + ' running' : ''), pa.spend ? '$' + pa.spend.toFixed(2) + ' auto spend' : ''].filter(Boolean).join(' · '); if (pa.on && pa.note) { stat.title = pa.note; stat.textContent += '\n' + String(pa.note).slice(0, 90) + (pa.note.length > 90 ? '…' : ''); }
     const acts = document.createElement('div'); acts.className = 'pacts';
     const mk = (t, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip in'; b.textContent = t; b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; };
     acts.append(mk('plan', () => send('/plan ' + p.name)));
@@ -1034,6 +1048,7 @@ async function refreshStatus() {
     }
     if (!S.busy) { try { const fr = await fetch('/api/fixers'); if (fr.ok) S.fixers = await fr.json(); } catch { /* ignore */ } }
     try { const ar = await fetch('/api/auto'); if (ar.ok) S.auto = await ar.json(); } catch { /* ignore */ }
+    try { const gr = await fetch('/nibbi/goal'); if (gr.ok) S.goals = await gr.json(); } catch { /* ignore */ }
     renderAgents(S.fixers, S.auto); if (S.demo) fleetEvents(demoFixers()); renderProject(); refreshBadge(); reattachFixerActs();
   } catch {
     if (!S.busy) setLink('offline');

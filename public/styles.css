@@ -291,7 +291,7 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 .pmenu .segb.on { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(21,20,19,.12); }
 .pmenu .segb.ship.on { background: var(--ink); color: #f5f2ec; }
 .pmenu .segb.armed { background: rgba(181,83,61,.92); color: #fff; }
-.pmenu .pstat { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; min-height: 1em; }
+.pmenu .pstat { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; min-height: 1em; white-space: pre-line; }
 .pmenu .pacts { display: flex; gap: 6px; margin-top: 8px; } .pmenu .pacts .chip { font-size: 12px; padding: 4px 10px; }
 .pmenu .pnew { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 0; border-radius: 12px; background: none; font: inherit; font-size: 12.5px; color: var(--ink-3); text-align: left; cursor: pointer; } .pmenu .pnew:hover { background: rgba(21,20,19,.05); color: var(--ink); }
 @media (max-width: 640px) { .project .pmenu { width: calc(100vw - 32px); } }
