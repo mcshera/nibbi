@@ -316,11 +316,8 @@ function renderDiff(d) {
     const sum = document.createElement('summary'); sum.innerHTML = '<span class="fn">' + escapeHtml(f.name || d.branch) + '</span><span class="cnt"><b class="pa">+' + f.add + '</b> <b class="pd">−' + f.del + '</b></span>';
     const pre = document.createElement('pre'); pre.className = 'dbody';
     for (const ln of f.lines) {
-      const s = document.createElement('span');
-      if (ln.startsWith('@@')) { s.className = 'dhunk'; s.textContent = ln + '\n'; }
-      else if (ln.startsWith('+')) { s.className = 'dadd'; s.textContent = ln + '\n'; }
-      else if (ln.startsWith('-')) { s.className = 'ddel'; s.textContent = ln + '\n'; }
-      else { s.textContent = ln + '\n'; }
+      const s = document.createElement('span'); s.className = 'ln' + (ln.startsWith('@@') ? ' dhunk' : ln.startsWith('+') ? ' dadd' : ln.startsWith('-') ? ' ddel' : '');
+      s.textContent = ln || ' ';
       pre.appendChild(s);
     }
     det.append(sum, pre); body.appendChild(det);

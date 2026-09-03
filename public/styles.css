@@ -229,8 +229,9 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 .nib .said .diffv .dbody { margin: 0; padding: 10px 12px; border-radius: 12px; background: #fbfaf7; border: 1px solid var(--line); font: 12px/1.5 "Geist Mono", ui-monospace, monospace; color: var(--ink-2); max-height: 380px; overflow: auto; white-space: pre; }
 .diffv .df { color: var(--ink); font-weight: 600; }
 .diffv .dhunk { color: var(--ink-4); }
-.diffv .dadd { color: #2f6b3a; background: rgba(76,140,86,.10); display: inline-block; width: 100%; }
-.diffv .ddel { color: #9a3f2c; background: rgba(181,83,61,.10); display: inline-block; width: 100%; }
+.diffv .ln { display: block; min-height: 1.5em; padding: 0 4px; margin: 0 -4px; }
+.diffv .dadd { color: #2f6b3a; background: rgba(76,140,86,.10); }
+.diffv .ddel { color: #9a3f2c; background: rgba(181,83,61,.10); }
 .diffv .dnote { margin-top: 6px; font-size: 11.5px; color: var(--ink-3); }
 .bubble:has(.diffv) { display: block; }
 
