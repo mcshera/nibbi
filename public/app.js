@@ -301,19 +301,31 @@ function renderDiff(d) {
   const head = document.createElement('div'); head.className = 'dh';
   head.textContent = (d.game ? d.game + ' · ' : '') + d.branch + ' → ' + d.target;
   const stat = document.createElement('pre'); stat.className = 'dstat'; stat.textContent = (d.diffstat || '').trim() || '(no changes yet)';
-  const pre = document.createElement('pre'); pre.className = 'dbody';
-  const lines = String(d.diff || '').split('\n'); let file = null;
-  for (const ln of lines) {
-    const s = document.createElement('span');
-    if (ln.startsWith('diff --git')) { file = ln.replace(/^diff --git a\/(\S+).*/, '$1'); s.className = 'df'; s.textContent = '\n' + file + '\n'; }
-    else if (/^(index |--- |\+\+\+ )/.test(ln)) continue;
-    else if (ln.startsWith('@@')) { s.className = 'dhunk'; s.textContent = ln.replace(/@@.*?@@/, (m) => m) + '\n'; }
-    else if (ln.startsWith('+')) { s.className = 'dadd'; s.textContent = ln + '\n'; }
-    else if (ln.startsWith('-')) { s.className = 'ddel'; s.textContent = ln + '\n'; }
-    else { s.textContent = ln + '\n'; }
-    pre.appendChild(s);
+  const files = []; let cur = null;
+  for (const ln of String(d.diff || '').split('\n')) {
+    if (ln.startsWith('diff --git')) { cur = { name: ln.replace(/^diff --git a\/(\S+).*/, '$1'), lines: [], add: 0, del: 0 }; files.push(cur); continue; }
+    if (!cur) { cur = { name: '', lines: [], add: 0, del: 0 }; files.push(cur); }
+    if (/^(index |--- |\+\+\+ )/.test(ln)) continue;
+    if (ln.startsWith('+')) cur.add++; else if (ln.startsWith('-')) cur.del++;
+    cur.lines.push(ln);
   }
-  wrap.append(head, stat, pre);
+  const many = files.length > 3;
+  const body = document.createElement('div'); body.className = 'dfiles';
+  for (const f of files) {
+    const det = document.createElement('details'); det.className = 'dfile'; det.open = !many;
+    const sum = document.createElement('summary'); sum.innerHTML = '<span class="fn">' + escapeHtml(f.name || d.branch) + '</span><span class="cnt"><b class="pa">+' + f.add + '</b> <b class="pd">−' + f.del + '</b></span>';
+    const pre = document.createElement('pre'); pre.className = 'dbody';
+    for (const ln of f.lines) {
+      const s = document.createElement('span');
+      if (ln.startsWith('@@')) { s.className = 'dhunk'; s.textContent = ln + '\n'; }
+      else if (ln.startsWith('+')) { s.className = 'dadd'; s.textContent = ln + '\n'; }
+      else if (ln.startsWith('-')) { s.className = 'ddel'; s.textContent = ln + '\n'; }
+      else { s.textContent = ln + '\n'; }
+      pre.appendChild(s);
+    }
+    det.append(sum, pre); body.appendChild(det);
+  }
+  wrap.append(head, stat, body);
   if (d.truncated) { const n = document.createElement('div'); n.className = 'dnote'; n.textContent = 'diff truncated at 60 KB — the rest is in the worktree'; wrap.appendChild(n); }
   return wrap;
 }
@@ -346,7 +358,7 @@ const COMMANDS = [
   { cmd: '/export', args: '', desc: 'export the transcript to the vault', local: false },
   { cmd: '/clear', args: '', desc: 'fresh working context (vault memory carries forward)', local: false },
   { cmd: '/deploy', args: '<project>', desc: 'run the project\'s own deploy script (two clicks, live log)', local: true },
-  { cmd: '/phone', args: '', desc: 'put nibbi on your phone (QR + steps)', local: true },
+  { cmd: '/phone', args: '', desc: 'put nibbi on your phone (QR + steps) — parked on the `phone` branch', local: true, hidden: true },
   { cmd: '/help', args: '', desc: 'this list', local: true },
 ];
 
@@ -376,7 +388,7 @@ async function runLocalCommand(name, arg) {
       w.appendChild(txt);
       return { html: w, text: 'Pairing link: ' + r.setup, acts: [{ label: 'copy link', run: () => { navigator.clipboard?.writeText(r.setup); toast('copied'); } }, { label: 'open setup page', run: () => openUrl(r.setup) }] };
     });
-    case 'help': return localTurn('/help', async () => ({ text: COMMANDS.map((c) => '`' + c.cmd + (c.args ? ' ' + c.args : '') + '` — ' + c.desc).join('\n'), acts: [{ label: 'what\'s new?', run: () => send('what\'s new since we last talked?') }] }));
+    case 'help': return localTurn('/help', async () => ({ text: COMMANDS.filter((c) => !c.hidden).map((c) => '`' + c.cmd + (c.args ? ' ' + c.args : '') + '` — ' + c.desc).join('\n'), acts: [{ label: 'what\'s new?', run: () => send('what\'s new since we last talked?') }] }));
     case 'project': return localTurn('/project' + (arg ? ' ' + arg : ''), async (T) => {
       if (!S.projects || !S.projects.length) await refreshProjects();
       if (arg) { const p = (S.projects || []).find((x) => x.name.toLowerCase() === arg.toLowerCase()); if (!p) return { ok: false, text: 'No project called **' + md.esc(arg) + '**. I know: ' + projectNames().join(', ') + '.' }; S.project = p.name; LS.set('project', p.name); refreshStatus(); }
@@ -466,10 +478,29 @@ function shotsRow(paths) {
 
 /* ------------------------------------------------------------------ fleet events: when a fixer lands while you weren't looking, nibbi says so */
 let fleetSeen = null;
+function awayBubble(list) {
+  const last = LS.get('lastSeen', 0); const now = Date.now(); LS.set('lastSeen', now);
+  if (!last || now - last < 20 * 60000) return;
+  const since = list.filter((f) => f.endedAt && Date.parse(f.endedAt) > last && ['done', 'failed', 'merged'].includes(f.status));
+  if (!since.length) return;
+  setMode('talk'); body.classList.remove('rest');
+  const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
+  const away = Math.round((now - last) / 3600000);
+  const grp = (st) => since.filter((f) => f.status === st);
+  const parts = [];
+  if (grp('merged').length) parts.push(grp('merged').length + ' merged (' + grp('merged').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
+  if (grp('done').length) parts.push(grp('done').length + ' staged for your review (' + grp('done').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
+  if (grp('failed').length) parts.push(grp('failed').length + ' failed (' + grp('failed').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
+  const text = 'While you were away' + (away >= 1 ? ' (' + away + 'h)' : '') + ': ' + parts.join(' · ') + '.';
+  setSaid(T, text, false); setMeta(T, {}); T.done = true;
+  const acts = grp('done').slice(0, 2).map((f) => ({ label: 'diff ' + fixerTitle(f).slice(0, 18), run: () => send('/diff ' + f.id) }));
+  acts.push({ label: 'full report', run: () => send('/report ' + Math.max(1, Math.min(72, away + 1))) });
+  addActs(T, acts); $('#sr').textContent = stripMd(text);
+}
 function fleetEvents(list) {
   if (!list) return;
   const cur = new Map(list.map((f) => [f.id, f.status]));
-  if (fleetSeen === null) { fleetSeen = cur; return; }
+  if (fleetSeen === null) { fleetSeen = cur; try { awayBubble(list); } catch { /* cosmetic */ } return; }
   for (const f of list) {
     const prev = fleetSeen.get(f.id);
     if (prev === f.status || (prev === undefined && !ACTIVE.has(f.status))) continue;
@@ -477,7 +508,8 @@ function fleetEvents(list) {
     setMode('talk'); body.classList.remove('rest');
     const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
     const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
-    const text = f.status === 'done' ? 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + '. Review it?' : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**.' : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '');
+    const cost = (f.costUsd ? ' · $' + f.costUsd.toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
+    const text = f.status === 'done' ? 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?' : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**.' : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '');
     setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
     addActs(T, fixerActs(f)); if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
     nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
@@ -493,7 +525,7 @@ function updatePalette() {
   const v = ask.value; const m = v.match(/^\/(\S*)$/);
   if (!m) { paletteEl.hidden = true; palItems = []; return; }
   const q = m[1].toLowerCase();
-  palItems = COMMANDS.filter((c) => c.cmd.slice(1).startsWith(q) || c.desc.toLowerCase().includes(q)).slice(0, 7);
+  palItems = COMMANDS.filter((c) => !c.hidden && (c.cmd.slice(1).startsWith(q) || c.desc.toLowerCase().includes(q))).slice(0, 7);
   if (!palItems.length) { paletteEl.hidden = true; return; }
   palIndex = Math.min(palIndex, palItems.length - 1);
   paletteEl.replaceChildren(...palItems.map((c, i) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'pi' + (i === palIndex ? ' sel' : ''); b.innerHTML = '<span class="c">' + escapeHtml(c.cmd) + '</span> <span class="a">' + escapeHtml(c.args) + '</span><span class="d">' + escapeHtml(c.desc) + '</span>'; b.onmousedown = (e) => { e.preventDefault(); pickPalette(i); }; return b; }));
@@ -780,7 +812,15 @@ $('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voice
 $('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real Oracle'); };
 $('#st-clear').onclick = () => tidy();
 refreshStatus(); setInterval(refreshStatus, 6000);
-async function refreshProjects() { try { const r = await fetch('/api/projects'); if (!r.ok) return; const list = await r.json(); S.projects = list; const saved = LS.get('project', null); const g = (saved && list.find((p) => p.name === saved)) || list.find((p) => p.kind === 'game') || list[0]; if (g) S.project = g.name; const pl = []; for (const p of list.filter((x) => x.kind === 'game')) { try { const ps = await fetch('/api/play?project=' + encodeURIComponent(p.name)).then((x) => x.json()); if (ps.playable) pl.push({ name: p.name, running: ps.running, url: ps.url }); } catch { /* skip */ } } S.playable = pl; } catch { /* offline */ } }
+function mostActiveProject(list) {
+  const names = new Set(list.map((p) => p.name));
+  const autoOn = Object.entries(S.auto || {}).filter(([n, a]) => a && a.on && names.has(n)).map(([n]) => n);
+  if (autoOn.length === 1) return autoOn[0];
+  let best = null, at = 0;
+  for (const f of S.fixers || []) { const t = Date.parse(f.endedAt || f.startedAt || 0) || 0; const n = f.game || f.project; if (names.has(n) && t > at) { at = t; best = n; } }
+  return best || autoOn[0] || null;
+}
+async function refreshProjects() { try { const r = await fetch('/api/projects'); if (!r.ok) return; const list = await r.json(); S.projects = list; const saved = LS.get('project', null); const recent = mostActiveProject(list); const g = (saved && list.find((p) => p.name === saved)) || (recent && list.find((p) => p.name === recent)) || list.find((p) => p.kind === 'game') || list[0]; if (g) S.project = g.name; const pl = []; for (const p of list.filter((x) => x.kind === 'game')) { try { const ps = await fetch('/api/play?project=' + encodeURIComponent(p.name)).then((x) => x.json()); if (ps.playable) pl.push({ name: p.name, running: ps.running, url: ps.url }); } catch { /* skip */ } } S.playable = pl; } catch { /* offline */ } }
 refreshProjects(); setInterval(refreshProjects, 60000);
 if (S.demo) renderAgents([], {});
 
@@ -918,9 +958,11 @@ if (location.protocol.startsWith('http')) { try { const es = new EventSource('/n
 if ('serviceWorker' in navigator && window.isSecureContext && !Q.get('nosw')) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 if (standalone) body.classList.add('standalone');
-if (!standalone && /iPhone|iPad|Android/i.test(navigator.userAgent) && !LS.get('installHintShown', false)) { setTimeout(() => { toast(/iPhone|iPad/i.test(navigator.userAgent) ? 'Share → Add to Home Screen makes me an app' : 'Menu → Install app makes me an app', 7000); LS.set('installHintShown', true); }, 4000); }
+
 if (Q.get('say')) { setTimeout(() => send(Q.get('say')), 300); }
 try { if (window.__TAURI__ && window.__TAURI__.event) { window.__TAURI__.event.listen('toggle-live', () => toggleListen()); } } catch { /* browser */ }
 document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (!a) return; if (window.__TAURI__ && /^https?:/i.test(a.href)) { e.preventDefault(); fetch('/api/open?url=' + encodeURIComponent(a.href)).catch(() => window.open(a.href, '_blank')); } });
+addEventListener('pagehide', () => LS.set('lastSeen', Date.now()));
+document.addEventListener('visibilitychange', () => { if (document.hidden) LS.set('lastSeen', Date.now()); });
 window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout };
 })();

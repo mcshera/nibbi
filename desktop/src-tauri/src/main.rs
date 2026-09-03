@@ -36,7 +36,6 @@ fn ensure_host() {
             .arg(&server)
             .arg("--port")
             .arg(PORT.to_string())
-            .arg("--remote")
             .current_dir(&home)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

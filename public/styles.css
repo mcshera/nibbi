@@ -260,3 +260,10 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 /* wide screens: give diffs room */
 @media (min-width: 1400px) { body:has(.turn:first-child .diffv) .feed { width: min(980px, calc(100vw - 48px)); } .nib .said .diffv .dbody { max-height: 56vh; } }
 .nib .said .runlog { margin: 8px 0 0; padding: 10px 12px; border-radius: 12px; background: #1b1a18; color: #ece8df; font: 12px/1.5 "Geist Mono", ui-monospace, monospace; max-height: 240px; overflow: auto; white-space: pre-wrap; }
+
+.diffv .dfile { border: 1px solid var(--line); border-radius: 12px; margin: 6px 0; background: #fbfaf7; overflow: hidden; }
+.diffv .dfile summary { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; cursor: pointer; font: 12.5px/1.4 "Geist Mono", ui-monospace, monospace; color: var(--ink); list-style: none; }
+.diffv .dfile summary::-webkit-details-marker { display: none; }
+.diffv .dfile summary .cnt b { font-weight: 600; } .diffv .pa { color: #2f6b3a; } .diffv .pd { color: #9a3f2c; }
+.diffv .dfile[open] summary { border-bottom: 1px solid var(--line); }
+.nib .said .diffv .dfile .dbody { border: 0; border-radius: 0; max-height: 320px; }
