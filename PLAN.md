@@ -59,6 +59,10 @@ without ever opening a dashboard.*
 - Second window / split for the diff viewer on wide screens; keyboard-only review flow (j/k, a, p).
 - Tests for the surface: playwright scenario suite becomes CI (`npm run verify`).
 
+## Next
+
+The current improvement plan (after a day of use) is `docs/IMPROVEMENT-PLAN.md`; the chat-specific one is `docs/CHAT-PLAN.md`.
+
 ## Principles that stay
 - Nothing on screen unless it's needed; the character carries state before any panel does.
 - Oracle's Bash policy stays tight — Nibbi uses sanctioned gateway actions, never widens permissions.
