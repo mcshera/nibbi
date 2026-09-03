@@ -699,7 +699,8 @@ function errorActs(text) {
 function questionActs(text) {
   const clean = stripMd(text).trim();
   if (!/\?\s*$/.test(clean)) return [];
-  const cut = clean.search(/[.!?](?=\s)[^.!?]*$/);   // last sentence boundary = punctuation followed by whitespace
+  const bounds = [...clean.matchAll(/[.!?](?=\s)/g)];   // sentence boundary = punctuation followed by whitespace (so 8.2 / v2.md stay whole)
+  const cut = bounds.length ? bounds[bounds.length - 1].index : -1;
   const q = (cut >= 0 ? clean.slice(cut + 1) : clean).trim().replace(/^[—–-]\s*/, '');
   if (!q) return [];
   if (/^(what|which|where|when|why|how|who|whom|whose)\b/i.test(q) || /\bwhat\b.*\?$/i.test(q) && !/^(want|should|shall|do you|would you|can i|could i|may i|ok)/i.test(q)) return [];
