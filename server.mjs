@@ -102,6 +102,34 @@ function emitEvent(ev) {
   try { mkdirSync(HOME, { recursive: true }); appendFileSync(EV_FILE, JSON.stringify(ev) + "\n"); } catch { /* disk */ }
   for (const c of evClients) { try { c.write(`event: ${ev.kind}\ndata: ${JSON.stringify(ev)}\n\n`); } catch { evClients.delete(c); } }
 }
+const RECOVERED = join(HOME, "nibbi-recovered.json");
+let recovering = false;
+function recoveredSet() { try { return new Set(JSON.parse(readFileSync(RECOVERED, "utf8"))); } catch { return new Set(); } }
+/* a fixer that hit the turn limit may have finished its work without committing: if the worktree has changes and the
+   project's own check passes there, commit on its branch and mark it done — the gateway's ship queue takes it from there */
+async function recoverTurnLimit(f) {
+  if (recovering) return; const seen = recoveredSet(); if (seen.has(f.id)) return;
+  if (!/maximum number of turns|turn limit|max_turns/i.test(String(f.summary || ""))) return;
+  const wt = f.worktree; if (!wt || !existsSync(wt)) return;
+  recovering = true; seen.add(f.id); try { writeFileSync(RECOVERED, JSON.stringify([...seen])); } catch { /* disk */ }
+  try {
+    const dirty = execFileSync("git", ["-C", wt, "status", "--porcelain"], { encoding: "utf8", timeout: 10000 }).trim();
+    if (!dirty) { emitEvent({ kind: "note", id: f.id, project: f.game, title: f.title, text: "turn limit with nothing uncommitted — really failed" }); return; }
+    let check = "true"; try { check = JSON.parse(readFileSync(join(HOME, "games.json"), "utf8"))[f.game]?.check || "true"; } catch { /* none */ }
+    emitEvent({ kind: "note", id: f.id, project: f.game, title: f.title, text: `turn limit with uncommitted work — running the project check (${check}) in the worktree` });
+    const ok = await new Promise((resolve) => { const c = spawn("bash", ["-lc", check], { cwd: wt, env: { ...process.env, CI: "true" }, stdio: "ignore" }); const t = setTimeout(() => { try { c.kill("SIGKILL"); } catch { /* */ } resolve(false); }, 10 * 60_000); c.on("close", (code) => { clearTimeout(t); resolve(code === 0); }); c.on("error", () => resolve(false)); });
+    if (!ok) { emitEvent({ kind: "note", id: f.id, project: f.game, title: f.title, text: "uncommitted work did not pass the project check — left failed" }); return; }
+    execFileSync("git", ["-C", wt, "add", "-A"], { timeout: 10000 });
+    execFileSync("git", ["-C", wt, "-c", "user.name=Oracle fixer " + f.id, "-c", "user.email=oracle@local", "commit", "-q", "-m", `${f.title || f.issue.slice(0, 60)} (work recovered by Nibbi after the turn limit; project check passed)`], { timeout: 20000 });
+    let stat = ""; try { const target = execFileSync("git", ["-C", wt, "rev-parse", "--abbrev-ref", "origin/HEAD"], { encoding: "utf8", timeout: 5000 }).trim().replace("origin/", ""); stat = execFileSync("git", ["-C", wt, "diff", "--stat", `${target}...HEAD`], { encoding: "utf8", timeout: 10000 }).trim(); } catch { try { stat = execFileSync("git", ["-C", wt, "diff", "--stat", "main...HEAD"], { encoding: "utf8", timeout: 10000 }).trim(); } catch { stat = execFileSync("git", ["-C", wt, "show", "--stat", "--format=", "HEAD"], { encoding: "utf8", timeout: 10000 }).trim(); } }
+    const reg = join(HOME, "fixers.json"); const all = JSON.parse(readFileSync(reg, "utf8"));
+    for (const x of all) if (x.id === f.id) { x.status = "done"; x.diffstat = stat; x.summary = (x.summary || "") + ` — RECOVERED by Nibbi ${new Date().toISOString().slice(0, 16)}: finished work was uncommitted at the turn limit; committed on the branch after the project check passed.`; }
+    writeFileSync(reg + ".tmp", JSON.stringify(all, null, 2)); execFileSync("mv", ["-f", reg + ".tmp", reg]);
+    emitEvent({ kind: "note", id: f.id, project: f.game, title: f.title, text: "recovered: committed on its branch, check passed, marked done" });
+  } catch (e) { emitEvent({ kind: "note", id: f.id, project: f.game, title: f.title, text: "recovery failed: " + String(e.message).slice(0, 120) }); }
+  finally { recovering = false; }
+}
+
 async function pollGateway() {
   const [fixers, auto] = await Promise.all([gwGet("/api/fixers"), gwGet("/api/auto")]);
   if (!fixers) return;
@@ -111,7 +139,8 @@ async function pollGateway() {
       const prev = evState.fixers[f.id];
       if (prev === f.status) continue;
       if (prev === undefined && !["queued", "installing", "running"].includes(f.status)) continue;
-      emitEvent({ kind: "fixer", id: f.id, project: f.game || f.project, title: f.title || (f.issue || "").slice(0, 60), from: prev || null, to: f.status, costUsd: f.costUsd, model: f.model, diffstat: (f.diffstat || "").trim().split("\n").pop() || "", group: f.group || null });
+      emitEvent({ kind: "fixer", id: f.id, project: f.game || f.project, title: f.title || (f.issue || "").slice(0, 60), from: prev || null, to: f.status, costUsd: f.costUsd, model: f.model, diffstat: (f.diffstat || "").trim().split("\n").pop() || "", group: f.group || null, mode: (auto && auto[f.game] && auto[f.game].on) ? (auto[f.game].mode || "stage") : "off" });
+      if (f.status === "failed") recoverTurnLimit(f).catch(() => {});
     }
     for (const [p, a] of Object.entries(cur.auto)) { const prev = evState.auto[p]; if (prev && (prev.on !== a.on || prev.mode !== a.mode)) emitEvent({ kind: "auto", project: p, from: prev, to: a }); }
   }
