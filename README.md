@@ -61,8 +61,10 @@ The phone app (installable PWA, LAN token gate, local-CA https, `/phone` pairing
 - **While it works**: the send button becomes a stop square — click to stop watching (Oracle keeps working).
 - **Escape** clears the input, then blurs, then tidies the whole table back to idle (a 6 s `undo` toast brings it
   back). Double-click Nibbi does the same. Click Nibbi for a hop.
-- The conversation stacks **newest first** under the character; older turns recede under an `earlier` hairline and
-  lose their action chips, so only the current turn can be acted on. Slash-command output renders as plain mono text.
+- The conversation reads **top to bottom** like any chat: newest at the bottom, pinned there while Nibbi streams; scroll
+  up to read and a `↓ latest` button brings you back. Only the latest turn keeps its action chips. In conversation Nibbi
+  shrinks to a small presence at the top so the chat gets the room. `pick up where we left off` / `/recent` restores the
+  last exchanges with time separators. Slash-command output renders as plain mono text. Plan: `docs/CHAT-PLAN.md`.
 
 ## The build loop (v0.3)
 

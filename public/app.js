@@ -38,10 +38,10 @@ function layout(snap) {
   const pillTop = pill.getBoundingClientRect().top || (H - 124);
   let pose;
   if (S.mode === 'talk') {
-    const r = Math.max(48, r0 * 0.66);
-    const cy = Math.max(74, Math.min(H * 0.22, 56 + r * 1.1));
+    const r = Math.max(34, Math.min(52, r0 * 0.34, H * 0.06));
+    const cy = 30 + r * 1.15;
     pose = { x: W / 2, y: cy, r };
-    document.documentElement.style.setProperty('--feed-top', Math.round(cy + r * 1.3 + 22) + 'px');
+    document.documentElement.style.setProperty('--feed-top', Math.round(cy + r * 1.1 + 10) + 'px');
   } else {
     const focused = document.activeElement === ask && !S.busy;
     pose = { x: W / 2, y: H * (focused ? 0.47 : 0.49) - (H < 600 ? 20 : 0), r: r0 };
@@ -57,6 +57,7 @@ layout(true);
 function setMode(m) {
   if (S.mode === m) return;
   S.mode = m; body.dataset.mode = m; layout(false);
+  if (m !== 'talk') jumpBtn.hidden = true;
 }
 
 /* ------------------------------------------------------------------ pointer → nibbi */
@@ -78,6 +79,16 @@ function scheduleIdleTimers() {
 }
 addEventListener('keydown', activity, { passive: true });
 scheduleIdleTimers();
+
+/* ------------------------------------------------------------------ scrolling: chronological, pinned to the bottom until you scroll up */
+const jumpBtn = document.createElement('button'); jumpBtn.id = 'jump'; jumpBtn.type = 'button'; jumpBtn.className = 'jump'; jumpBtn.hidden = true; jumpBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M9 3.5v11M9 14.5l-5-5M9 14.5l5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> latest'; document.body.appendChild(jumpBtn);
+S.stick = true;
+let scrollRaf = 0;
+function scrollFeed(force) { if (!force && !S.stick) return; if (scrollRaf) return; scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; feed.scrollTop = feed.scrollHeight; }); }
+feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; } }, { passive: true });
+jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); };
+new MutationObserver(() => scrollFeed(false)).observe(feed, { childList: true, subtree: true, characterData: true });
+new ResizeObserver(() => scrollFeed(false)).observe(feed);
 
 /* ------------------------------------------------------------------ markdown */
 function renderMd(src) {
@@ -123,7 +134,7 @@ function newTurn(text, images) {
   nibBody.append(bubble, meta);
   nib.append(ava, nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
-  feed.prepend(turn); feed.scrollTop = 0;
+  feed.appendChild(turn); S.stick = true; scrollFeed(true);
   const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, fold, text, startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false };
   S.turns.push(T);
   return T;
@@ -348,6 +359,7 @@ const COMMANDS = [
   { cmd: '/log', args: '<fixer-id>', desc: 'a fixer\'s recent log', local: true },
   { cmd: '/report', args: '[hours]', desc: 'build report for the last N hours', local: true },
   { cmd: '/history', args: '<query>', desc: 'search past conversations', local: true },
+  { cmd: '/recent', args: '[n]', desc: 'bring back the last exchanges, oldest first', local: true },
   { cmd: '/vault', args: '<path>', desc: 'read a file from the brain (e.g. plans/battalion.md)', local: true },
   { cmd: '/journal', args: '[YYYY-MM-DD]', desc: 'today\'s journal page (or a given day)', local: true },
   { cmd: '/model', args: '[default|opus|sonnet|haiku]', desc: 'switch Oracle\'s model', local: true },
@@ -441,6 +453,24 @@ async function runLocalCommand(name, arg) {
       const cfg = r && r[proj] ? r[proj] : (r || {});
       return { text: 'Auto on **' + proj + '** is now ' + (cfg.on === false || mode === 'pause' || mode === 'off' ? '**off**' : '**' + (cfg.mode || mode) + '** mode' + (cfg.maxConcurrent ? ' · up to ' + cfg.maxConcurrent + ' fixers at once' : '')) + '.' + (mode === 'ship' ? '\n\n_ship = fixers merge themselves when the gate passes. Stage keeps you in the loop._' : ''), acts: [{ label: 'plan', run: () => send('/plan ' + proj) }] }; }); }
     case 'model': return localTurn('/model' + (arg ? ' ' + arg : ''), async () => { if (!arg) { const r = await api.get('/api/model'); return { text: 'Model: **' + r.current + '** (options: ' + r.options.join(', ') + ')', acts: r.options.filter((o) => o !== r.current).slice(0, 3).map((o) => ({ label: o, run: () => send('/model ' + o) })) }; } const r = await api.post('/api/model', { model: arg }); refreshStatus(); return { text: 'Switched to **' + r.current + '**.' }; });
+    case 'recent': {
+      if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
+      let items = []; try { items = await api.get('/api/history?n=' + Math.min(200, (Number(arg) || 12) * 4)); } catch (e) { toast('history unavailable: ' + e.message); return; }
+      const msgs = (Array.isArray(items) ? items : (items.items || [])).filter((m) => m.channel === 'app' && m.text && !/^\(voice\)\s*$/.test(m.text)).slice(-((Number(arg) || 12) * 2));
+      if (!msgs.length) { toast('nothing recent'); return; }
+      hideChips(); setMode('talk'); body.classList.remove('rest');
+      let lastTs = 0, T = null;
+      for (const m of msgs) {
+        const ts = Date.parse(m.ts);
+        if (ts - lastTs > 3600000) { const sep = document.createElement('div'); sep.className = 'when'; const d = new Date(ts); const sameDay = d.toDateString() === new Date().toDateString(); sep.textContent = (sameDay ? 'today' : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })) + ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); feed.appendChild(sep); }
+        lastTs = ts;
+        if (m.role === 'user') { T = newTurn(m.text.replace(/^(🖼️\s*)+/, '')); T.plain = m.text.trim().startsWith('/'); T.bubble.classList.remove('live'); T.restored = true; T.said.textContent = ''; T.el.removeAttribute('aria-busy'); }
+        else { if (!T || T.said.textContent || T.acc) { T = newTurn(null); T.bubble.classList.remove('live'); T.restored = true; } setSaid(T, m.text, false); T.done = true; T.meta.textContent = new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + (m.costUsd ? ' · $' + m.costUsd.toFixed(3) : ''); T.acc = m.text; }
+      }
+      for (const t of S.turns) if (t.restored && !t.done) { t.said.textContent = ''; t.done = true; }
+      S.stick = true; scrollFeed(true); nibbi.lookFree(); scheduleIdleTimers();
+      return;
+    }
     case 'history': return localTurn('/history ' + arg, async () => { if (!arg) return { ok: false, text: '`/history <query>`' }; const r = await api.get('/api/history?q=' + encodeURIComponent(arg) + '&n=8'); const items = Array.isArray(r) ? r : (r.items || []); if (!items.length) return { text: 'Nothing about "' + md.esc(arg) + '" in the log.' }; return { text: items.slice(0, 8).map((e) => '**' + (e.role === 'user' ? 'you' : NAME) + '** · ' + new Date(e.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '\n' + String(e.text || '').replace(/\s+/g, ' ').slice(0, 220)).join('\n\n') }; });
     case 'vault': return localTurn('/vault ' + arg, async () => { if (!arg) return { ok: false, text: '`/vault <path>` — e.g. `/vault plans/battalion.md`' }; const r = await api.get('/api/vault?p=' + encodeURIComponent(arg)); return { text: '`' + md.esc(arg) + '`\n\n' + String(r.content || '').slice(0, 6000), acts: [{ label: 'ask nibbi to change it', run: () => { ask.value = 'In ' + arg + ', '; ask.focus(); autosize(); } }] }; });
     case 'journal': return localTurn('/journal' + (arg ? ' ' + arg : ''), async () => { const day = arg || new Date().toLocaleDateString('en-CA'); const r = await api.get('/api/vault?p=' + encodeURIComponent('journal/' + day + '.md')); const c = String(r.content || ''); if (!c || c === '(missing)') return { text: 'No journal page for **' + day + '** yet.', acts: [{ label: 'what happened today?', run: () => send('what happened today? give me the short version, then write the journal page') }] }; return { text: '`journal/' + day + '.md`\n\n' + c.slice(0, 6000), acts: [{ label: 'yesterday', run: () => { const d = new Date(day); d.setDate(d.getDate() - 1); send('/journal ' + d.toLocaleDateString('en-CA')); } }] }; });
@@ -470,7 +500,7 @@ async function fixerShots(f) {
 function shotsRow(paths) {
   if (!paths.length) return null;
   const w = document.createElement('div'); w.className = 'shots';
-  for (const p of paths) { const a = document.createElement('a'); a.href = '/api/file?p=' + encodeURIComponent(p); a.target = '_blank'; a.rel = 'noopener'; const im = document.createElement('img'); im.src = a.href; im.alt = p.split('/').pop(); im.loading = 'lazy'; im.onerror = () => a.remove(); a.appendChild(im); w.appendChild(a); }
+  for (const p of paths) { const a = document.createElement('a'); a.href = '/api/file?p=' + encodeURIComponent(p); a.target = '_blank'; a.rel = 'noopener'; const im = document.createElement('img'); im.src = a.href; im.alt = p.split('/').pop(); im.loading = 'lazy'; im.onload = () => scrollFeed(false); im.onerror = () => a.remove(); a.appendChild(im); w.appendChild(a); }
   return w;
 }
 
@@ -861,6 +891,7 @@ function mostActiveProject(list) {
 }
 async function refreshProjects() { try { if (!S.auto) { try { S.auto = await api.get('/api/auto'); } catch { /* offline */ } } if (!S.fixers || !S.fixers.length) { try { S.fixers = await api.get('/api/fixers'); } catch { /* offline */ } } const r = await fetch('/api/projects'); if (!r.ok) return; const list = await r.json(); S.projects = list; const saved = LS.get('project', null); const recent = mostActiveProject(list); const g = (saved && list.find((p) => p.name === saved)) || (recent && list.find((p) => p.name === recent)) || list.find((p) => p.kind === 'game') || list[0]; if (g) S.project = g.name; const pl = []; for (const p of list.filter((x) => x.kind === 'game')) { try { const ps = await fetch('/api/play?project=' + encodeURIComponent(p.name)).then((x) => x.json()); if (ps.playable) pl.push({ name: p.name, running: ps.running, url: ps.url }); } catch { /* skip */ } } S.playable = pl; renderProject(); } catch { /* offline */ } }
 refreshProjects(); setInterval(refreshProjects, 60000);
+(async () => { try { const items = await api.get('/api/history?n=12'); const recent = (Array.isArray(items) ? items : []).filter((m) => m.channel === 'app'); S.recent = recent.length > 0 && Date.now() - Date.parse(recent[recent.length - 1].ts) < 12 * 3600000; } catch { S.recent = false; } })();
 if (S.demo) { S.auto = { shipless: { on: true, mode: 'stage', inflight: 2, pending: 17, staged: 3, done: 12, total: 29, spend: 4.2 } }; renderAgents([], {}); renderProject(); }
 
 /* ------------------------------------------------------------------ contextual chips */
@@ -868,8 +899,8 @@ let chipsShown = false;
 function chipSet(when) {
   const out = [];
   const fx = S.fixers || [];
-  const staged = fx.filter((f) => f.status === 'done' && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length;
-  const running = fx.filter((f) => /running|queued/i.test(f.status)).length;
+  const staged = fx.filter((f) => f.status === 'done' && (f.game || f.project) === activeProject() && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length;
+  const running = fx.filter((f) => /running|queued/i.test(f.status) && (f.game || f.project) === activeProject()).length;
   const proj = S.project || 'shipless';
   if (staged) out.push({ label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' waiting for review', text: '/artifacts ' + activeProject() });
   for (const f of fx.filter((x) => x.status === 'running').slice(0, 1)) out.push({ label: 'steer ' + fixerTitle(f).slice(0, 22), text: '__steer:' + f.id });
@@ -878,6 +909,7 @@ function chipSet(when) {
   if (S.link === 'offline' && !S.demo && when !== 'after') { out.unshift({ label: 'wake the gateway', text: '__wake' }, { label: 'use the demo brain', text: '__demo' }); }
   if (S.playtest && when !== 'after') { return [{ label: 'bug', text: '__prefix:[bug] ' }, { label: 'balance', text: '__prefix:[balance] ' }, { label: 'idea', text: '__prefix:[idea] ' }, { label: 'rules question', text: '__prefix:[rules] ' }, { label: 'end playtest', text: '/endtest' }]; }
   if (when === 'idle' || when === 'focus') {
+    if (S.recent && !S.turns.length) out.push({ label: 'pick up where we left off', text: '/recent' });
     if (h < 11) out.push({ label: 'morning brief', text: 'give me my morning brief' });
     out.push({ label: 'what\'s new?', text: 'what\'s new since we last talked?' });
     for (const p of (S.playable || []).slice(0, 2)) out.push(p.running && p.url ? { label: p.name + ' is running — open', text: '/play ' + p.name + ' status' } : { label: 'play ' + p.name, text: '/play ' + p.name });
@@ -907,6 +939,8 @@ ask.addEventListener('focus', () => { layout(false); const r = pill.getBoundingC
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
+  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: 'smooth' }); }
+  if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else { ask.blur(); if (S.mode === 'talk' && !S.busy) tidy(); } }
 });
 pill.addEventListener('submit', (e) => { e.preventDefault(); if (S.busy) { if (S.abort) { S.abort.abort(); toast('stopped watching'); } return; } send(ask.value, pendingImages.slice()); });
