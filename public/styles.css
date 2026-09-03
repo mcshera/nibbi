@@ -268,3 +268,31 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 .diffv .dfile summary .cnt b { font-weight: 600; } .diffv .pa { color: #2f6b3a; } .diffv .pd { color: #9a3f2c; }
 .diffv .dfile[open] summary { border-bottom: 1px solid var(--line); }
 .nib .said .diffv .dfile .dbody { border: 0; border-radius: 0; max-height: 320px; }
+
+/* ---------- project presence (top-left) ---------- */
+.project { position: fixed; top: 16px; left: 20px; z-index: 6; }
+.project .plabel { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 0; border-radius: 999px; background: none; color: var(--ink-3); font: inherit; font-size: 12.5px; letter-spacing: .01em; cursor: pointer; transition: color var(--t2), background var(--t2); }
+.project .plabel:hover, .project.open .plabel { color: var(--ink); background: rgba(21,20,19,.05); }
+.project .pdot { width: 6px; height: 6px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px #cfcac1; transition: background var(--t2), box-shadow var(--t2); }
+.project .pdot[data-mode="suggest"] { box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.project .pdot[data-mode="stage"] { background: var(--ink-3); box-shadow: none; }
+.project .pdot[data-mode="ship"] { background: var(--ink); box-shadow: none; }
+.project .pdot.busy { animation: pulse 1.4s ease-in-out infinite; }
+.project .pmenu { position: absolute; top: 100%; left: 0; margin-top: 6px; width: 320px; padding: 6px; border-radius: 16px; background: var(--pill-bg); backdrop-filter: blur(14px) saturate(1.1); border: 1px solid var(--line); box-shadow: 0 10px 30px -12px rgba(21,20,19,.25), 0 1px 0 rgba(255,255,255,.6) inset; opacity: 0; transform: translateY(-4px) scale(.98); pointer-events: none; transition: opacity var(--t2) var(--ease), transform var(--t2) var(--ease); }
+.project.open .pmenu, .project:hover .pmenu, .project:focus-within .pmenu { opacity: 1; transform: none; pointer-events: auto; }
+.pmenu .prow { padding: 8px 10px 10px; border-radius: 12px; }
+.pmenu .prow.active { background: rgba(21,20,19,.04); }
+.pmenu .prow + .prow { margin-top: 2px; }
+.pmenu .phead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; border: 0; background: none; padding: 0; font: inherit; text-align: left; cursor: pointer; color: var(--ink); }
+.pmenu .phead .n { font-size: 14px; font-weight: 600; } .pmenu .phead .m { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pmenu .pbar { height: 3px; border-radius: 2px; background: rgba(21,20,19,.10); margin: 8px 0 8px; overflow: hidden; } .pmenu .pbar i { display: block; height: 100%; background: var(--ink); border-radius: 2px; }
+.pmenu .pauto { display: flex; align-items: center; gap: 8px; margin-top: 6px; } .pmenu .pauto .l { font-size: 11.5px; color: var(--ink-3); width: 30px; }
+.pmenu .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: rgba(21,20,19,.06); }
+.pmenu .segb { font: inherit; font-size: 11.5px; padding: 4px 9px; border: 0; border-radius: 999px; background: none; color: var(--ink-3); cursor: pointer; transition: background var(--t1), color var(--t1); }
+.pmenu .segb.on { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(21,20,19,.12); }
+.pmenu .segb.ship.on { background: var(--ink); color: #f5f2ec; }
+.pmenu .segb.armed { background: rgba(181,83,61,.92); color: #fff; }
+.pmenu .pstat { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; min-height: 1em; }
+.pmenu .pacts { display: flex; gap: 6px; margin-top: 8px; } .pmenu .pacts .chip { font-size: 12px; padding: 4px 10px; }
+.pmenu .pnew { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 0; border-radius: 12px; background: none; font: inherit; font-size: 12.5px; color: var(--ink-3); text-align: left; cursor: pointer; } .pmenu .pnew:hover { background: rgba(21,20,19,.05); color: var(--ink); }
+@media (max-width: 640px) { .project .pmenu { width: calc(100vw - 32px); } }

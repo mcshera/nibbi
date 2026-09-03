@@ -88,8 +88,7 @@ Oracle's own commands still pass through: `/approve`, `/preview`, `/fixers`, `/p
 **Fleet events**: when a fixer finishes, fails or merges (polled every 6 s), Nibbi posts one bubble with `diff · preview ·
 approve & merge` (or `log · requeue`), plus thumbnails of any screenshots the fixer wrote (`<repo>/.oracle-shots/`).
 **Playtest mode** (`/playtest <game>`): the pill gets a tag and the chips become `bug · balance · idea · rules question`
-prefixes. The status menu shows lifetime spend and rate-limit state. Agent cards on the pill carry the same actions; foremen get `pause/resume` and the
-`suggest · stage · ship` ladder. Every irreversible chip (merge, stop, ship, unqueue) needs a second click.
+prefixes. The status menu shows lifetime spend and rate-limit state. Agent cards on the pill carry the same actions; auto mode lives in the project menu (top-left), not as an agent. Every irreversible chip (merge, stop, ship, unqueue) needs a second click.
 
 See `PLAN.md` for the gap analysis and what's next (artifacts inline, playtest capture, Telegram parity, deploy).
 
@@ -105,7 +104,8 @@ See `PLAN.md` for the gap analysis and what's next (artifacts inline, playtest c
 | done | markdown reply (rendered live while streaming), folded steps `5 steps · 8s — show`, follow-up actions under the reply (`ship it`, `open preview`, `yes/not now`, or `go on`/`show me`) | happy hop, then idle |
 | error | red-ink message + recovery chips (`try again`, `how to re-login`, `start the gateway`) | wide eyes, flatten, spatter |
 | 40 s quiet after a reply | conversation dims to 38 % until you move | keeps breathing |
-| fixers running | one small tinted Nibbi per agent under the pill (dozing = queued, thinking = installing, working = running; happy/shocked for a minute when done/failed); hover or click for title · status · model · cost · log tail · `ask nibbi about it` | — |
+| always (quiet) | the active **project** top-left (`battalion ●`): the dot is the auto mode — hollow off · ring suggest · grey stage · black ship, pulsing while dispatching. Hover/click: every project with branch, plan bar, the **off · suggest · stage · ship** ladder (ship needs a second click), in-flight/pending/staged, spend, `plan` `play` `fix…`, `+ new project` | — |
+| fixers running | one small tinted Nibbi per fixer perched on the pill (dozing = queued, thinking = installing, working = running; happy/shocked for a while when done/failed); hover or click for title · status · model · cost · log tail · `diff` `preview` `approve` `steer` `stop` | — |
 | gateway offline | status label for 2.6 s, then just the dot; chips `wake the gateway` / `use the demo brain` | sleeps |
 
 ## Protocol (what the surface uses)
@@ -136,7 +136,7 @@ is one constant (`NAME` in `app.js`, the placeholder in `index.html`).
   idle, steady while working, frantic on errors. Hop droplets stain too.
 - **Wet ink** — the inner wash drifts (slow density variation in the black) and the outer feather breathes.
 - **Agents** — fixers appear as small tinted Nibbis (six stable ink colours, hashed from the fixer id), each a separate
-  shader pass with its own boil and blink, so they never move in lockstep.
+  shader pass with its own boil and blink, so they never move in lockstep. (Auto mode is a project setting, not an agent.)
 - **Eyes** — lid-based blinks (sometimes double), saccadic gaze, pupils widen when the pointer comes close, and the
   body tilts a little toward what it looks at. Idle shivers every ~45–85 s shake off a couple of specks.
 - `prefers-reduced-motion` freezes the boil and disables drips, splats, hops and stretch.

@@ -21,6 +21,7 @@ const S = {
   demo: Q.get('demo') === '1',
   busy: false,
   turns: [],
+  sessionCost: 0, sessionTurns: 0,
   status: null,            // last /api/status
   fixers: [],              // last /api/fixers
   voiceOn: LS.get('voice', true),
@@ -632,6 +633,7 @@ async function send(text, images) {
   finishSteps(T, ok);
   setSaid(T, result.text || '', false);
   setMeta(T, result);
+  if (result.costUsd) S.sessionCost += result.costUsd; S.sessionTurns++;
   T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
   $('#sr').textContent = ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200);
   T.done = true;
@@ -711,9 +713,7 @@ const RECENT_MS = 10 * 60000;
 function renderAgents(list, auto) {
   const now = Date.now();
   const src = S.demo ? demoFixers() : (list || []);
-  const autoSrc = S.demo ? { shipless: { on: true, mode: 'stage', inflight: 2, pending: 17, staged: 3, done: 12, total: 29, spend: 4.2, note: 'working through the v2 roadmap' } } : (auto || S.auto || {});
   const show = [];
-  for (const [p, a] of Object.entries(autoSrc)) if (a && a.on) show.push({ id: 'auto:' + p, kind: 'auto', project: p, title: 'auto · ' + p, status: a.inflight > 0 ? 'running' : 'duty', auto: a });
   for (const f of src) if (ACTIVE.has(f.status) || (f.endedAt && now - Date.parse(f.endedAt) < RECENT_MS)) show.push(f);
   show.splice(8);
   const seen = new Set();
@@ -770,6 +770,47 @@ async function fillCard(a) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('.agent')) for (const a of agentEls.values()) a.el.classList.remove('pinned'); });
 
+/* ------------------------------------------------------------------ projects: a quiet presence top-left; auto mode is a project setting, not an agent */
+const projectEl = $('#project'), pnameEl = $('.pname', projectEl), pdotEl = $('.pdot', projectEl), pmenuEl = $('.pmenu', projectEl);
+const msCache = new Map();
+async function milestonesFor(name) { const c = msCache.get(name); if (c && Date.now() - c.at < 60000) return c.ms; try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(name)); msCache.set(name, { at: Date.now(), ms }); return ms; } catch { return []; } }
+const MODES = ['off', 'suggest', 'stage', 'ship'];
+function autoOf(name) { const a = (S.auto || {})[name]; if (!a) return { on: false, mode: 'off', inflight: 0, pending: 0, staged: 0, spend: 0 }; return { ...a, mode: a.on ? (a.mode || 'stage') : 'off' }; }
+function renderProject() {
+  const list = (S.projects || []).filter((p) => p.kind !== 'brain');
+  projectEl.hidden = !list.length;
+  if (!list.length) return;
+  const name = activeProject(); const a = autoOf(name);
+  pnameEl.textContent = name;
+  pdotEl.dataset.mode = a.mode; pdotEl.classList.toggle('busy', a.inflight > 0);
+  projectEl.title = name + (a.on ? ' · auto ' + a.mode + (a.inflight ? ' · ' + a.inflight + ' in flight' : '') : '');
+  const running = (S.fixers || []).filter((f) => ACTIVE.has(f.status));
+  pmenuEl.replaceChildren();
+  for (const p of list) {
+    const pa = autoOf(p.name); const row = document.createElement('div'); row.className = 'prow' + (p.name === name ? ' active' : '');
+    const head = document.createElement('button'); head.type = 'button'; head.className = 'phead'; head.innerHTML = '<span class="n">' + escapeHtml(p.name) + '</span><span class="m">' + escapeHtml((p.branch || '') + (p.dirty ? ' · ' + p.dirty + ' dirty' : '')) + '</span>';
+    head.onclick = () => { if (p.name !== name) send('/project ' + p.name); else send('/plan ' + p.name); };
+    const bar = document.createElement('div'); bar.className = 'pbar'; bar.innerHTML = '<i></i>'; milestonesFor(p.name).then((ms) => { const d = ms.reduce((x, m) => x + m.done, 0), t = ms.reduce((x, m) => x + m.total, 0); bar.hidden = !t; bar.querySelector('i').style.width = (t ? Math.round(100 * d / t) : 0) + '%'; bar.title = d + '/' + t + ' tasks'; });
+    const auto = document.createElement('div'); auto.className = 'pauto';
+    const lab = document.createElement('span'); lab.className = 'l'; lab.textContent = 'auto'; auto.appendChild(lab);
+    const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', 'auto mode for ' + p.name);
+    for (const m of MODES) { const b = document.createElement('button'); b.type = 'button'; b.className = 'segb' + (pa.mode === m ? ' on' : '') + (m === 'ship' ? ' ship' : ''); b.textContent = m; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(pa.mode === m)); b.title = { off: 'nothing dispatches on its own', suggest: 'auto proposes tasks, you dispatch', stage: 'auto dispatches; you approve every merge', ship: 'auto dispatches AND merges when the gate passes' }[m];
+      let armed = 0; b.onclick = (e) => { e.stopPropagation(); if (pa.mode === m) return; if (m === 'ship' && !armed) { armed = setTimeout(() => { armed = 0; b.textContent = 'ship'; b.classList.remove('armed'); }, 4000); b.textContent = 'ship — sure?'; b.classList.add('armed'); return; } clearTimeout(armed); send('/auto ' + p.name + ' ' + m); }; seg.appendChild(b); }
+    auto.appendChild(seg);
+    const stat = document.createElement('div'); stat.className = 'pstat'; const rf = running.filter((f) => (f.game || f.project) === p.name).length; stat.textContent = [pa.on ? pa.inflight + ' in flight · ' + pa.pending + ' pending · ' + pa.staged + ' staged' : (rf ? rf + ' fixer' + (rf > 1 ? 's' : '') + ' running' : ''), pa.spend ? '$' + pa.spend.toFixed(2) + ' auto spend' : ''].filter(Boolean).join(' · ');
+    const acts = document.createElement('div'); acts.className = 'pacts';
+    const mk = (t, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip in'; b.textContent = t; b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; };
+    acts.append(mk('plan', () => send('/plan ' + p.name)));
+    if ((S.playable || []).some((x) => x.name === p.name)) acts.append(mk('play', () => send('/play ' + p.name)));
+    acts.append(mk('fix…', () => { if (p.name !== name) { S.project = p.name; LS.set('project', p.name); renderProject(); } ask.value = '/fix '; ask.focus(); autosize(); }));
+    row.append(head, bar, auto, stat, acts); pmenuEl.appendChild(row);
+  }
+  const foot = document.createElement('button'); foot.type = 'button'; foot.className = 'pnew'; foot.textContent = '+ new project'; foot.onclick = () => { ask.value = '/new '; ask.focus(); autosize(); }; pmenuEl.appendChild(foot);
+}
+projectEl.addEventListener('click', (e) => { if (e.target.closest('.plabel')) projectEl.classList.toggle('open'); });
+document.addEventListener('click', (e) => { if (!e.target.closest('#project')) projectEl.classList.remove('open'); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') projectEl.classList.remove('open'); });
+
 /* ------------------------------------------------------------------ status / link */
 let linkFreshT = 0;
 function setLink(l) {
@@ -795,12 +836,13 @@ async function refreshStatus() {
     }
     if (!S.busy) { try { const fr = await fetch('/api/fixers'); if (fr.ok) S.fixers = await fr.json(); } catch { /* ignore */ } }
     try { const ar = await fetch('/api/auto'); if (ar.ok) S.auto = await ar.json(); } catch { /* ignore */ }
-    renderAgents(S.fixers, S.auto); fleetEvents(S.demo ? demoFixers() : S.fixers);
+    renderAgents(S.fixers, S.auto); fleetEvents(S.demo ? demoFixers() : S.fixers); renderProject();
   } catch {
     if (!S.busy) setLink('offline');
     $('#st-brain').textContent = 'host · not reachable (open via node server.mjs)';
   }
   $('#st-project').textContent = 'project: ' + activeProject() + (projectNames().length > 1 ? ' (click to switch)' : '');
+  $('#st-session').textContent += (S.sessionTurns ? ' · this sitting $' + S.sessionCost.toFixed(2) + ' / ' + S.sessionTurns + ' turn' + (S.sessionTurns > 1 ? 's' : '') : '');
   $('#st-voice').textContent = 'voice: ' + (S.voiceOn ? 'on' : 'off');
   $('#st-demo').textContent = S.demo ? 'demo brain: on (click for the real one)' : 'demo brain: off';
 }
@@ -817,19 +859,20 @@ function mostActiveProject(list) {
   for (const f of S.fixers || []) { const t = Date.parse(f.endedAt || f.startedAt || 0) || 0; const n = f.game || f.project; if (names.has(n) && t > at) { at = t; best = n; } }
   return best || autoOn[0] || null;
 }
-async function refreshProjects() { try { const r = await fetch('/api/projects'); if (!r.ok) return; const list = await r.json(); S.projects = list; const saved = LS.get('project', null); const recent = mostActiveProject(list); const g = (saved && list.find((p) => p.name === saved)) || (recent && list.find((p) => p.name === recent)) || list.find((p) => p.kind === 'game') || list[0]; if (g) S.project = g.name; const pl = []; for (const p of list.filter((x) => x.kind === 'game')) { try { const ps = await fetch('/api/play?project=' + encodeURIComponent(p.name)).then((x) => x.json()); if (ps.playable) pl.push({ name: p.name, running: ps.running, url: ps.url }); } catch { /* skip */ } } S.playable = pl; } catch { /* offline */ } }
+async function refreshProjects() { try { if (!S.auto) { try { S.auto = await api.get('/api/auto'); } catch { /* offline */ } } if (!S.fixers || !S.fixers.length) { try { S.fixers = await api.get('/api/fixers'); } catch { /* offline */ } } const r = await fetch('/api/projects'); if (!r.ok) return; const list = await r.json(); S.projects = list; const saved = LS.get('project', null); const recent = mostActiveProject(list); const g = (saved && list.find((p) => p.name === saved)) || (recent && list.find((p) => p.name === recent)) || list.find((p) => p.kind === 'game') || list[0]; if (g) S.project = g.name; const pl = []; for (const p of list.filter((x) => x.kind === 'game')) { try { const ps = await fetch('/api/play?project=' + encodeURIComponent(p.name)).then((x) => x.json()); if (ps.playable) pl.push({ name: p.name, running: ps.running, url: ps.url }); } catch { /* skip */ } } S.playable = pl; renderProject(); } catch { /* offline */ } }
 refreshProjects(); setInterval(refreshProjects, 60000);
-if (S.demo) renderAgents([], {});
+if (S.demo) { S.auto = { shipless: { on: true, mode: 'stage', inflight: 2, pending: 17, staged: 3, done: 12, total: 29, spend: 4.2 } }; renderAgents([], {}); renderProject(); }
 
 /* ------------------------------------------------------------------ contextual chips */
 let chipsShown = false;
 function chipSet(when) {
   const out = [];
   const fx = S.fixers || [];
-  const staged = fx.filter((f) => /staged|review|ready/i.test(f.status)).length;
+  const staged = fx.filter((f) => f.status === 'done' && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length;
   const running = fx.filter((f) => /running|queued/i.test(f.status)).length;
   const proj = S.project || 'shipless';
-  if (staged) out.push({ label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' waiting for review', text: 'what\'s staged for review?' });
+  if (staged) out.push({ label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' waiting for review', text: '/artifacts ' + activeProject() });
+  for (const f of fx.filter((x) => x.status === 'running').slice(0, 1)) out.push({ label: 'steer ' + fixerTitle(f).slice(0, 22), text: '__steer:' + f.id });
   if (running) out.push({ label: running + ' fixer' + (running > 1 ? 's' : '') + ' working', text: 'how are the fixers doing?' });
   const h = new Date().getHours();
   if (S.link === 'offline' && !S.demo && when !== 'after') { out.unshift({ label: 'wake the gateway', text: '__wake' }, { label: 'use the demo brain', text: '__demo' }); }
@@ -854,7 +897,7 @@ function showChips(when) {
   chipsShown = true;
   clearTimeout(S.chipTimer); S.chipTimer = setTimeout(hideChips, when === 'after' ? 14000 : 30000);
 }
-function chipRun(text) { if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); ask.focus(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.oracle.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
+function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; ask.focus(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); ask.focus(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.oracle.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
