@@ -85,6 +85,7 @@ Type `/` for the palette. Nibbi answers these itself (no model call; they use th
 | `/issue <text>` | file an issue into the vault for the active project (`games|projects/<p>/issues.md`), with `fix it now` |
 | `/new <name> web\|game` | web = vite scaffold + `npm install` (→ `/play` works); game = rules/design docs + a plan in the vault |
 | `/plan edit <instruction>` | Oracle rewrites the plan file |
+| `/goal <text>` · `/goal` · `/goal stop` | run the active project toward a goal for as long as it takes: auto goes on (focused on the milestone you name, e.g. `finish M9`), the host's **watchdog** nudges Oracle whenever nothing is in flight for 8 min with tasks pending (15/45 min without a goal), every landing is a bubble, and a 🎯 bubble marks the goal reached |
 | `/phone` | pair your phone (QR + steps) |
 | `/deploy <project>` | runs the project's own `npm run deploy` (two-click confirm, live log). Nibbi's own deploy rebuilds + installs `Nibbi.app` |
 | keys `d` `p` `a` `s` `o` (input unfocused) | diff · preview · approve (twice) · stop · open — on the newest turn |
