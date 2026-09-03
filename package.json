@@ -5,10 +5,11 @@
   "type": "module",
   "description": "Nibbi \u2014 Oracle's new face: a little ink-blot character at the center of the app. Zero-build web surface + zero-dep host that proxies to the Oracle gateway.",
   "scripts": {
-    "start": "node server.mjs --open",
-    "serve": "node server.mjs",
+    "start": "node server.mjs --remote --open",
+    "serve": "node server.mjs --remote",
     "shot": "node tools/shot.mjs",
-    "verify": "node tools/verify.mjs"
+    "verify": "node tools/verify.mjs",
+    "test": "node tools/verify.mjs"
   },
   "engines": {
     "node": ">=20"

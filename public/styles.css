@@ -28,7 +28,7 @@ body::before { /* soft vignette so the paper feels lit from above */
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background: radial-gradient(120% 90% at 50% 30%, rgba(255,255,255,0.25), rgba(255,255,255,0) 55%);
 }
-canvas#ink, canvas#fx { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1; }
+canvas#ink, canvas#fx { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; z-index: 1; }
 canvas#fx { z-index: 2; }
 canvas#fx.grab { cursor: pointer; }
 
@@ -243,3 +243,19 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 .planv .prow.done .pn { color: var(--ink-3); } .planv .prow.next .pn { font-weight: 600; }
 .planv .pauto { margin-top: 10px; font-size: 12.5px; color: var(--ink-3); }
 .bubble:has(.planv) { display: block; }
+
+/* ---------- phone pairing + standalone ---------- */
+.phonev { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.phonev .qr { width: 164px; height: 164px; padding: 8px; background: #fff; border-radius: 12px; border: 1px solid var(--line); flex: none; } .phonev .qr svg { width: 100%; height: 100%; display: block; }
+.phonev .ptxt { flex: 1; min-width: 220px; font-size: 14px; line-height: 1.55; } .phonev .ptxt code { font-size: 12px; word-break: break-all; }
+.bubble:has(.phonev) { display: block; }
+body.standalone .status { top: calc(14px + env(safe-area-inset-top)); }
+body.standalone .feed { top: calc(var(--feed-top) + env(safe-area-inset-top) * .5); }
+@media (max-width: 640px) { .status .label { display: none; } .palette { width: calc(100vw - 24px) !important; } }
+
+.shots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; } .shots img { height: 96px; max-width: 220px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+body.playtest .pill { border-color: rgba(21,20,19,.22); }
+body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px; left: 22px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); background: var(--paper); padding: 0 6px; border-radius: 6px; }
+
+/* wide screens: give diffs room */
+@media (min-width: 1400px) { body:has(.turn:first-child .diffv) .feed { width: min(980px, calc(100vw - 48px)); } .nib .said .diffv .dbody { max-height: 56vh; } }

@@ -47,13 +47,13 @@ without ever opening a dashboard.*
 8. Auto controls: foreman card gets `pause`/`resume` and the off·suggest·stage·ship ladder; `/auto <project> <mode>`.
 9. Utilities: `/steer`, `/stop`, `/model`, `/history`, `/vault`, `/report`, `/artifacts`, `/help`.
 
-**P1 — proof and memory**
+**P1 — proof and memory — ✅ shipped in v0.4 (artifacts thumbnails on fixer events + `/log`, cost meter + rate limit in the status menu, playtest capture chips + pill tag, `/journal`)**
 - Artifacts (screenshots) inline when a fixer lands; `/artifacts [project]` gallery bubble.
 - Vault viewer with "ask Oracle to change this" chip; journal peek in the morning.
 - Cost meter + rate-limit state in the status menu; per-turn cost already in meta.
 - Playtest mode: mic-first bug capture, one bubble per report, auto-triage chips (bug · balance · idea).
 
-**P2 — reach**
+**P2 — reach — phone app ✅ (installable PWA, LAN token gate, local-CA https, `/phone` pairing), wide-screen diff pane ✅, keyboard review keys ✅, `npm test` = scenario suite ✅ · deploy ⏳ (needs a gateway deploy action) · Telegram ✗ (not wanted)**
 - Gateway-side `/play` `/plan` so Telegram gets them; push fleet events to Telegram when Nibbi is hidden.
 - Deploy command per project (shipless first), with the same confirm-to-ship pattern.
 - Second window / split for the diff viewer on wide screens; keyboard-only review flow (j/k, a, p).

@@ -339,16 +339,29 @@ const COMMANDS = [
   { cmd: '/report', args: '[hours]', desc: 'build report for the last N hours', local: true },
   { cmd: '/history', args: '<query>', desc: 'search past conversations', local: true },
   { cmd: '/vault', args: '<path>', desc: 'read a file from the brain (e.g. plans/battalion.md)', local: true },
+  { cmd: '/journal', args: '[YYYY-MM-DD]', desc: 'today\'s journal page (or a given day)', local: true },
   { cmd: '/model', args: '[default|opus|sonnet|haiku]', desc: 'switch Oracle\'s model', local: true },
   { cmd: '/golden', args: '', desc: 'run the regression exams for the brain', local: false },
   { cmd: '/proposals', args: '', desc: 'pending self-improvement proposals', local: false },
   { cmd: '/export', args: '', desc: 'export the transcript to the vault', local: false },
   { cmd: '/clear', args: '', desc: 'fresh working context (vault memory carries forward)', local: false },
+  { cmd: '/phone', args: '', desc: 'put nibbi on your phone (QR + steps)', local: true },
   { cmd: '/help', args: '', desc: 'this list', local: true },
 ];
 
 async function runLocalCommand(name, arg) {
   switch (name) {
+    case 'phone': return localTurn('/phone', async () => {
+      let r; try { r = await api.get('/nibbi/remote'); } catch (e) { return { ok: false, text: 'I can only pair from the desk app (this host says: ' + e.message + ').' }; }
+      if (!r.remote) return { ok: false, text: 'The host isn\'t listening on the network yet. Start it with `node server.mjs --remote` (the launchd plist and Nibbi.app do this by default now), then run `/phone` again.' };
+      if (!r.ip) return { ok: false, text: 'No Wi-Fi/LAN address found on this Mac — join a network first.' };
+      const w = document.createElement('div'); w.className = 'phonev';
+      try { const q = qrcode(0, 'M'); q.addData(r.setup); q.make(); const box = document.createElement('div'); box.className = 'qr'; box.innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); w.appendChild(box); } catch { /* no qr */ }
+      const txt = document.createElement('div'); txt.className = 'ptxt';
+      txt.innerHTML = '<b>Scan with your phone</b> (same Wi-Fi), or open<br><code>' + escapeHtml(r.setup) + '</code><br><br>' + '1 · trust this Mac (one-time certificate)<br>2 · open Nibbi over https' + (r.tls ? '' : ' <i>(https not ready — check the host log)</i>') + '<br>3 · Share → <b>Add to Home Screen</b><br><br><small>The pairing link carries a token; the gateway itself never leaves this Mac. Plain http works too, minus the microphone.</small>';
+      w.appendChild(txt);
+      return { html: w, text: 'Pairing link: ' + r.setup, acts: [{ label: 'copy link', run: () => { navigator.clipboard?.writeText(r.setup); toast('copied'); } }, { label: 'open setup page', run: () => openUrl(r.setup) }] };
+    });
     case 'help': return localTurn('/help', async () => ({ text: COMMANDS.map((c) => '`' + c.cmd + (c.args ? ' ' + c.args : '') + '` — ' + c.desc).join('\n'), acts: [{ label: 'what\'s new?', run: () => send('what\'s new since we last talked?') }] }));
     case 'project': return localTurn('/project' + (arg ? ' ' + arg : ''), async (T) => {
       if (!S.projects || !S.projects.length) await refreshProjects();
@@ -384,7 +397,7 @@ async function runLocalCommand(name, arg) {
     });
     case 'steer': { const m = arg.match(/^(\S+)\s+([\s\S]+)$/); return localTurn('/steer ' + arg, async () => { if (!m) return { ok: false, text: '`/steer <fixer-id> <note>`' }; const r = await api.post('/api/fixer-steer', { id: m[1], text: m[2] }); return { text: r.text || 'sent' }; }); }
     case 'stop': return localTurn('/stop ' + arg, async () => { if (!arg) return { ok: false, text: '`/stop <fixer-id>`' }; const r = await api.post('/api/fixer-stop', { id: arg }); refreshStatus(); return { text: r.text || 'stopped' }; });
-    case 'log': return localTurn('/log ' + arg, async () => { if (!arg) return { ok: false, text: '`/log <fixer-id>`' }; const r = await api.get('/api/fixer-log?id=' + encodeURIComponent(arg)); const es = (r.entries || []).slice(-14); const f = fixerById(arg); return { text: (f ? '**' + md.esc(fixerTitle(f)) + '** · ' + f.status + '\n\n' : '') + (es.length ? es.map((e) => (e.kind === 'tool' ? '› ' : e.kind === 'assistant' ? '' : '· ') + e.text.slice(0, 220)).join('\n') : '_no log yet_'), acts: f ? fixerActs(f) : [] }; });
+    case 'log': return localTurn('/log ' + arg, async () => { if (!arg) return { ok: false, text: '`/log <fixer-id>`' }; const r = await api.get('/api/fixer-log?id=' + encodeURIComponent(arg)); const es = (r.entries || []).slice(-14); const f = fixerById(arg); const shots = f ? await fixerShots(f) : []; setTimeout(() => { const t = S.turns[S.turns.length - 1]; const row = shotsRow(shots); if (t && row) t.said.appendChild(row); }, 0); return { text: (f ? '**' + md.esc(fixerTitle(f)) + '** · ' + f.status + '\n\n' : '') + (es.length ? es.map((e) => (e.kind === 'tool' ? '› ' : e.kind === 'assistant' ? '' : '· ') + e.text.slice(0, 220)).join('\n') : '_no log yet_'), acts: f ? fixerActs(f) : [] }; });
     case 'plan': return localTurn('/plan' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = arg || activeProject(); const st = addStep(T, 'reading plans/' + proj + '.md');
       const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); markStep(st, 'done');
@@ -406,6 +419,7 @@ async function runLocalCommand(name, arg) {
     case 'model': return localTurn('/model' + (arg ? ' ' + arg : ''), async () => { if (!arg) { const r = await api.get('/api/model'); return { text: 'Model: **' + r.current + '** (options: ' + r.options.join(', ') + ')', acts: r.options.filter((o) => o !== r.current).slice(0, 3).map((o) => ({ label: o, run: () => send('/model ' + o) })) }; } const r = await api.post('/api/model', { model: arg }); refreshStatus(); return { text: 'Switched to **' + r.current + '**.' }; });
     case 'history': return localTurn('/history ' + arg, async () => { if (!arg) return { ok: false, text: '`/history <query>`' }; const r = await api.get('/api/history?q=' + encodeURIComponent(arg) + '&n=8'); const items = Array.isArray(r) ? r : (r.items || []); if (!items.length) return { text: 'Nothing about "' + md.esc(arg) + '" in the log.' }; return { text: items.slice(0, 8).map((e) => '**' + (e.role === 'user' ? 'you' : NAME) + '** · ' + new Date(e.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '\n' + String(e.text || '').replace(/\s+/g, ' ').slice(0, 220)).join('\n\n') }; });
     case 'vault': return localTurn('/vault ' + arg, async () => { if (!arg) return { ok: false, text: '`/vault <path>` — e.g. `/vault plans/battalion.md`' }; const r = await api.get('/api/vault?p=' + encodeURIComponent(arg)); return { text: '`' + md.esc(arg) + '`\n\n' + String(r.content || '').slice(0, 6000), acts: [{ label: 'ask nibbi to change it', run: () => { ask.value = 'In ' + arg + ', '; ask.focus(); autosize(); } }] }; });
+    case 'journal': return localTurn('/journal' + (arg ? ' ' + arg : ''), async () => { const day = arg || new Date().toLocaleDateString('en-CA'); const r = await api.get('/api/vault?p=' + encodeURIComponent('journal/' + day + '.md')); const c = String(r.content || ''); if (!c || c === '(missing)') return { text: 'No journal page for **' + day + '** yet.', acts: [{ label: 'what happened today?', run: () => send('what happened today? give me the short version, then write the journal page') }] }; return { text: '`journal/' + day + '.md`\n\n' + c.slice(0, 6000), acts: [{ label: 'yesterday', run: () => { const d = new Date(day); d.setDate(d.getDate() - 1); send('/journal ' + d.toLocaleDateString('en-CA')); } }] }; });
     case 'report': return localTurn('/report' + (arg ? ' ' + arg : ''), async () => { const r = await api.get('/api/build-report?hours=' + (Number(arg) || 24)); return { text: r.text || '_nothing to report_' }; });
     case 'artifacts': return localTurn('/artifacts' + (arg ? ' ' + arg : ''), async () => {
       const proj = arg || activeProject(); const r = await api.get('/api/artifacts?project=' + encodeURIComponent(proj));
@@ -418,6 +432,22 @@ async function runLocalCommand(name, arg) {
     });
     default: return null;
   }
+}
+
+/* ---- proof of work: image paths a fixer wrote (repo/.oracle-shots or vault) → thumbnails via /api/file ---- */
+async function fixerShots(f) {
+  try {
+    const r = await api.get('/api/fixer-log?id=' + encodeURIComponent(f.id));
+    const paths = new Set();
+    for (const e of r.entries || []) for (const m of String(e.text || '').matchAll(/(\/[\w .@-]+(?:\/[\w .@-]+)*\.(?:png|jpe?g|webp))/gi)) { const p = m[1]; if (!/\/tmp\/|node_modules/.test(p)) paths.add(p); }
+    return [...paths].slice(-4);
+  } catch { return []; }
+}
+function shotsRow(paths) {
+  if (!paths.length) return null;
+  const w = document.createElement('div'); w.className = 'shots';
+  for (const p of paths) { const a = document.createElement('a'); a.href = '/api/file?p=' + encodeURIComponent(p); a.target = '_blank'; a.rel = 'noopener'; const im = document.createElement('img'); im.src = a.href; im.alt = p.split('/').pop(); im.loading = 'lazy'; im.onerror = () => a.remove(); a.appendChild(im); w.appendChild(a); }
+  return w;
 }
 
 /* ------------------------------------------------------------------ fleet events: when a fixer lands while you weren't looking, nibbi says so */
@@ -435,7 +465,8 @@ function fleetEvents(list) {
     const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
     const text = f.status === 'done' ? 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + '. Review it?' : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**.' : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '');
     setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
-    addActs(T, fixerActs(f)); nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
+    addActs(T, fixerActs(f)); if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
+    nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
     $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(stripMd(text));
   }
   fleetSeen = cur;
@@ -711,7 +742,8 @@ async function refreshStatus() {
       if (!S.busy) setLink(S.demo ? 'demo' : (h.status.busy ? 'busy' : 'live'));
       $('#st-brain').textContent = 'brain · ' + (h.status.busy ? 'busy' : 'ready') + ' · ' + Math.round((h.status.ctxTokens || 0) / 1000) + 'k ctx · ' + (h.status.turns || 0) + ' turns';
       $('#st-session').textContent = 'session · ' + (h.status.sessionShort || '—') + (h.status.rateLimit && h.status.rateLimit.status !== 'allowed' ? ' · rate-limited' : '');
-      $('#st-model').textContent = 'model · ' + (h.status.modelOverride || 'default');
+      $('#st-model').textContent = 'model · ' + (h.status.modelOverride || 'default') + ' · $' + Number(h.status.costUsdTotal || 0).toFixed(2) + ' lifetime' + (h.status.rateLimit && h.status.rateLimit.status !== 'allowed' ? ' · rate-limited until ' + new Date((h.status.rateLimit.resetsAt || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+      const pt = h.status.playtestGame || null; if (pt !== S.playtest) { S.playtest = pt; body.classList.toggle('playtest', !!pt); ask.placeholder = pt ? 'Playtesting ' + pt + ' — tell nibbi what happened…' : 'Ask nibbi to build something...'; if (pt && document.activeElement === ask) showChips('focus'); }
     } else {
       if (!S.busy) { setLink(S.demo ? 'demo' : 'offline'); if (!S.demo && S.mode === 'idle' && nibbi.mood() === 'idle') nibbi.setMood('sleep'); }
       $('#st-brain').textContent = 'brain · unreachable at ' + (h.gateway || 'gateway');
@@ -750,6 +782,7 @@ function chipSet(when) {
   if (running) out.push({ label: running + ' fixer' + (running > 1 ? 's' : '') + ' working', text: 'how are the fixers doing?' });
   const h = new Date().getHours();
   if (S.link === 'offline' && !S.demo && when !== 'after') { out.unshift({ label: 'wake the gateway', text: '__wake' }, { label: 'use the demo brain', text: '__demo' }); }
+  if (S.playtest && when !== 'after') { return [{ label: 'bug', text: '__prefix:[bug] ' }, { label: 'balance', text: '__prefix:[balance] ' }, { label: 'idea', text: '__prefix:[idea] ' }, { label: 'rules question', text: '__prefix:[rules] ' }, { label: 'end playtest', text: '/endtest' }]; }
   if (when === 'idle' || when === 'focus') {
     if (h < 11) out.push({ label: 'morning brief', text: 'give me my morning brief' });
     out.push({ label: 'what\'s new?', text: 'what\'s new since we last talked?' });
@@ -770,7 +803,7 @@ function showChips(when) {
   chipsShown = true;
   clearTimeout(S.chipTimer); S.chipTimer = setTimeout(hideChips, when === 'after' ? 14000 : 30000);
 }
-function chipRun(text) { if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.oracle.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
+function chipRun(text) { if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); ask.focus(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.oracle.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
@@ -787,6 +820,7 @@ addEventListener('keydown', (e) => {
   if (e.altKey && e.code === 'Space') { e.preventDefault(); toggleListen(); return; }
   if (e.key === 'Escape' && document.activeElement !== ask && S.mode === 'talk' && !S.busy) { tidy(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.activeElement !== ask && !e.repeat && S.turns.length && !S.busy) { const map = { d: /^(diff|what changed)$/, p: /^preview$/, a: /^approve/, s: /^stop/, o: /^open/ }; const rx = map[e.key.toLowerCase()]; if (rx) { const chip = [...S.turns[S.turns.length - 1].body.querySelectorAll('.acts .chip')].find((c) => rx.test(c.textContent)); if (chip) { e.preventDefault(); chip.click(); chip.focus(); return; } } }
   if (document.activeElement !== ask && e.key.length === 1 && !e.repeat) { ask.focus(); }
 });
 
@@ -814,15 +848,16 @@ async function startListen() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     listening = true; pill.classList.add('listening'); listenEl.hidden = false; $('.heard', listenEl).textContent = 'listening…';
     nibbi.setMood('listening'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.3, r.top);
-    recChunks = []; rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac'].find((m) => MediaRecorder.isTypeSupported(m));
+    recChunks = []; rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
     rec.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
     rec.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(recChunks, { type: 'audio/webm' });
+      const blob = new Blob(recChunks, { type: (rec && rec.mimeType) || 'audio/webm' });
       if (!listening && blob.size < 400) return;
       $('.heard', listenEl).textContent = 'hearing…';
       try {
-        const res = await fetch('/api/transcribe', { method: 'POST', headers: { 'content-type': 'audio/webm' }, body: blob });
+        const res = await fetch('/api/transcribe', { method: 'POST', headers: { 'content-type': blob.type || 'application/octet-stream' }, body: blob });
         const j = await res.json();
         endListenUI();
         if (j.heard) { ask.value = j.heard; autosize(); send(j.heard); } else toast('heard nothing');
@@ -866,6 +901,10 @@ async function speak(text) {
 /* ------------------------------------------------------------------ boot */
 nibbi.setReducedMotion(reducedMotion.matches); reducedMotion.addEventListener('change', (e) => nibbi.setReducedMotion(e.matches));
 if (location.protocol.startsWith('http')) { try { const es = new EventSource('/nibbi/livereload'); es.onmessage = () => location.reload(); } catch { /* no live reload */ } }
+if ('serviceWorker' in navigator && window.isSecureContext && !Q.get('nosw')) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+if (standalone) body.classList.add('standalone');
+if (!standalone && /iPhone|iPad|Android/i.test(navigator.userAgent) && !LS.get('installHintShown', false)) { setTimeout(() => { toast(/iPhone|iPad/i.test(navigator.userAgent) ? 'Share → Add to Home Screen makes me an app' : 'Menu → Install app makes me an app', 7000); LS.set('installHintShown', true); }, 4000); }
 if (Q.get('say')) { setTimeout(() => send(Q.get('say')), 300); }
 try { if (window.__TAURI__ && window.__TAURI__.event) { window.__TAURI__.event.listen('toggle-live', () => toggleListen()); } } catch { /* browser */ }
 document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (!a) return; if (window.__TAURI__ && /^https?:/i.test(a.href)) { e.preventDefault(); fetch('/api/open?url=' + encodeURIComponent(a.href)).catch(() => window.open(a.href, '_blank')); } });

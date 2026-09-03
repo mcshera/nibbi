@@ -6,6 +6,7 @@
     <string>/Users/Matty/.local/node/current/bin/node</string>
     <string>/Users/Matty/Documents/Nibbi/server.mjs</string>
     <string>--port</string><string>4527</string>
+    <string>--remote</string>
   </array>
   <key>WorkingDirectory</key><string>/Users/Matty/Documents/Nibbi</string>
   <key>RunAtLoad</key><true/>
