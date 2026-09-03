@@ -112,8 +112,8 @@ function renderMd(src) {
 
 /* ------------------------------------------------------------------ feed */
 
-function newTurn(text, images) {
-  const last = S.turns[S.turns.length - 1]; const now = new Date();
+function newTurn(text, images, at) {
+  const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now());
   if (!last || new Date(last.at || Date.now()).toDateString() !== now.toDateString()) { if (feed.children.length) { const sep = document.createElement('div'); sep.className = 'when'; sep.textContent = now.toDateString() === new Date().toDateString() ? 'today' : now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }); feed.appendChild(sep); } }
   const turn = document.createElement('article'); turn.className = 'turn';
   const you = document.createElement('div'); you.className = 'you';
@@ -125,7 +125,7 @@ function newTurn(text, images) {
   const nibBody = document.createElement('div'); nibBody.className = 'nibbody';
   const steps = document.createElement('div'); steps.className = 'steps'; steps.hidden = true;
   const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="l"></span>'; fold.onclick = () => steps.classList.remove('folded'); steps.appendChild(fold);
-  for (const P of S.turns) { const a = P.nib.querySelector('.acts'); if (a) a.remove(); }
+  for (const P of S.turns) { const a = P.nib.querySelector('.acts:not(.sticky)'); if (a) a.remove(); }
   turn.setAttribute('aria-busy', 'true');
   const said = document.createElement('div'); said.className = 'said';
   const meta = document.createElement('div'); meta.className = 'meta';
@@ -135,7 +135,7 @@ function newTurn(text, images) {
   nib.append(ava, nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
   feed.appendChild(turn); S.stick = true; scrollFeed(true);
-  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, fold, text, at: Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false };
+  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false };
   S.turns.push(T);
   return T;
 }
@@ -163,7 +163,7 @@ function finishSteps(T, ok) {
 function setSaid(T, text, live) {
   T.acc = text;
   const clean = parseActs(text.replace(/»voice:\s*(?:(?!»voice:)[^\n])*\n?/g, '')).clean;
-  if (T.plain) { T.said.textContent = clean; T.said.classList.add('plain'); return; }
+  if (T.plain) { T.said.classList.add('plain'); T.said.replaceChildren(); const parts = clean.split(/(https?:\/\/[^\s)]+)/g); for (const part of parts) { if (/^https?:\/\//.test(part)) { const a = document.createElement('a'); a.href = part; a.textContent = part; a.target = '_blank'; a.rel = 'noopener'; T.said.appendChild(a); } else T.said.appendChild(document.createTextNode(part)); } return; }
   if (live) { if (!T.raf) T.raf = setTimeout(() => { T.raf = 0; T.said.replaceChildren(renderMd(parseActs(T.acc.replace(/»voice:\s*(?:(?!»voice:)[^\n])*\n?/g, '')).clean)); }, 60); }
   else { if (T.raf) { clearTimeout(T.raf); T.raf = 0; } T.said.replaceChildren(renderMd(clean)); }
 }
@@ -171,7 +171,7 @@ function setMeta(T, r) {
   const bits = [];
   T.at = T.at || Date.now(); const tm = document.createElement('time'); tm.dateTime = new Date(T.at).toISOString(); tm.title = new Date(T.at).toLocaleString(); tm.textContent = relTime(T.at); T.timeEl = tm;
   bits.push('');
-  if (r && r.costUsd) bits.push('$' + r.costUsd.toFixed(3));
+  if (r && r.costUsd) { bits.push('$' + r.costUsd.toFixed(3)); T.cost = r.costUsd; }
   if (r && r.local) bits.push('local model');
   if (r && r.raw) bits.push(String(r.raw).replace(/^\s*error:\s*/i, '').slice(0, 90));
   T.meta.textContent = bits.filter(Boolean).join(' · '); T.meta.prepend(tm, document.createTextNode(bits.filter(Boolean).length ? ' · ' : ''));
@@ -180,9 +180,9 @@ function setMeta(T, r) {
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
   T.meta.append(document.createTextNode(' · '), quote, document.createTextNode(' · '), copy, document.createTextNode(' · '), again);
 }
-function addActs(T, acts) {
+function addActs(T, acts, opts) {
   if (!acts.length) return;
-  const w = document.createElement('div'); w.className = 'acts';
+  const w = document.createElement('div'); w.className = 'acts' + (opts && opts.sticky ? ' sticky' : '');
   for (const a of acts) {
     const c = document.createElement('button'); c.type = 'button'; c.className = 'chip in' + (a.warn ? ' warn' : ''); c.textContent = a.label;
     if (a.confirm) { let armed = 0; c.onclick = () => { if (!armed) { armed = setTimeout(() => { armed = 0; c.textContent = a.label; c.classList.remove('armed'); }, 4000); c.textContent = a.confirm; c.classList.add('armed'); return; } clearTimeout(armed); armed = 0; a.run(); }; }
@@ -198,14 +198,14 @@ function tidy() {
   const saved = { turns: S.turns, nodes: [...feed.children] };
   for (const T of S.turns) T.el.classList.add('leave');
   setTimeout(() => { if (tidied === saved) feed.replaceChildren(); }, 240);
-  S.turns = []; tidied = saved;
+  S.turns = []; tidied = saved; LS.set('transcript', null);
   setMode('idle'); body.classList.remove('rest'); nibbi.lookFree(); nibbi.setMood('idle'); nibbi.hop(); hideChips();
-  toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); } });
+  toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); persistTranscript(); } });
 }
 
 /* ------------------------------------------------------------------ toast */
 let toastT = 0;
-function toast(msg, ms, act) { const t = $('#toast'); t.textContent = msg; if (act) { const b = document.createElement('button'); b.type = 'button'; b.textContent = act.label; b.onclick = () => { act.run(); t.hidden = true; }; t.append(' ', b); } t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || 1800); }
+function toast(msg, ms, act) { try { if (typeof clientLog === 'function') clientLog('toast', msg); } catch { /* early */ } const t = $('#toast'); t.textContent = msg; if (act) { const b = document.createElement('button'); b.type = 'button'; b.textContent = act.label; b.onclick = () => { act.run(); t.hidden = true; }; t.append(' ', b); } t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || 1800); }
 
 /* ------------------------------------------------------------------ brain client */
 async function* sseTurn(message, images, signal) {
@@ -598,7 +598,7 @@ function postFixerBubble(f) {
   const cost = (f.costUsd ? ' · $' + Number(f.costUsd).toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
   const text = f.status === 'done' ? 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?' : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**' + cost + '.' : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '');
   setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
-  addActs(T, fixerActs(f)); if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
+  addActs(T, fixerActs(f), { sticky: true }); T.fixerId = f.id; if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
   const a = agentEls.get(f.id); if (a) { const r = a.canvas.getBoundingClientRect(); nibbi.lookAt(r.left + r.width / 2, r.top); setTimeout(() => nibbi.lookFree(), 1800); nibbi.splash(AGENT_INK[hashId(f.id) % AGENT_INK.length], f.status === 'merged' ? 8 : 4); }
   nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
   sound(f.status === 'failed' ? 'error' : 'land');
@@ -755,10 +755,10 @@ async function playFlow(project, action) {
   finishSteps(T, ok); setSaid(T, text, false); setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
   if (!ok) T.nib.classList.add('error');
   const acts = [];
-  if (url) { acts.push({ label: 'open it', run: () => openUrl(url) }, { label: 'stop the server', run: () => send('/play ' + project + ' stop') }); }
+  if (url) { acts.push({ label: 'open it', run: () => openUrl(url), sticky: true }, { label: 'stop the server', run: () => send('/play ' + project + ' stop') }); }
   else if (ok && action === 'status' && /Want me to start/.test(text)) acts.push({ label: 'start it', run: () => send('/play ' + project) });
   else if (!ok) acts.push({ label: 'try again', run: () => send('/play ' + project) });
-  addActs(T, acts);
+  addActs(T, acts, { sticky: !!url });
   S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1500 : 2600);
   $('#sr').textContent = stripMd(text); scheduleIdleTimers();
 }
@@ -837,7 +837,7 @@ async function send(text, images) {
   else if (!result.aborted) { nibbi.setMood('happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); }
   else nibbi.setMood('idle');
   if (ok && !result.aborted && !S.spokeStream) speak(result.voice || firstSentences(stripMd(parseActs(result.text).clean), 2, 320));
-  if (isCommand && /^\/preview\s/i.test(text) && ok) { const m = String(result.text).match(/https?:\/\/(?:localhost|127\.0\.0\.1)[^\s)]+/); if (m) { const st = addStep(T, 'taking a screenshot of the preview'); T.steps.classList.remove('folded'); api.post('/nibbi/shot', { url: m[0], name: 'preview-' + text.split(/\s+/)[1] }).then((r) => { markStep(st, 'done'); finishSteps(T, true); const row = shotsRow([]); const w = document.createElement('div'); w.className = 'shots'; const a = document.createElement('a'); a.href = r.url; a.target = '_blank'; const im = document.createElement('img'); im.src = r.url; im.alt = 'preview'; im.onload = () => scrollFeed(false); a.appendChild(im); w.appendChild(a); T.said.appendChild(w); }).catch((e) => { markStep(st, 'fail'); finishSteps(T, true); toast('no screenshot: ' + e.message, 3000); }); } }
+  if (isCommand && ok) { const urls = [...String(result.text).matchAll(/https?:\/\/[^\s)]+/g)].map((m) => m[0]); if (urls.length) addActs(T, urls.slice(0, 2).map((u) => ({ label: 'open ' + u.replace(/^https?:\/\//, '').slice(0, 28), run: () => openUrl(u) })), { sticky: true }); const local = urls.find((u) => /^https?:\/\/(localhost|127\.0\.0\.1)/.test(u)); if (local && /^\/preview\s/i.test(text)) { const st = addStep(T, 'taking a screenshot of the preview'); T.steps.classList.remove('folded'); sleep(2500).then(() => api.post('/nibbi/shot', { url: local, name: 'preview-' + text.split(/\s+/)[1] })).then((r) => { markStep(st, 'done'); finishSteps(T, true); const w = document.createElement('div'); w.className = 'shots'; const a = document.createElement('a'); a.href = r.url; a.target = '_blank'; const im = document.createElement('img'); im.src = r.url; im.alt = 'preview'; im.onload = () => scrollFeed(false); a.appendChild(im); w.appendChild(a); T.said.appendChild(w); }).catch((e) => { st.el.querySelector('.l').textContent = 'screenshot failed — ' + (e.message || 'unknown'); markStep(st, 'fail'); finishSteps(T, true); }); } }
   if (!isCommand) { const pa = parseActs(result.text); if (pa.acts.length) addActs(T, pa.acts.map((a) => ({ label: a, run: () => send(a) }))); else addActs(T, replyActs(result.text)); }
   setLink(S.demo ? 'demo' : 'live');
   refreshStatus();
@@ -1029,7 +1029,7 @@ async function refreshStatus() {
     }
     if (!S.busy) { try { const fr = await fetch('/api/fixers'); if (fr.ok) S.fixers = await fr.json(); } catch { /* ignore */ } }
     try { const ar = await fetch('/api/auto'); if (ar.ok) S.auto = await ar.json(); } catch { /* ignore */ }
-    renderAgents(S.fixers, S.auto); if (S.demo) fleetEvents(demoFixers()); renderProject(); refreshBadge();
+    renderAgents(S.fixers, S.auto); if (S.demo) fleetEvents(demoFixers()); renderProject(); refreshBadge(); reattachFixerActs();
   } catch {
     if (!S.busy) setLink('offline');
     $('#st-brain').textContent = 'host · not reachable (open via node server.mjs)';
@@ -1043,6 +1043,7 @@ $('#st-project').onclick = () => { const names = projectNames(); if (!names.leng
 $('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn); refreshStatus(); toast(S.voiceOn ? NAME + ' will speak replies' : 'voice off'); if (S.voiceOn) speak('Okay. I\'ll talk.'); };
 $('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real Oracle'); };
 $('#st-clear').onclick = () => tidy();
+try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
 refreshStatus(); setInterval(refreshStatus, 6000); connectEvents();
 function mostActiveProject(list) {
   const names = new Set(list.map((p) => p.name));
@@ -1221,6 +1222,40 @@ if (standalone) body.classList.add('standalone');
 if (Q.get('say')) { setTimeout(() => send(Q.get('say')), 300); }
 try { if (window.__TAURI__ && window.__TAURI__.event) { window.__TAURI__.event.listen('toggle-live', () => toggleListen()); } } catch { /* browser */ }
 document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (!a) return; if (window.__TAURI__ && /^https?:/i.test(a.href)) { e.preventDefault(); fetch('/api/open?url=' + encodeURIComponent(a.href)).catch(() => window.open(a.href, '_blank')); } });
+/* live state report: the running app tells the host what it is showing (loopback-readable at /nibbi/state) */
+let stateTimer = 0;
+function snapshot() {
+  return { v: '0.6.1', mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
+    turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => s.textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
+    chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), toast: $('#toast').hidden ? null : $('#toast').textContent };
+}
+function persistTranscript() {
+  try {
+    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), fixerId: T.fixerId || null, cost: T.cost || 0, steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '' }));
+    LS.set('transcript', { at: Date.now(), rows });
+  } catch { /* quota */ }
+}
+function restoreTranscript() {
+  const t = LS.get('transcript', null); if (!t || !t.rows || !t.rows.length || Date.now() - t.at > 12 * 3600000) return;
+  setMode('talk');
+  for (const r of t.rows) {
+    const T = newTurn(r.you, undefined, r.at); T.plain = r.plain; T.bubble.classList.remove('live'); T.fixerId = r.fixerId; T.cost = r.cost;
+    if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }
+    setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error');
+    T.at = r.at; setMeta(T, { costUsd: r.cost }); T.el.removeAttribute('aria-busy');
+  }
+  S.stick = true; scrollFeed(true); body.classList.add('rest');
+}
+function reattachFixerActs() { for (const T of S.turns) { if (!T.fixerId || T.body.querySelector('.acts')) continue; const f = fixerById(T.fixerId); if (f && (f.status === 'done' || ACTIVE.has(f.status))) addActs(T, fixerActs(f), { sticky: true }); } }
+function reportState() { persistTranscript(); clearTimeout(stateTimer); stateTimer = setTimeout(() => { try { fetch('/nibbi/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(snapshot()), keepalive: true }).catch(() => {}); } catch { /* offline */ } }, 400); }
+new MutationObserver(reportState).observe(feed, { childList: true, subtree: true, characterData: true });
+new MutationObserver(reportState).observe(chipsEl, { childList: true });
+setInterval(reportState, 15000);
+const clientLog = (level, msg, extra) => { try { fetch('/nibbi/client-log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ level, msg: String(msg).slice(0, 400), ...(extra || {}), url: location.href }), keepalive: true }).catch(() => {}); } catch { /* */ } };
+addEventListener('error', (e) => clientLog('error', e.message, { src: (e.filename || '').split('/').pop() + ':' + e.lineno }));
+addEventListener('unhandledrejection', (e) => clientLog('error', (e.reason && (e.reason.message || e.reason)) || 'unhandled rejection'));
+const _toast = toast; window.__toastLog = true;
+
 addEventListener('pagehide', () => LS.set('lastSeen', Date.now()));
 document.addEventListener('visibilitychange', () => { if (document.hidden) LS.set('lastSeen', Date.now()); });
 window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout };
