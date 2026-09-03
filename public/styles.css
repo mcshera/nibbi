@@ -259,3 +259,4 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 
 /* wide screens: give diffs room */
 @media (min-width: 1400px) { body:has(.turn:first-child .diffv) .feed { width: min(980px, calc(100vw - 48px)); } .nib .said .diffv .dbody { max-height: 56vh; } }
+.nib .said .runlog { margin: 8px 0 0; padding: 10px 12px; border-radius: 12px; background: #1b1a18; color: #ece8df; font: 12px/1.5 "Geist Mono", ui-monospace, monospace; max-height: 240px; overflow: auto; white-space: pre-wrap; }

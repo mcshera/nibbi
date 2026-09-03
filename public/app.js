@@ -345,12 +345,26 @@ const COMMANDS = [
   { cmd: '/proposals', args: '', desc: 'pending self-improvement proposals', local: false },
   { cmd: '/export', args: '', desc: 'export the transcript to the vault', local: false },
   { cmd: '/clear', args: '', desc: 'fresh working context (vault memory carries forward)', local: false },
+  { cmd: '/deploy', args: '<project>', desc: 'run the project\'s own deploy script (two clicks, live log)', local: true },
   { cmd: '/phone', args: '', desc: 'put nibbi on your phone (QR + steps)', local: true },
   { cmd: '/help', args: '', desc: 'this list', local: true },
 ];
 
 async function runLocalCommand(name, arg) {
   switch (name) {
+    case 'deploy': { const go = /(^|\s)--go$/.test(arg || ''); const proj = (arg || '').replace(/(^|\s)--go$/, '').trim() || activeProject();
+      return localTurn('/deploy ' + proj, async (T) => {
+        if (!go) return { text: 'Deploy **' + proj + '**? I run the project\'s own `npm run deploy` here on this Mac and show the log as it goes.', acts: [{ label: 'deploy', confirm: 'deploy ' + proj + ' — sure?', warn: true, run: () => send('/deploy ' + proj + ' --go') }] };
+        const st = addStep(T, 'running npm run deploy in ' + proj);
+        const logEl = document.createElement('pre'); logEl.className = 'runlog'; T.said.appendChild(logEl);
+        const res = await fetch('/nibbi/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: proj, script: 'deploy' }) });
+        if (!res.ok) { const j = await res.json().catch(() => ({})); markStep(st, 'fail'); if (res.status === 409) return { ok: false, text: '**' + proj + '** has no `deploy` script yet. Add one to its `package.json` — e.g. `"deploy": "sh scripts/deploy.sh"` — and `/deploy ' + proj + '` will run it with a live log.' + (j.scripts && j.scripts.length ? ' Scripts it has: ' + j.scripts.map((s) => '`' + s + '`').join(', ') + '.' : ''), acts: [{ label: 'ask nibbi to write one', run: () => send('write a deploy script for ' + proj + ' and add it as npm run deploy — ask me where it deploys to first') }] }; return { ok: false, text: humanError(j.error || ('HTTP ' + res.status)) }; }
+        const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '', code = null, lines = [];
+        for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); let ev = '', data = ''; for (const l of chunk.split('\n')) { if (l.startsWith('event:')) ev = l.slice(6).trim(); else if (l.startsWith('data:')) data += l.slice(5).trim(); } if (!data) continue; const d = JSON.parse(data); if (ev === 'line') { lines.push(d.t); logEl.textContent = lines.slice(-14).join('\n'); nibbi.pulse(0.3); } else if (ev === 'done') code = d.code; } }
+        markStep(st, code === 0 ? 'done' : 'fail');
+        const ok = code === 0; const tail = lines.slice(-6).join('\n');
+        return { ok, text: (ok ? '**' + proj + '** deployed ✓' : 'Deploy of **' + proj + '** exited with code ' + code + '.') + (tail ? '\n\n```\n' + tail + '\n```' : ''), acts: ok ? [] : [{ label: 'try again', run: () => send('/deploy ' + proj + ' --go') }] };
+      }); }
     case 'phone': return localTurn('/phone', async () => {
       let r; try { r = await api.get('/nibbi/remote'); } catch (e) { return { ok: false, text: 'I can only pair from the desk app (this host says: ' + e.message + ').' }; }
       if (!r.remote) return { ok: false, text: 'The host isn\'t listening on the network yet. Start it with `node server.mjs --remote` (the launchd plist and Nibbi.app do this by default now), then run `/phone` again.' };

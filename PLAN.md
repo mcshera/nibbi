@@ -53,7 +53,7 @@ without ever opening a dashboard.*
 - Cost meter + rate-limit state in the status menu; per-turn cost already in meta.
 - Playtest mode: mic-first bug capture, one bubble per report, auto-triage chips (bug · balance · idea).
 
-**P2 — reach — phone app ✅ (installable PWA, LAN token gate, local-CA https, `/phone` pairing), wide-screen diff pane ✅, keyboard review keys ✅, `npm test` = scenario suite ✅ · deploy ⏳ (needs a gateway deploy action) · Telegram ✗ (not wanted)**
+**P2 — reach — phone app ✅ (installable PWA, LAN token gate, local-CA https, `/phone` pairing), wide-screen diff pane ✅, keyboard review keys ✅, `npm test` = scenario suite ✅ · `/deploy <project>` ✅ (runs the project's own deploy script with a live log; shipless still needs a `deploy` script written) · Telegram ✗ (not wanted)**
 - Gateway-side `/play` `/plan` so Telegram gets them; push fleet events to Telegram when Nibbi is hidden.
 - Deploy command per project (shipless first), with the same confirm-to-ship pattern.
 - Second window / split for the diff viewer on wide screens; keyboard-only review flow (j/k, a, p).

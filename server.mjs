@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { execFile, execFileSync } from "node:child_process";
 import { networkInterfaces, homedir, hostname } from "node:os";
 import { randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
 
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.startsWith("--") ? [a.slice(2), arr[i + 1]?.startsWith("--") || arr[i + 1] === undefined ? true : arr[i + 1]] : []).filter(Boolean));
 const PORT = Number(args.port || process.env.NIBBI_PORT || 4527);
@@ -149,11 +150,33 @@ async function handle(req, res) {
       json(res, 200, { remote: REMOTE, ip, name, token: REMOTE ? token() : null, http: ip ? `http://${ip}:${PORT}/` : null, https: ip && tlsOk ? `https://${ip}:${TLS_PORT}/` : null, setup: ip ? `http://${ip}:${PORT}/nibbi/setup?token=${REMOTE ? token() : ""}` : null, tls: tlsOk }); return;
     }
     if (url.pathname === "/nibbi/setup") { html(res, 200, setupPage(req)); return; }
+    if (url.pathname === "/nibbi/run" && req.method === "POST") { await runScript(req, res); return; }
     if (url.pathname === "/nibbi/ca.crt") { serveCa(res); return; }
     if (url.pathname.startsWith("/api/")) { proxy(req, res); return; }
     if (req.method !== "GET" && req.method !== "HEAD") { json(res, 405, { error: "method" }); return; }
     serveStatic(req, res);
   } catch (e) { if (!res.headersSent) json(res, 500, { error: String(e.message || e).slice(0, 200) }); }
+}
+/* run a project's OWN npm script (deploy/build/test) with a live log — the project defines what "deploy" means */
+const RUNNABLE = new Set(["deploy", "build", "test"]);
+async function runScript(req, res) {
+  let body = ""; for await (const c of req) body += c;
+  let p = {}; try { p = JSON.parse(body || "{}"); } catch { /* empty */ }
+  const project = String(p.project || ""), script = String(p.script || "deploy");
+  if (!RUNNABLE.has(script)) { json(res, 400, { error: "only deploy/build/test" }); return; }
+  let repo = null; try { repo = JSON.parse(readFileSync(join(HOME, "games.json"), "utf8"))[project]?.repo || null; } catch { /* none */ }
+  if (!repo || !existsSync(repo)) { json(res, 404, { error: `unknown project '${project}'` }); return; }
+  let scripts = {}; try { scripts = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")).scripts || {}; } catch { /* no package.json */ }
+  if (!scripts[script]) { json(res, 409, { error: `no "${script}" script in ${join(repo, "package.json")}`, scripts: Object.keys(scripts) }); return; }
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+  const send = (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`);
+  send("start", { cmd: scripts[script], cwd: repo });
+  const child = spawn("npm", ["run", script], { cwd: repo, env: { ...process.env, CI: "true", FORCE_COLOR: "0" }, stdio: ["ignore", "pipe", "pipe"] });
+  const onData = (buf) => { for (const line of String(buf).split(/\r?\n/)) if (line.trim()) send("line", { t: line.slice(0, 400) }); };
+  child.stdout.on("data", onData); child.stderr.on("data", onData);
+  const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } send("line", { t: "(timed out after 15 minutes)" }); }, 15 * 60_000);
+  child.on("close", (code) => { clearTimeout(timer); send("done", { code }); res.end(); });
+  req.on("close", () => { clearTimeout(timer); try { child.kill(); } catch { /* gone */ } });
 }
 function serveCa(res) { try { const buf = readFileSync(join(TLS_DIR, "ca.crt")); res.writeHead(200, { "content-type": "application/x-x509-ca-cert", "content-disposition": "attachment; filename=\"nibbi-local-ca.crt\"" }); res.end(buf); } catch { json(res, 404, { error: "no certificate yet — start the host with --remote" }); } }
 

@@ -90,6 +90,7 @@ Type `/` for the palette. Nibbi answers these itself (no model call; they use th
 | `/steer <id> <note>` · `/stop <id>` · `/log <id>` | talk to, stop, or read a running fixer |
 | `/artifacts [project]` · `/report [hours]` · `/history <q>` · `/vault <path>` · `/journal [day]` · `/model [name]` · `/help` | proof of work, overnight report, search, brain files, journal, model |
 | `/phone` | pair your phone (QR + steps) |
+| `/deploy <project>` | runs the project's own `npm run deploy` (two-click confirm, live log). Nibbi's own deploy rebuilds + installs `Nibbi.app` |
 | keys `d` `p` `a` `s` `o` (input unfocused) | diff · preview · approve (twice) · stop · open — on the newest turn |
 
 Oracle's own commands still pass through: `/approve`, `/preview`, `/fixers`, `/playtest`, `/endtest`, `/golden`, `/proposals`, `/export`, `/clear`.
