@@ -1,0 +1,14 @@
+{
+  "name": "nibbi-story",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A story-mode Codex surface guided by Nibbi.",
+  "scripts": {
+    "start": "node server.mjs --open",
+    "serve": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,7 @@
+.shots/*.png
+.shots/*_s.png
+node_modules/
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+.DS_Store

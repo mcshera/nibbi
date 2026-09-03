@@ -1,0 +1,16 @@
+{
+  "name": "nibbi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Nibbi \u2014 Oracle's new face: a little ink-blot character at the center of the app. Zero-build web surface + zero-dep host that proxies to the Oracle gateway.",
+  "scripts": {
+    "start": "node server.mjs --open",
+    "serve": "node server.mjs",
+    "shot": "node tools/shot.mjs",
+    "verify": "node tools/verify.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

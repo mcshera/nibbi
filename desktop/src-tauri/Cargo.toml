@@ -1,0 +1,17 @@
+[package]
+name = "nibbi-desktop"
+version = "0.1.0"
+description = "Nibbi — Oracle's face on the table"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-window-state = "2.4.1"
+
+[profile.release]
+strip = true
+lto = true

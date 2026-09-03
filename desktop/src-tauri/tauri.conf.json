@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Nibbi",
+  "version": "0.1.0",
+  "identifier": "com.oracle.nibbi",
+  "build": {
+    "frontendDist": "../../public"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Nibbi",
+        "url": "http://localhost:4527/?app=1",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 520,
+        "minHeight": 480,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": false,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 18
+        }
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/icon.icns"
+    ],
+    "category": "DeveloperTool",
+    "macOS": {
+      "exceptionDomain": "localhost"
+    }
+  }
+}
