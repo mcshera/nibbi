@@ -88,7 +88,8 @@ function probeGateway() {
 
 /* ---- event log: the host watches the gateway itself (always on) so the surface never misses a transition ---- */
 const EV_FILE = join(HOME, "nibbi-events.jsonl"), EV_STATE = join(HOME, "nibbi-events-state.json");
-const evClients = new Set(); let evRing = []; const liveStates = {}; const clientLog = [];
+const evClients = new Set(); let evRing = []; let liveStates = {}; const clientLog = [];
+try { liveStates = JSON.parse(readFileSync(join(HOME, "nibbi-state.json"), "utf8")); if (Array.isArray(liveStates) || liveStates.turns) liveStates = {}; } catch { liveStates = {}; }
 try { evRing = readFileSync(EV_FILE, "utf8").trim().split("\n").filter(Boolean).slice(-500).map((l) => JSON.parse(l)); } catch { evRing = []; }
 let evState = null; try { evState = JSON.parse(readFileSync(EV_STATE, "utf8")); } catch { evState = null; }
 function gwGet(path) {
