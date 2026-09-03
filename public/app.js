@@ -695,12 +695,25 @@ function errorActs(text) {
   if (/gateway (offline|isn)|failed to fetch|networkerror|not reachable/i.test(text)) { acts.push({ label: 'start the gateway', warn: true, run: () => toast('launchctl kickstart -k gui/$(id -u)/com.oracle.gateway', 6000) }); acts.push({ label: 'use the demo brain', run: () => { S.demo = true; refreshStatus(); const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }); }
   return acts;
 }
+/* yes/no chips only for yes/no questions — open questions (what/how/which…) get none */
+function questionActs(text) {
+  const clean = stripMd(text).trim();
+  if (!/\?\s*$/.test(clean)) return [];
+  const cut = clean.search(/[.!?](?=\s)[^.!?]*$/);   // last sentence boundary = punctuation followed by whitespace
+  const q = (cut >= 0 ? clean.slice(cut + 1) : clean).trim().replace(/^[—–-]\s*/, '');
+  if (!q) return [];
+  if (/^(what|which|where|when|why|how|who|whom|whose)\b/i.test(q) || /\bwhat\b.*\?$/i.test(q) && !/^(want|should|shall|do you|would you|can i|could i|may i|ok)/i.test(q)) return [];
+  const m = q.match(/^(?:want me to|should i|shall i|do you want me to|would you like me to|can i|could i|may i|okay? (?:to|if i)|mind if i|ready to|ready for me to)\s+(.+?)\??$/i);
+  if (m) { const verb = m[1].replace(/\s*\b(or|and)\b.*$/i, '').replace(/[,;:]$/, '').trim(); if (/\bor\b/i.test(m[1])) return []; const lab = verb.length > 26 ? verb.slice(0, 24).replace(/\s+\S*$/, '') + '…' : verb; return [{ label: 'yes, ' + lab, run: () => send('yes, ' + verb) }, { label: 'not now', run: () => send('not now') }]; }
+  if (/^(is|are|do|does|did|will|would|should|shall|can|could|have|has|was|were)\b/i.test(q) && !/\bor\b/i.test(q)) return [{ label: 'yes', run: () => send('yes') }, { label: 'no', run: () => send('no') }];
+  return [];
+}
 function replyActs(text) {
   const acts = launchActsFor(text);
   if (/stage|staged|review the diff|approve/i.test(text)) acts.push({ label: 'show what\'s staged', run: () => send('/fixers') });
   if (/\bship\b|merge/i.test(text) && /\?/.test(text)) acts.push({ label: 'ship it', run: () => send('yes, ship it') });
   if (/preview|localhost:\d+/i.test(text)) { const m = text.match(/https?:\/\/[^\s)]+/); if (m) acts.push({ label: 'open preview', run: () => window.open(m[0], '_blank') }); }
-  if (/\?\s*$/.test(text.trim()) && !acts.length) acts.push({ label: 'yes', run: () => send('yes') }, { label: 'not now', run: () => send('not now') });
+  if (!acts.length) acts.push(...questionActs(text));
   return acts.slice(0, 3);
 }
 
