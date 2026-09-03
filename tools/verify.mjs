@@ -1,9 +1,12 @@
 // tools/verify.mjs — scenario screenshots + probe for the Nibbi surface. Writes .shots/v-*.png and prints a JSON summary.
 // usage: node tools/verify.mjs [base=http://127.0.0.1:4527]
-import { chromium } from '/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs';
+import { existsSync } from 'node:fs';
+const PW = process.env.NIBBI_PLAYWRIGHT || (existsSync(new URL('../node_modules/playwright-core/index.mjs', import.meta.url)) ? new URL('../node_modules/playwright-core/index.mjs', import.meta.url).pathname : '/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs');
+const { chromium } = await import(PW);
+const CHANNEL = process.env.CI ? undefined : 'chrome';
 const base = process.argv[2] || 'http://127.0.0.1:4527';
 const out = new URL('../.shots/', import.meta.url).pathname;
-const b = await chromium.launch({ channel: 'chrome', args: ['--use-angle=metal', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const b = await chromium.launch({ channel: CHANNEL, args: ['--use-angle=metal', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const errs = [];
 async function page(w, h, dpr) { const pg = await b.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: dpr || 1 }); pg.on('pageerror', (e) => errs.push('pageerror: ' + e.message.slice(0, 200))); pg.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text().slice(0, 200)); }); return pg; }
 const probe = (pg) => pg.evaluate(() => ({ mode: document.body.dataset.mode, link: document.body.dataset.link, mood: window.nibbi.mood(), fps: window.nibbi.state().fps, r: Math.round(window.nibbi.state().r), y: Math.round(window.nibbi.state().y), turns: window.nibbiApp.state().turns.length, steps: document.querySelectorAll('.step').length, chips: [...document.querySelectorAll('.chip')].map((c) => c.textContent) }));

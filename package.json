@@ -1,6 +1,6 @@
 {
   "name": "nibbi",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "Nibbi \u2014 Oracle's new face: a little ink-blot character at the center of the app. Zero-build web surface + zero-dep host that proxies to the Oracle gateway.",
@@ -9,8 +9,9 @@
     "serve": "node server.mjs",
     "shot": "node tools/shot.mjs",
     "verify": "node tools/verify.mjs",
-    "test": "node tools/verify.mjs",
-    "deploy": "CARGO_TARGET_DIR=$HOME/Oracle/desktop/src-tauri/target npm --prefix desktop run build && rm -rf \"$HOME/Applications/Nibbi.app\" && cp -R \"$HOME/Oracle/desktop/src-tauri/target/release/bundle/macos/Nibbi.app\" \"$HOME/Applications/Nibbi.app\" && echo \"Nibbi.app installed\""
+    "test": "node --test tests/*.test.mjs && node tools/verify.mjs",
+    "deploy": "CARGO_TARGET_DIR=$HOME/Oracle/desktop/src-tauri/target npm --prefix desktop run build && rm -rf \"$HOME/Applications/Nibbi.app\" && cp -R \"$HOME/Oracle/desktop/src-tauri/target/release/bundle/macos/Nibbi.app\" \"$HOME/Applications/Nibbi.app\" && echo \"Nibbi.app installed\"",
+    "test:unit": "node --test tests/*.test.mjs"
   },
   "engines": {
     "node": ">=20"

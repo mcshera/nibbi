@@ -301,3 +301,18 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 .jump:hover { background: var(--ink); color: #f5f2ec; border-color: transparent; }
 .when { text-align: center; font-size: 11px; letter-spacing: .04em; color: var(--ink-3); margin: 6px 0 16px; }
 .when::before, .when::after { content: ''; display: inline-block; width: 40px; height: 1px; background: var(--line); vertical-align: middle; margin: 0 10px; }
+
+/* review mode */
+.turn.review .bubble { border-color: rgba(21,20,19,.22); }
+.rhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 14px; margin-bottom: 8px; } .rhead .m { color: var(--ink-3); font-size: 12.5px; } .rhead .keys { margin-left: auto; font-size: 11px; color: var(--ink-4); letter-spacing: .02em; }
+.rsum { font-size: 13px; color: var(--ink-2); margin: 0 0 10px; padding: 8px 10px; border-radius: 10px; background: rgba(21,20,19,.04); }
+.pmenu .ptune { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 11.5px; color: var(--ink-3); }
+.pmenu .ptune input { width: 54px; margin-left: 4px; font: inherit; font-size: 11.5px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.6); color: var(--ink); }
+.pmenu .ptune select { font: inherit; font-size: 11.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.6); color: var(--ink); }
+
+/* chat polish */
+.nib .said pre.capped { max-height: 22em; overflow: hidden; }
+.nib .said pre .expand { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 0 10px; text-align: center; font: inherit; font-size: 12px; color: #ece8df; background: linear-gradient(to bottom, rgba(27,26,24,0), #1b1a18 55%); border: 0; cursor: pointer; }
+.nib .said .tblwrap { overflow-x: auto; max-width: 100%; margin: .4em 0 .8em; }
+.meta time { color: var(--ink-3); }
+.palette .pi.hist { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; white-space: normal; } .palette .pi.hist .t { color: var(--ink-2); font-size: 12.5px; }

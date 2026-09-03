@@ -81,18 +81,24 @@ Type `/` for the palette. Nibbi answers these itself (no model call; they use th
 | `/play <project> [stop\|status]` | launch/stop the dev server and open it |
 | `/steer <id> <note>` · `/stop <id>` · `/log <id>` | talk to, stop, or read a running fixer |
 | `/artifacts [project]` · `/report [hours]` · `/history <q>` · `/vault <path>` · `/journal [day]` · `/model [name]` · `/help` | proof of work, overnight report, search, brain files, journal, model |
+| `/review [project\|all]` | walk staged fixers one at a time: `j/k` next/prev · `a` approve (confirm) · `x` discard · `p` preview · merge whole group |
+| `/issue <text>` | file an issue into the vault for the active project (`games|projects/<p>/issues.md`), with `fix it now` |
+| `/new <name> web\|game` | web = vite scaffold + `npm install` (→ `/play` works); game = rules/design docs + a plan in the vault |
+| `/plan edit <instruction>` | Oracle rewrites the plan file |
 | `/phone` | pair your phone (QR + steps) |
 | `/deploy <project>` | runs the project's own `npm run deploy` (two-click confirm, live log). Nibbi's own deploy rebuilds + installs `Nibbi.app` |
 | keys `d` `p` `a` `s` `o` (input unfocused) | diff · preview · approve (twice) · stop · open — on the newest turn |
 
 Oracle's own commands still pass through: `/approve`, `/preview`, `/fixers`, `/playtest`, `/endtest`, `/golden`, `/proposals`, `/export`, `/clear`.
 
-**Fleet events**: when a fixer finishes, fails or merges (polled every 6 s), Nibbi posts one bubble with `diff · preview ·
+**Fleet events**: the host watches the gateway itself (every 5 s, always on) and streams transitions to the surface (`/nibbi/events`, replayed from `~/.oracle/nibbi-events.jsonl`), so "while you were away" is exact even if the window was closed. When a fixer finishes, fails or merges, Nibbi posts one bubble with `diff · preview ·
 approve & merge` (or `log · requeue`), plus thumbnails of any screenshots the fixer wrote (`<repo>/.oracle-shots/`).
 **Playtest mode** (`/playtest <game>`): the pill gets a tag and the chips become `bug · balance · idea · rules question`
 prefixes. The status menu shows lifetime spend and rate-limit state. Agent cards on the pill carry the same actions; auto mode lives in the project menu (top-left), not as an agent. Every irreversible chip (merge, stop, ship, unqueue) needs a second click.
 
-See `PLAN.md` for the gap analysis and what's next (artifacts inline, playtest capture, Telegram parity, deploy).
+**Chips come from meaning**: Oracle ends replies with `»acts: a | b | c` (SOUL policy 5) and Nibbi renders them; a yes/no regex is only the fallback for genuine yes/no questions.
+
+See `PLAN.md`, `docs/CHAT-PLAN.md` and `docs/IMPROVEMENT-PLAN.md` for the roadmap; `CHANGELOG.md` for what shipped.
 
 ## How it's contextual
 
@@ -119,7 +125,7 @@ See `PLAN.md` for the gap analysis and what's next (artifacts inline, playtest c
 ## Verify
 
 ```bash
-npm run verify          # scenario screenshots → .shots/v-*.png + JSON summary (0 console errors expected)
+npm test                # unit tests (node --test) + scenario screenshots → .shots/v-*.png (0 console errors expected)
 node tools/shot.mjs "http://127.0.0.1:4527/?demo=1" .shots/x.png --demo "fix the login bug" --at 500,3000,9000 --probe
 ```
 

@@ -230,11 +230,11 @@ function createNibbi(opts) {
       return;
     }
   }
-  function spawnSpat(t, spread) {
+  function spawnSpat(t, spread, color) {
     for (const sp of spatDyn) {
       if (sp.on && t - sp.born < sp.life) continue;
       const s = pose.r / R0, a = rnd() * Math.PI * 2, rad = (155 + rnd() * 80) * s * (spread || 1);
-      sp.on = true; sp.born = t; sp.abs = false; sp.ox = Math.cos(a) * rad; sp.oy = Math.sin(a) * rad * 0.75 + 20 * s; sp.r = (1.4 + rnd() * 3.0) * s; sp.life = 4500 + rnd() * 2500;
+      sp.on = true; sp.born = t; sp.abs = false; sp.ox = Math.cos(a) * rad; sp.oy = Math.sin(a) * rad * 0.75 + 20 * s; sp.r = (1.4 + rnd() * 3.0) * s; sp.life = 4500 + rnd() * 2500; sp.color = color || null;
       return;
     }
   }
@@ -470,7 +470,9 @@ function createNibbi(opts) {
       let sc = 1, al = 1; if (age < 130) sc = 0.2 + (age / 130); if (age > sp.life - 2400) al = (sp.life - age) / 2400;
       fx.globalAlpha = Math.max(0, al) * fade;
       const ox = sp.abs ? sp.x : cx + sp.ox, oy = sp.abs ? sp.y : cy + sp.oy;
+      if (sp.color) fx.fillStyle = 'rgb(' + Math.round(sp.color[0] * 255) + ',' + Math.round(sp.color[1] * 255) + ',' + Math.round(sp.color[2] * 255) + ')';
       fx.beginPath(); fx.ellipse(ox, oy, sp.r * sc, sp.r * sc * 0.85, 0.4, 0, 7); fx.fill();
+      if (sp.color) fx.fillStyle = '#191817';
     }
     fx.globalAlpha = fade;
     for (const d of drops) { if (!d.on || t < d.t) continue; fx.beginPath(); fx.ellipse(d.x, d.y - lift * 0.3, d.r, d.r * 1.25, 0, 0, 7); fx.fill(); }
@@ -565,6 +567,7 @@ function createNibbi(opts) {
     hop() { const t = now(); if (t - hopAt < HOP_D) return; hopAt = t; spawnDroplet(t + 150, -1); spawnDroplet(t + 180, 1); },
     blink() { const t = now(); if (t - blinkAt > BLINK_D) blinkAt = t; },
     spatter(k, spread) { const t = now(); for (let i = 0; i < (k || 1); i++) spawnSpat(t + i * 40, spread); },
+    splash(color, k) { if (reduced) return; const t = now(); for (let i = 0; i < (k || 4); i++) spawnSpat(t + i * 35, 0.9 + rnd() * 0.5, color); api.hop(); },
     drip() { spawnBead(now()); },
     shake() { shakeAt = now(); },
     setFade(v) { fadeT = clamp(v, 0, 1); },

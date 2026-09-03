@@ -57,6 +57,7 @@ fn main() {
     use tauri_plugin_global_shortcut::{Code, Modifiers, ShortcutState};
     ensure_host();
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin({
             use tauri_plugin_window_state::StateFlags;
             tauri_plugin_window_state::Builder::default()

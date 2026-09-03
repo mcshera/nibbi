@@ -16,6 +16,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { networkInterfaces, homedir, hostname } from "node:os";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { appendFileSync, readdirSync } from "node:fs";
 
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.startsWith("--") ? [a.slice(2), arr[i + 1]?.startsWith("--") || arr[i + 1] === undefined ? true : arr[i + 1]] : []).filter(Boolean));
 const PORT = Number(args.port || process.env.NIBBI_PORT || 4527);
@@ -85,6 +86,40 @@ function probeGateway() {
   });
 }
 
+/* ---- event log: the host watches the gateway itself (always on) so the surface never misses a transition ---- */
+const EV_FILE = join(HOME, "nibbi-events.jsonl"), EV_STATE = join(HOME, "nibbi-events-state.json");
+const evClients = new Set(); let evRing = [];
+try { evRing = readFileSync(EV_FILE, "utf8").trim().split("\n").filter(Boolean).slice(-500).map((l) => JSON.parse(l)); } catch { evRing = []; }
+let evState = null; try { evState = JSON.parse(readFileSync(EV_STATE, "utf8")); } catch { evState = null; }
+function gwGet(path) {
+  return new Promise((resolve) => {
+    const req = httpRequest({ host: GATEWAY.hostname, port: GATEWAY.port, path, method: "GET", timeout: 4000 }, (r) => { let b = ""; r.on("data", (c) => (b += c)); r.on("end", () => { try { resolve(r.statusCode === 200 ? JSON.parse(b) : null); } catch { resolve(null); } }); });
+    req.on("error", () => resolve(null)); req.on("timeout", () => { req.destroy(); resolve(null); }); req.end();
+  });
+}
+function emitEvent(ev) {
+  ev.ts = ev.ts || Date.now(); evRing.push(ev); if (evRing.length > 500) evRing.shift();
+  try { mkdirSync(HOME, { recursive: true }); appendFileSync(EV_FILE, JSON.stringify(ev) + "\n"); } catch { /* disk */ }
+  for (const c of evClients) { try { c.write(`event: ${ev.kind}\ndata: ${JSON.stringify(ev)}\n\n`); } catch { evClients.delete(c); } }
+}
+async function pollGateway() {
+  const [fixers, auto] = await Promise.all([gwGet("/api/fixers"), gwGet("/api/auto")]);
+  if (!fixers) return;
+  const cur = { fixers: Object.fromEntries(fixers.map((f) => [f.id, f.status])), auto: Object.fromEntries(Object.entries(auto || {}).map(([p, a]) => [p, { on: !!a.on, mode: a.on ? (a.mode || "stage") : "off" }])) };
+  if (evState) {
+    for (const f of fixers) {
+      const prev = evState.fixers[f.id];
+      if (prev === f.status) continue;
+      if (prev === undefined && !["queued", "installing", "running"].includes(f.status)) continue;
+      emitEvent({ kind: "fixer", id: f.id, project: f.game || f.project, title: f.title || (f.issue || "").slice(0, 60), from: prev || null, to: f.status, costUsd: f.costUsd, model: f.model, diffstat: (f.diffstat || "").trim().split("\n").pop() || "", group: f.group || null });
+    }
+    for (const [p, a] of Object.entries(cur.auto)) { const prev = evState.auto[p]; if (prev && (prev.on !== a.on || prev.mode !== a.mode)) emitEvent({ kind: "auto", project: p, from: prev, to: a }); }
+  }
+  evState = cur;
+  try { writeFileSync(EV_STATE, JSON.stringify(cur)); } catch { /* disk */ }
+}
+setInterval(() => { pollGateway().catch(() => {}); }, 5000); pollGateway().catch(() => {});
+
 /* ---- proxy ---- */
 function proxy(req, res) {
   const opts = { host: GATEWAY.hostname, port: GATEWAY.port, path: req.url, method: req.method, headers: { ...req.headers, host: GATEWAY.host } };
@@ -151,12 +186,98 @@ async function handle(req, res) {
     }
     if (url.pathname === "/nibbi/setup") { html(res, 200, setupPage(req)); return; }
     if (url.pathname === "/nibbi/run" && req.method === "POST") { await runScript(req, res); return; }
+    if (url.pathname === "/nibbi/events") {
+      const since = Number(url.searchParams.get("since") || 0);
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+      res.write(": nibbi events\n\n");
+      for (const ev of evRing) if (ev.ts > since) res.write(`event: ${ev.kind}\ndata: ${JSON.stringify(ev)}\n\n`);
+      res.write(`event: ready\ndata: ${JSON.stringify({ now: Date.now(), replayed: evRing.filter((e) => e.ts > since).length })}\n\n`);
+      evClients.add(res); const ping = setInterval(() => { try { res.write(": ping\n\n"); } catch { /* gone */ } }, 20000);
+      req.on("close", () => { evClients.delete(res); clearInterval(ping); }); return;
+    }
+    if (url.pathname === "/nibbi/git") { // recent commits of a registered project
+      const repo = repoOf(url.searchParams.get("project")); if (!repo) { json(res, 404, { error: "unknown project" }); return; }
+      const n = Math.min(30, Number(url.searchParams.get("n") || 8));
+      try { const out = execFileSync("git", ["-C", repo, "log", "-n", String(n), "--pretty=format:%h%x01%ct%x01%an%x01%s"], { encoding: "utf8", timeout: 5000 });
+        json(res, 200, out.trim().split("\n").filter(Boolean).map((l) => { const [hash, ct, an, s] = l.split("\x01"); return { hash, at: Number(ct) * 1000, author: an, msg: s }; })); }
+      catch (e) { json(res, 500, { error: String(e.message).slice(0, 120) }); } return;
+    }
+    if (url.pathname === "/nibbi/repo") { // a text file from a registered project (README etc.)
+      const repo = repoOf(url.searchParams.get("project")); if (!repo) { json(res, 404, { error: "unknown project" }); return; }
+      const rel = String(url.searchParams.get("path") || "README.md"); const abs = normalize(join(repo, rel));
+      if (!abs.startsWith(repo + "/") || !existsSync(abs) || !statSync(abs).isFile()) { json(res, 404, { error: "no such file" }); return; }
+      const buf = readFileSync(abs); if (buf.length > 200_000 || buf.includes(0)) { json(res, 413, { error: "not a small text file" }); return; }
+      json(res, 200, { path: rel, content: buf.toString("utf8") }); return;
+    }
+    if (url.pathname === "/nibbi/scaffold" && req.method === "POST") { await scaffold(req, res); return; }
+    if (url.pathname === "/nibbi/vault-write" && req.method === "POST") { // creates folders; never protected files; logs the write
+      const p = await readJson(req); const VAULT = join(homedir(), "OracleVault"); const rel = String(p.path || ""); const abs = normalize(join(VAULT, rel));
+      if (!rel || typeof p.content !== "string" || !abs.startsWith(VAULT + "/")) { json(res, 400, { error: "path (inside the vault) + content required" }); return; }
+      if (/(^|\/)(SOUL|AGENTS)\.md$/.test(abs)) { json(res, 403, { error: "protected — SOUL/AGENTS change via proposals" }); return; }
+      try { mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs + ".tmp", p.content); execFileSync("mv", ["-f", abs + ".tmp", abs]); if (p.log) appendFileSync(join(VAULT, "log.md"), `\n## [${new Date().toISOString().slice(0, 16).replace("T", " ")}] ${String(p.log).replace(/\n/g, " ").slice(0, 300)}\n`); json(res, 200, { ok: true, path: rel }); }
+      catch (e) { json(res, 500, { error: String(e.message).slice(0, 160) }); } return;
+    }
+    if (url.pathname === "/nibbi/shot" && req.method === "POST") { await shot(req, res); return; }
+    if (url.pathname === "/nibbi/artifact") { const f = String(url.searchParams.get("f") || "").replace(/[^a-zA-Z0-9._-]/g, ""); const p = join(HOME, "artifacts", f); if (!f || !existsSync(p)) { json(res, 404, { error: "no artifact" }); return; } res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=300" }); res.end(readFileSync(p)); return; }
     if (url.pathname === "/nibbi/ca.crt") { serveCa(res); return; }
     if (url.pathname.startsWith("/api/")) { proxy(req, res); return; }
     if (req.method !== "GET" && req.method !== "HEAD") { json(res, 405, { error: "method" }); return; }
     serveStatic(req, res);
   } catch (e) { if (!res.headersSent) json(res, 500, { error: String(e.message || e).slice(0, 200) }); }
 }
+function repoOf(project) { try { const r = JSON.parse(readFileSync(join(HOME, "games.json"), "utf8"))[String(project || "")]?.repo; return r && existsSync(r) ? r : null; } catch { return null; } }
+const sse = (res) => { res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" }); return (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); };
+async function readJson(req) { let b = ""; for await (const c of req) b += c; try { return JSON.parse(b || "{}"); } catch { return {}; } }
+
+/* scaffold a freshly created project: web (vite, dev/build/deploy scripts) or game (rules/design docs) */
+const WEB_FILES = (name) => ({
+  "package.json": JSON.stringify({ name: name.toLowerCase().replace(/[^a-z0-9-]+/g, "-"), private: true, version: "0.1.0", type: "module", scripts: { dev: "vite", build: "vite build", preview: "vite preview", deploy: "echo 'add your deploy command here (rsync, netlify, gh-pages…)' && exit 1" }, devDependencies: { vite: "^6" } }, null, 2) + "\n",
+  "index.html": `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>${name}</title>\n<link rel="stylesheet" href="/src/styles.css">\n</head>\n<body>\n  <main>\n    <h1>${name}</h1>\n    <p>Started with Nibbi. Edit <code>src/main.js</code> and <code>src/styles.css</code>.</p>\n  </main>\n  <script type="module" src="/src/main.js"></script>\n</body>\n</html>\n`,
+  "src/main.js": `console.log('${name} — hello');\n`,
+  "src/styles.css": `:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }\nbody { margin: 0; display: grid; place-items: center; min-height: 100vh; }\nmain { max-width: 40rem; padding: 2rem; }\n`,
+  ".gitignore": "node_modules/\ndist/\n.DS_Store\n",
+});
+const GAME_FILES = (name) => ({
+  "design.md": `# ${name} — design\n\n**Pitch:** (one sentence)\n\n## Pillars\n1. \n2. \n3. \n\n## Core loop\n\n## Components\n\n## Open questions\n`,
+  "rules.md": `# ${name} — rules\n\n## Setup\n\n## Turn\n\n## Winning\n`,
+  "package.json": JSON.stringify({ name: name.toLowerCase().replace(/[^a-z0-9-]+/g, "-"), private: true, version: "0.1.0", type: "module", scripts: { test: "node --test tests/", sim: "node src/sim.js" } }, null, 2) + "\n",
+  "src/sim.js": `// ${name} — simulation entry point (balance sims live here)\nconsole.log('${name} sim: nothing to simulate yet');\n`,
+  "tests/rules.test.js": `import { test } from 'node:test';\nimport assert from 'node:assert/strict';\ntest('rules load', () => { assert.ok(true); });\n`,
+  ".gitignore": "node_modules/\n.DS_Store\n",
+});
+async function scaffold(req, res) {
+  const p = await readJson(req); const project = String(p.project || ""), template = String(p.template || "web"), name = String(p.name || project);
+  const repo = repoOf(project); if (!repo) { json(res, 404, { error: `unknown project '${project}'` }); return; }
+  const entries = readdirSyncSafe(repo).filter((e) => ![".git", "README.md", ".gitignore", ".DS_Store"].includes(e));
+  if (entries.length) { json(res, 409, { error: "repo is not empty — scaffold only into a fresh project", entries }); return; }
+  const files = template === "game" ? GAME_FILES(name) : WEB_FILES(name);
+  for (const [rel, content] of Object.entries(files)) { const abs = join(repo, rel); mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs, content); }
+  const send = sse(res); send("start", { template, files: Object.keys(files) });
+  const finish = (code) => { try { execFileSync("git", ["-C", repo, "add", "-A"], { timeout: 5000 }); execFileSync("git", ["-C", repo, "-c", "user.name=Nibbi", "-c", "user.email=nibbi@local", "commit", "-q", "-m", `scaffold: ${template} template (via Nibbi)`], { timeout: 10000 }); } catch { /* nothing to commit */ } send("done", { code }); res.end(); };
+  if (template !== "web") { finish(0); return; }
+  const child = spawn("npm", ["install", "--no-audit", "--no-fund"], { cwd: repo, env: { ...process.env, CI: "true" }, stdio: ["ignore", "pipe", "pipe"] });
+  const onData = (buf) => { for (const line of String(buf).split(/\r?\n/)) if (line.trim()) send("line", { t: line.slice(0, 300) }); };
+  child.stdout.on("data", onData); child.stderr.on("data", onData);
+  const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } send("line", { t: "(npm install timed out)" }); }, 6 * 60_000);
+  child.on("close", (code) => { clearTimeout(timer); finish(code); });
+}
+function readdirSyncSafe(p) { try { return readdirSync(p); } catch { return []; } }
+
+/* screenshot a URL with playwright-core (if available) into ~/.oracle/artifacts — used after /preview */
+async function shot(req, res) {
+  const p = await readJson(req); const target = String(p.url || ""), name = String(p.name || "shot").replace(/[^a-zA-Z0-9._-]/g, "") || "shot";
+  if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(target)) { json(res, 400, { error: "local http(s) URLs only" }); return; }
+  const pw = process.env.NIBBI_PLAYWRIGHT || "/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs";
+  if (!existsSync(pw)) { json(res, 501, { error: "playwright-core not found — set NIBBI_PLAYWRIGHT" }); return; }
+  try {
+    const { chromium } = await import(pw);
+    const b = await chromium.launch({ channel: "chrome" }); const pg = await b.newPage({ viewport: { width: 1280, height: 800 } });
+    await pg.goto(target, { waitUntil: "load", timeout: 20000 }); await pg.waitForTimeout(1200);
+    mkdirSync(join(HOME, "artifacts"), { recursive: true }); const file = `${name}-${Date.now()}.png`; await pg.screenshot({ path: join(HOME, "artifacts", file) }); await b.close();
+    json(res, 200, { file, url: `/nibbi/artifact?f=${file}` });
+  } catch (e) { json(res, 500, { error: String(e.message).slice(0, 160) }); }
+}
+
 /* run a project's OWN npm script (deploy/build/test) with a live log — the project defines what "deploy" means */
 const RUNNABLE = new Set(["deploy", "build", "test"]);
 async function runScript(req, res) {

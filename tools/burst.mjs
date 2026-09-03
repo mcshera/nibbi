@@ -1,7 +1,10 @@
 
-import { chromium } from '/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs';
+import { existsSync } from 'node:fs';
+const PW = process.env.NIBBI_PLAYWRIGHT || (existsSync(new URL('../node_modules/playwright-core/index.mjs', import.meta.url)) ? new URL('../node_modules/playwright-core/index.mjs', import.meta.url).pathname : '/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs');
+const { chromium } = await import(PW);
+const CHANNEL = process.env.CI ? undefined : 'chrome';
 const [,, url, out, times, msg] = process.argv;
-const b = await chromium.launch({ channel: 'chrome', args: ['--use-angle=metal', '--ignore-gpu-blocklist'] });
+const b = await chromium.launch({ channel: CHANNEL, args: ['--use-angle=metal', '--ignore-gpu-blocklist'] });
 const pg = await b.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
 const errs = []; pg.on('pageerror', (e) => errs.push(e.message.slice(0, 200)));
 await pg.goto(url, { waitUntil: 'load' }); await pg.waitForTimeout(1500);

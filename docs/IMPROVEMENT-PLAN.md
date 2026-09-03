@@ -84,6 +84,8 @@
 - `»acts:` line in the system prompt (vault proposal; no code change needed).
 - A `deploy` action per project so `/deploy` can run where the project's own script can't.
 
+## Status (2026-09-03, v0.6): A–H shipped in one sitting; I.1 replaced by the host's own poll + SSE, I.2 adopted as SOUL policy 5, I.3 covered by `/deploy` running project scripts.
+
 ## Sequence (three sittings)
 1. **Sitting 1 — meaning & memory**: A (`»acts:` proposal + rendering, regex fallback), B (host event log + SSE + exact away
    bubble), E timestamps/code caps. *Result:* chips make sense; nothing is missed.

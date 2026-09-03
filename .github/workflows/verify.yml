@@ -1,0 +1,13 @@
+name: verify
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test tests/*.test.mjs
+      - run: npm i --no-save playwright-core && npx playwright-core install --with-deps chromium
+      - run: node server.mjs & sleep 1
+      - run: CI=1 node tools/verify.mjs "http://127.0.0.1:4527"
