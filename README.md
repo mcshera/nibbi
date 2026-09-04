@@ -1,44 +1,57 @@
 # Nibbi
 
-Oracle's new face. The whole app is a little ink-blot character on a sheet of paper and one line to talk to it.
-Nibbi talks back (streamed text under the character, optional Kokoro voice), and shows its work in the chat while it
-happens — every tool Oracle touches becomes a live step row that folds away when the reply lands.
+**An always-on build partner with a face.** Nibbi is a little ink-blot character on a sheet of paper and one line to talk
+to it. It runs on your Mac, remembers your projects in a plain-markdown vault, dispatches fixer agents into isolated git
+worktrees, tests and merges their work, and shows everything it does — in the chat, as it happens.
 
-Nothing is on screen unless it's needed. Idle: the character and the pill. Focus the pill: the mic and a few
-contextual suggestions appear. Send something: Nibbi springs to the top and the conversation flows under it,
-newest first. Errors: Nibbi flinches, flattens, and offers the fix. Escape (or double-click Nibbi) tidies the table.
+<p align="center"><img src="docs/hero.png" width="720" alt="Nibbi idle: the character and the pill"></p>
 
-```
-~/Documents/Nibbi
-  server.mjs          zero-dep host: serves ./public, proxies /api/* to the Oracle gateway (127.0.0.1:4519)
-  public/
-    index.html        one pill, one feed, two canvases
-    nibbi.js          the character: WebGL SDF ink body + 2D eyes/spatter/droplets + mood state machine
-    app.js            layout modes, SSE turn choreography, progress rows, contextual chips, voice in/out, demo brain
-    styles.css        paper, pill, feed, chips (single easing curve; 120/220/420 ms tiers)
-  tools/              shot.mjs (screenshot + DOM probe) · verify.mjs (scenario suite → .shots/)
-  desktop/            Tauri v2 shell → Nibbi.app (tray, ⌥ Space, window-state, auto-starts the host)
-  launchd/            com.nibbi.host.plist (keep the host alive at login) + install script
-```
+- **Talk** (type or voice) → Nibbi answers as itself; every tool it touches is a step row that folds away.
+- **Build**: `/new <name> web|game` scaffolds a project · `/fix <issue>` dispatches a fixer · `/diff` `/review` `approve & merge`.
+- **Let it run**: `/goal finish M9` — auto mode dispatches, tests and merges toward the goal; a watchdog unsticks it;
+  landings arrive as bubbles (and macOS notifications).
+- **Remember**: a git-versioned vault (`~/NibbiVault`) holds plans, issues, journal — readable in any editor or Obsidian.
+- **Play**: `/play <project>` launches a project's dev server and opens it.
 
-## Run
+Brains: **Claude** through your own Claude Code login (Max/Pro) — no API keys on disk. Voice (optional, Apple Silicon):
+Kokoro TTS + whisper STT, local.
+
+## Install (macOS)
+
+Requirements: macOS 13+, [Node 22+](https://nodejs.org), git (`xcode-select --install`), a Claude Max/Pro account.
 
 ```bash
-cd ~/Documents/Nibbi
-npm start                       # host on http://127.0.0.1:4527 and opens it (needs node ≥ 20)
-# or
-node server.mjs --port 4527 --gateway http://127.0.0.1:4519
+git clone https://github.com/mcshera/nibbi.git ~/Nibbi-app && cd ~/Nibbi-app
+bash install.sh              # add --voice for local speech (Apple Silicon), --no-app to use the browser instead
+claude                        # once: log in to Claude Code if you haven't (Nibbi's brain uses that login)
 ```
 
-The brain is the existing Oracle gateway (`com.nibbi.gateway`, port 4519). If it's down, Nibbi says so
-(status dot → “gateway offline”) and can fall back to a scripted **demo brain** (`?demo=1`, or the status menu)
-so the choreography can be seen anywhere. Restart the gateway with
-`launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway`.
+`install.sh` creates `~/.nibbi` (state), `~/NibbiVault` (your brain, git), `~/NibbiWork` (fixer worktrees),
+`~/NibbiProjects`, installs the daemon's dependencies, registers two background services (`com.nibbi.gateway` — the
+brain on :4519, `com.nibbi.host` — the app host on :4527), and installs **Nibbi.app** from the latest release. Re-run it
+any time; `bash uninstall.sh` removes services and app but keeps your vault and projects. Health: `~/.nibbi/bin/nibbi-doctor`.
 
-Keep the host alive across logins: `sh launchd/install.sh` (installs `com.nibbi.host`, KeepAlive).
+The app is ad-hoc signed (no Apple developer certificate yet): if macOS says it "cannot be opened", right-click →
+Open once, or use the browser at `http://127.0.0.1:4527`.
 
-Desktop app: `cd desktop && npm i && npx tauri build` → `src-tauri/target/release/bundle/macos/Nibbi.app`
-(copy to `~/Applications`). The app starts the host itself if nothing is listening on 4527.
+## Anatomy
+
+```
+install.sh · uninstall.sh   one-command setup on a fresh Mac (idempotent)
+server.mjs                  zero-dep app host: serves public/, proxies /api/* → daemon, event log + SSE, goals, watchdog
+public/                     the surface: nibbi.js (character engine), app.js (chat, build loop, agents, voice), styles.css
+daemon/                     the brain: Claude Agent SDK session, vault memory, fixers (worktrees + merge gate), auto mode, crons
+vault-template/             SOUL / AGENTS / MEMORY / HEARTBEAT stubs your vault starts from
+launchd/templates/          background services (rendered with your paths by install.sh)
+desktop/                    Tauri v2 shell → Nibbi.app (tray, ⌥Space, notifications, Dock badge)
+site/                       nibbi.com (Cloudflare Pages)
+tools/ · tests/             scenario screenshots + unit tests (`npm test`)
+docs/                       plans, chat plan, fresh-install test protocol
+```
+
+## How to test a fresh install
+See `docs/FRESH-INSTALL.md` — the checklist for a second Mac (or a new macOS user account), what "good" looks like at
+each step, and how to reset and try again.
 
 ## On your phone (parked)
 

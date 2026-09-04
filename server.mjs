@@ -402,8 +402,9 @@ function readdirSyncSafe(p) { try { return readdirSync(p); } catch { return []; 
 async function shot(req, res) {
   const p = await readJson(req); const target = String(p.url || ""), name = String(p.name || "shot").replace(/[^a-zA-Z0-9._-]/g, "") || "shot";
   if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(target)) { json(res, 400, { error: "local http(s) URLs only" }); return; }
-  const pw = process.env.NIBBI_PLAYWRIGHT || "/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs";
-  if (!existsSync(pw)) { json(res, 501, { error: "playwright-core not found — set NIBBI_PLAYWRIGHT" }); return; }
+  const local = join(dirname(fileURLToPath(import.meta.url)), "node_modules", "playwright-core", "index.mjs");
+  const pw = process.env.NIBBI_PLAYWRIGHT || local;
+  if (!existsSync(pw)) { json(res, 501, { error: "playwright-core not found — npm i -D playwright-core (or set NIBBI_PLAYWRIGHT)" }); return; }
   try {
     const { chromium } = await import(pw);
     const b = await chromium.launch({ channel: "chrome" }); const pg = await b.newPage({ viewport: { width: 1280, height: 800 } });

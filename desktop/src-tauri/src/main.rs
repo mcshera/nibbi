@@ -11,7 +11,6 @@ use tauri::{
 };
 
 const PORT: u16 = 4527;
-const NIBBI_HOME: &str = "/Users/Matty/Documents/Nibbi";
 
 fn host_up() -> bool {
     let addr: SocketAddr = ([127, 0, 0, 1], PORT).into();
@@ -23,15 +22,25 @@ fn ensure_host() {
     if host_up() {
         return;
     }
-    let home = std::env::var("NIBBI_HOME").unwrap_or_else(|_| NIBBI_HOME.to_string());
-    let server = format!("{home}/server.mjs");
+    // where is the host? install.sh writes ~/.nibbi/host.json {"path": ".../server.mjs", "node": ".../node"}; env NIBBI_HOME overrides
+    let user_home = std::env::var("HOME").unwrap_or_default();
+    let mut server = String::new();
+    let mut node_hint = String::new();
+    if let Ok(txt) = std::fs::read_to_string(format!("{user_home}/.nibbi/host.json")) {
+        if let Some(p) = txt.split("\"path\":\"").nth(1).and_then(|s| s.split('"').next()) { server = p.to_string(); }
+        if let Some(n) = txt.split("\"node\":\"").nth(1).and_then(|s| s.split('"').next()) { node_hint = n.to_string(); }
+    }
+    if let Ok(h) = std::env::var("NIBBI_HOME") { server = format!("{h}/server.mjs"); }
+    if server.is_empty() { server = format!("{user_home}/Documents/Nibbi/server.mjs"); }
+    let home = std::path::Path::new(&server).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     let candidates = [
+        node_hint,
         "node".to_string(),
         "/opt/homebrew/bin/node".to_string(),
         "/usr/local/bin/node".to_string(),
         format!("{}/.local/node/node-v22.14.0-darwin-arm64/bin/node", std::env::var("HOME").unwrap_or_default()),
     ];
-    for node in candidates.iter() {
+    for node in candidates.iter().filter(|n| !n.is_empty()) {
         let spawned = Command::new(node)
             .arg(&server)
             .arg("--port")

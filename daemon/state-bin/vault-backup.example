@@ -1,0 +1,13 @@
+#!/bin/bash
+# vault-backup — encrypted offsite backup of the Nibbi brain. Runs nightly + on demand.
+set -euo pipefail
+VAULT="$HOME/NibbiVault"
+STAMP=$(date +%F)
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+KEY=$(security find-generic-password -s oracle-backup -a key -w)
+git -C "$VAULT" bundle create "$TMP/vault.bundle" --all --quiet
+openssl enc -aes-256-cbc -pbkdf2 -salt -pass "pass:$KEY" -in "$TMP/vault.bundle" -out "$TMP/vault-$STAMP.bundle.enc"
+scp -q -o BatchMode=yes -o ConnectTimeout=10 "$TMP/vault-$STAMP.bundle.enc" root@YOUR_SERVER:/root/oracle-backups/
+ssh -o BatchMode=yes root@YOUR_SERVER "cd /root/oracle-backups && ls -t vault-*.bundle.enc | tail -n +15 | xargs -r rm --"
+echo "backup ok: vault-$STAMP.bundle.enc ($(du -h "$TMP/vault-$STAMP.bundle.enc" | cut -f1 | tr -d ' '))"

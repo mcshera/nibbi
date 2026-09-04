@@ -1,7 +1,9 @@
 // tools/shot.mjs — headless screenshot + DOM probe for the Nibbi surface.
 // usage: node tools/shot.mjs <url> <out.png> [--w 1440 --h 1000 --wait 1500 --demo "message" --probe]
 import { existsSync } from 'node:fs';
-const PW = process.env.NIBBI_PLAYWRIGHT || (existsSync(new URL('../node_modules/playwright-core/index.mjs', import.meta.url)) ? new URL('../node_modules/playwright-core/index.mjs', import.meta.url).pathname : '/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs');
+const LOCAL = new URL('../node_modules/playwright-core/index.mjs', import.meta.url).pathname;
+const PW = process.env.NIBBI_PLAYWRIGHT || (existsSync(LOCAL) ? LOCAL : null);
+if (!PW) { console.error('playwright-core not found — run: npm i -D playwright-core  (or set NIBBI_PLAYWRIGHT to its index.mjs)'); process.exit(2); }
 const { chromium } = await import(PW);
 const CHANNEL = process.env.CI ? undefined : 'chrome';
 const argv = process.argv.slice(2);

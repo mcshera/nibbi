@@ -1,0 +1,19 @@
+#!/bin/bash
+# tts-kokoro "<text>" -> prints path to ogg. Hot kokoro-server (127.0.0.1:4521) first; cold mlx fallback.
+set -euo pipefail
+TEXT="$1"
+P=$(curl -s -m 45 --get --data-urlencode "text=$TEXT" --data-urlencode "path=1" "http://127.0.0.1:4521/synth" 2>/dev/null || true)
+[ -n "$P" ] && [ -f "$P" ] && { echo "$P"; exit 0; }
+# fallback: cold one-shot
+CACHE="$HOME/.nibbi/tts-cache"; mkdir -p "$CACHE"
+KEY=$(printf %s "$TEXT" | shasum | cut -c1-16)
+OGG="$CACHE/$KEY.ogg"
+[ -f "$OGG" ] && { echo "$OGG"; exit 0; }
+export VIRTUAL_ENV="$HOME/.nibbi/venv" PATH="$HOME/.nibbi/bin:$HOME/.nibbi/venv/bin:$PATH"
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+cd "$TMP"
+"$HOME/.nibbi/venv/bin/python" -m mlx_audio.tts.generate --model prince-canuma/Kokoro-82M \
+  --text "$TEXT" --voice af_heart --file_prefix out >/dev/null 2>&1
+WAV=$(ls out*.wav | head -1)
+"$HOME/.nibbi/bin/ffmpeg" -y -i "$WAV" -c:a libopus -b:a 48k -ar 48000 "$OGG" >/dev/null 2>&1
+echo "$OGG"

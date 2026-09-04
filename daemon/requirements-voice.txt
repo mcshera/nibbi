@@ -1,0 +1,3 @@
+mlx-whisper
+mlx-audio
+imageio-ffmpeg

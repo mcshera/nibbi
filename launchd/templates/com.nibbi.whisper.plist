@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.nibbi.whisper</string>
+  <key>ProgramArguments</key><array>
+    <string>__HOME__/.nibbi/venv/bin/python</string>
+    <string>__HOME__/.nibbi/bin/whisper-server.py</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>__HOME__/.nibbi/logs/whisper-server.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/.nibbi/logs/whisper-server.log</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>VIRTUAL_ENV</key><string>__HOME__/.nibbi/venv</string>
+    <key>PATH</key><string>__HOME__/.nibbi/venv/bin:__HOME__/.nibbi/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key><string>__HOME__</string>
+  </dict>
+</dict></plist>

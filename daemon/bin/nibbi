@@ -1,0 +1,3 @@
+#!/bin/bash
+APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$APP/node_modules/.bin/tsx" "$APP/src/gateway.ts" "$@"

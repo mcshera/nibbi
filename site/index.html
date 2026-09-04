@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nibbi — an always-on build partner with a face</title>
+<meta name="description" content="Nibbi is a little ink-blot character that builds games and web projects with you: it remembers in a plain-markdown vault, dispatches fixers, tests and merges — and shows its work as it happens. Runs on your Mac with your Claude login.">
+<meta property="og:title" content="Nibbi"><meta property="og:description" content="An always-on build partner with a face. Open source, runs on your Mac."><meta property="og:image" content="https://nibbi.com/og.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+:root{--paper:#f5f2ec;--ink:#151413;--ink-2:#3a3835;--ink-3:#6f6b65;--line:rgba(21,20,19,.10)}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 Geist,ui-sans-serif,-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+canvas{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;pointer-events:none}
+main{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:56vh 24px 80px;text-align:center}
+h1{font-size:44px;line-height:1.1;margin:0 0 12px;letter-spacing:-.01em}
+.sub{font-size:19px;color:var(--ink-2);margin:0 auto 28px;max-width:600px}
+.cta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:14px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;border:1px solid var(--line);background:rgba(250,248,243,.86);color:var(--ink);text-decoration:none;font-weight:600;box-shadow:0 1px 0 rgba(255,255,255,.7) inset,0 12px 34px -18px rgba(21,20,19,.28)}
+.btn.primary{background:var(--ink);color:#f5f2ec;border-color:transparent}
+.btn:hover{transform:translateY(-1px)}
+code,pre{font:14px/1.5 "Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{display:inline-block;text-align:left;margin:8px auto 0;padding:12px 16px;border-radius:14px;background:rgba(21,20,19,.06);color:var(--ink-2);white-space:pre-wrap;word-break:break-word;max-width:100%}
+.req{font-size:13.5px;color:var(--ink-3);margin-top:10px}
+section{margin-top:64px;text-align:left}
+section h2{font-size:15px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin:0 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.card{padding:16px 18px;border-radius:18px;background:rgba(255,255,255,.55);border:1px solid var(--line)}
+.card b{display:block;margin-bottom:4px}.card p{margin:0;color:var(--ink-2);font-size:15px}
+footer{margin-top:64px;font-size:13px;color:var(--ink-3);text-align:center}
+footer a{color:var(--ink-3)}
+@media (max-width:640px){main{padding-top:50vh}h1{font-size:34px}}
+</style>
+</head>
+<body>
+<canvas id="ink" aria-hidden="true"></canvas><canvas id="fx" aria-hidden="true"></canvas>
+<main>
+  <h1>Meet nibbi.</h1>
+  <p class="sub">An always-on build partner with a face. It remembers your projects, dispatches fixers, tests and merges — and shows its work while it happens. Open source, runs on your Mac with your own Claude login.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/mcshera/nibbi/releases/latest/download/Nibbi.app.zip">Download for Mac</a>
+    <a class="btn" href="https://github.com/mcshera/nibbi">View on GitHub</a>
+  </div>
+  <pre>curl -fsSL https://nibbi.com/install.sh | bash</pre>
+  <p class="req">macOS 13+ · Node 22+ · a Claude Max/Pro account · voice is optional (Apple Silicon)</p>
+
+  <section><h2>what it does</h2><div class="grid">
+    <div class="card"><b>Talk, type or speak</b><p>Replies are carried by a small ink-blot version of Nibbi; every tool it touches is a step row that folds away.</p></div>
+    <div class="card"><b>Fixers you can watch</b><p><code>/fix</code> dispatches an agent into its own git worktree. It perches on the text box while it works; <code>/diff</code>, <code>/review</code>, approve — or let ship mode merge it.</p></div>
+    <div class="card"><b>Goals that run</b><p><code>/goal finish M9</code> turns words into a milestone and keeps the loop going — dispatch, test, merge, repeat — with a watchdog that unsticks it.</p></div>
+    <div class="card"><b>A memory you can read</b><p>A git-versioned markdown vault: plans as checkboxes, issues from playtests, a journal. Open it in Obsidian.</p></div>
+    <div class="card"><b>Projects as places</b><p><code>/new hello web</code> scaffolds and installs; <code>/play</code> opens the dev server; the top-left shows where you are.</p></div>
+    <div class="card"><b>Yours</b><p>No API keys on disk, nothing leaves your Mac except Claude calls through your login. The brain's shell is allowlisted; nothing merges without a gate.</p></div>
+  </div></section>
+
+  <section><h2>install</h2>
+    <pre>git clone https://github.com/mcshera/nibbi.git ~/Nibbi-app &amp;&amp; cd ~/Nibbi-app
+bash install.sh          # --voice for local speech · --no-app for the browser
+claude                    # log in once; Nibbi's brain uses that login</pre>
+    <p class="req">Creates <code>~/.nibbi</code>, <code>~/NibbiVault</code>, two background services, and installs Nibbi.app. <a href="https://github.com/mcshera/nibbi/blob/main/docs/FRESH-INSTALL.md">First-install checklist →</a></p>
+  </section>
+  <footer>Nibbi is made by <a href="https://github.com/mcshera">Matthew Shera</a>. MIT licensed. <a href="https://github.com/mcshera/nibbi/issues">Issues</a></footer>
+</main>
+<script src="nibbi.js"></script>
+<script>
+(() => {
+  const n = createNibbi({ ink: document.getElementById('ink'), fx: document.getElementById('fx') });
+  document.body.style.backgroundImage = 'url(' + n.paperDataURL() + ')';
+  const place = () => { const W = innerWidth, H = innerHeight; n.setTarget({ x: W / 2, y: Math.min(H * 0.3, 260), r: Math.max(64, Math.min(140, Math.min(W, H) * 0.15)) }); };
+  place(); addEventListener('resize', place); n.snapTarget({ x: innerWidth / 2, y: Math.min(innerHeight * 0.3, 260), r: Math.max(64, Math.min(140, Math.min(innerWidth, innerHeight) * 0.15)) });
+  addEventListener('pointermove', (e) => n.pointer(e.clientX, e.clientY), { passive: true });
+  addEventListener('scroll', () => { const y = scrollY; n.setFade(Math.max(0.15, 1 - y / 500)); }, { passive: true });
+  document.querySelectorAll('.btn').forEach((b) => { b.addEventListener('pointerenter', () => { const r = b.getBoundingClientRect(); n.lookAt(r.left + r.width / 2, r.top); }); b.addEventListener('pointerleave', () => n.lookFree()); b.addEventListener('click', () => n.setMood('happy')); });
+})();
+</script>
+</body>
+</html>

@@ -1,7 +1,9 @@
 // tools/verify.mjs — scenario screenshots + probe for the Nibbi surface. Writes .shots/v-*.png and prints a JSON summary.
 // usage: node tools/verify.mjs [base=http://127.0.0.1:4527]
 import { existsSync } from 'node:fs';
-const PW = process.env.NIBBI_PLAYWRIGHT || (existsSync(new URL('../node_modules/playwright-core/index.mjs', import.meta.url)) ? new URL('../node_modules/playwright-core/index.mjs', import.meta.url).pathname : '/Users/Matty/Documents/Board Game Test/node_modules/playwright-core/index.mjs');
+const LOCAL = new URL('../node_modules/playwright-core/index.mjs', import.meta.url).pathname;
+const PW = process.env.NIBBI_PLAYWRIGHT || (existsSync(LOCAL) ? LOCAL : null);
+if (!PW) { console.error('playwright-core not found — run: npm i -D playwright-core  (or set NIBBI_PLAYWRIGHT to its index.mjs)'); process.exit(2); }
 const { chromium } = await import(PW);
 const CHANNEL = process.env.CI ? undefined : 'chrome';
 const base = process.argv[2] || 'http://127.0.0.1:4527';

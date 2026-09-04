@@ -19,3 +19,7 @@
 ## 0.6.2 — 2026-09-04
 - The whole system is Nibbi: daemon at `~/Nibbi`, vault `~/NibbiVault`, state `~/.nibbi`, services `com.nibbi.*` (old paths are symlinks). Telegram removed; daemon notes (briefs, reports, auto events) stream into the app.
 - Watchdog backs off and stops when the brain says its tooling is down; one-tap gateway restart.
+
+## 0.7.0 — 2026-09-04
+- Public release layout: `install.sh` / `uninstall.sh` for a fresh Mac, the daemon vendored in `daemon/` (sync script), vault template, launchd templates, `docs/FRESH-INSTALL.md`, nibbi.com site (Cloudflare Pages) with `curl | bash` bootstrap.
+- Desktop shell finds the host via `~/.nibbi/host.json`; no machine-specific paths left in code.

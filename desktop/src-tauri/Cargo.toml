@@ -1,6 +1,6 @@
 [package]
 name = "nibbi-desktop"
-version = "0.6.0"
+version = "0.7.0"
 description = "Nibbi — Oracle's face on the table"
 edition = "2021"
 

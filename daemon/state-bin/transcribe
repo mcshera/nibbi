@@ -1,0 +1,15 @@
+#!/bin/bash
+# transcribe <audiofile> [fast] — STT via hot whisper-server; cold mlx fallback
+set -euo pipefail
+F="$1"; Q=""
+[ "${2:-}" = "fast" ] && Q="?fast=1"
+R=$(curl -s -m 60 -X POST --data-binary @"$F" "http://127.0.0.1:4522/stt$Q" 2>/dev/null || true)
+if [ -n "$R" ]; then
+  python3 -c "import json,sys; print(json.loads(sys.stdin.read())['heard'])" <<<"$R" 2>/dev/null && exit 0
+fi
+export PATH="$HOME/.nibbi/bin:$PATH"
+exec "$HOME/.nibbi/venv/bin/python" - "$F" <<'PY'
+import sys, mlx_whisper
+r = mlx_whisper.transcribe(sys.argv[1], path_or_hf_repo="mlx-community/whisper-large-v3-turbo")
+print(r["text"].strip())
+PY

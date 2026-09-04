@@ -1,0 +1,27 @@
+#!/bin/bash
+# nibbi-doctor — flagship "it just works" diagnostics
+G="\033[32m✓\033[0m"; B="\033[31m✗\033[0m"; Y="\033[33m•\033[0m"
+ok(){ printf "$G %s\n" "$1"; }; bad(){ printf "$B %s\n" "$1"; }; note(){ printf "$Y %s\n" "$1"; }
+
+curl -s -m 2 http://127.0.0.1:4519/api/status >/dev/null && ok "gateway :4519" || bad "gateway :4519 — launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway"
+curl -s -m 2 http://127.0.0.1:4521/health >/dev/null && ok "kokoro voice :4521" || bad "kokoro :4521 — launchctl kickstart -k gui/$(id -u)/com.nibbi.kokoro"
+curl -s -m 2 http://127.0.0.1:4522/health >/dev/null && ok "whisper ears :4522" || bad "whisper :4522 — launchctl kickstart -k gui/$(id -u)/com.nibbi.whisper"
+
+S=$(curl -s -m 2 http://127.0.0.1:4519/api/status 2>/dev/null)
+[ -n "$S" ] && note "$(python3 -c "import json,sys;s=json.loads(sys.stdin.read());print(f'session {s.get(\"sessionShort\")} · {s.get(\"turns\")} turns · \${s.get(\"costUsdTotal\",0):.2f} · up {s.get(\"uptimeSec\",0)//60}m')" <<<"$S")"
+
+if [ -f ~/.nibbi/turn.lock ]; then
+  AGE=$(( $(date +%s) - $(stat -f %m ~/.nibbi/turn.lock) ))
+  [ $AGE -gt 900 ] && bad "turn.lock STALE (${AGE}s) — rm ~/.nibbi/turn.lock" || note "turn in flight (${AGE}s)"
+else ok "turn lock clear"; fi
+
+for f in fonts/GeistVF.woff2 vendor/marked.js app.js; do
+  curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:4519/$f" | grep -q 200 && ok "serves /$f" || bad "missing /$f"
+done
+
+N=$(ls ~/.nibbi/tts-cache 2>/dev/null | wc -l | tr -d " ")
+MB=$(du -sm ~/.nibbi/tts-cache 2>/dev/null | cut -f1)
+note "tts cache: $N clips, ${MB}MB"
+df -h / | awk 'NR==2{print "  disk free: "$4}'
+pgrep -f "Nibbi.app" >/dev/null && ok "desktop app running" || note "desktop app not running — open ~/Applications/Nibbi.app"
+osascript -e 'tell application "System Events" to get name of every login item' 2>/dev/null | grep -q Nibbi && ok "login item" || note "no login item"
