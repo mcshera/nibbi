@@ -13,7 +13,8 @@
     "deploy": "cd desktop && npm i --no-audit --no-fund && npx tauri build && rm -rf \"$HOME/Applications/Nibbi.app\" && cp -R \"${CARGO_TARGET_DIR:-src-tauri/target}/release/bundle/macos/Nibbi.app\" \"$HOME/Applications/Nibbi.app\" && echo \"Nibbi.app installed\"",
     "test:unit": "node --test tests/*.test.mjs",
     "sync:daemon": "scripts/sync-daemon.sh",
-    "release:app": "cd \"${CARGO_TARGET_DIR:-desktop/src-tauri/target}/release/bundle/macos\" && rm -f Nibbi.app.zip && ditto -c -k --keepParent Nibbi.app Nibbi.app.zip && echo \"$(pwd)/Nibbi.app.zip\""
+    "release:app": "cd \"${CARGO_TARGET_DIR:-desktop/src-tauri/target}/release/bundle/macos\" && rm -f Nibbi.app.zip && ditto -c -k --keepParent Nibbi.app Nibbi.app.zip && echo \"$(pwd)/Nibbi.app.zip\"",
+    "test:fresh": "scripts/fresh-test.sh"
   },
   "engines": {
     "node": ">=20"

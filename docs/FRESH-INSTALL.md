@@ -2,6 +2,11 @@
 
 *Use this on a second Mac (best) or a brand-new macOS user account on this one. The point is to see what a stranger sees.*
 
+## Rehearse first (on your main Mac, 2 minutes)
+`npm run test:fresh` clones the committed tree into a throwaway home, runs `install.sh` there, boots the daemon and host on
+spare ports, checks health and cleans up. Green means the laptop run will at least get past step 3. Do this before every
+release. (`scripts/fresh-test.sh --keep` leaves the sandbox for inspection.)
+
 ## Before you start
 - The Mac has: macOS 13+, internet, and you know your Apple ID (for Xcode CLT) and Claude account.
 - Nothing Nibbi-related on it: no `~/.nibbi`, `~/NibbiVault`, `~/Nibbi-app`, no `com.nibbi.*` in `launchctl list`.
