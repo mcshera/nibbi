@@ -161,17 +161,30 @@ async function watchdog() {
     if (a.inflight > 0 || a.pending === 0) continue;
     const lastStart = Math.max(0, ...fixers.filter((f) => (f.game || f.project) === project).map((f) => Date.parse(f.startedAt || 0) || 0));
     const quietMin = (now - lastStart) / 60000;
-    const lastNudge = goal && goal.lastNudgeAt ? (now - goal.lastNudgeAt) / 60000 : 999;
-    const stallMin = goal ? 8 : 15, nudgeGap = goal ? 20 : 45;
-    if (quietMin < stallMin || lastNudge < nudgeGap) continue;
+    const st = goal || {};
+    // did the previous nudge work? a fixer started after it → reset; otherwise count a failure and back off hard
+    if (st.lastNudgeAt && !st.judged) { if (lastStart > st.lastNudgeAt) { st.fails = 0; st.judged = true; } else if (now - st.lastNudgeAt > 4 * 60000) { st.fails = (st.fails || 0) + 1; st.judged = true; } g[project] = { ...st }; saveGoals(g); }
+    const gatewayUp = Date.parse(status.lastTurnAt || 0) || 0; const restarted = st.blockedAt && status.uptimeSec * 1000 < now - st.blockedAt;
+    if (st.blocked && !restarted && lastStart < (st.blockedAt || 0)) continue;   // loop blocked (tooling down) — wait for a restart or a fixer to start
+    if (restarted && st.blocked) { st.blocked = false; st.fails = 0; delete st.blockedAt; g[project] = { ...st }; saveGoals(g); emitEvent({ kind: "goal", project, text: "gateway came back — the loop can move again", goal: st.text || null }); }
+    const lastNudge = st.lastNudgeAt ? (now - st.lastNudgeAt) / 60000 : 999;
+    const stallMin = st.text && st.text !== "auto" ? 8 : 15;
+    const nudgeGap = (st.text && st.text !== "auto" ? 20 : 45) * Math.pow(3, Math.min(3, st.fails || 0));   // 45 → 135 → 405 min after failures
+    const recent = (st.nudgeLog || []).filter((t) => now - t < 6 * 3600000);
+    if (quietMin < stallMin || lastNudge < nudgeGap || recent.length >= 3) continue;
     nudging = true;
     try {
       const focus = (goal && goal.focus) || a.focus || "";
       const msg = `[nibbi watchdog] Auto mode on ${project} is ${a.mode} with ${a.pending} tasks pending and nothing in flight for ${Math.round(quietMin)} min. Dispatch the next independent task(s) now with dispatch_fixer (up to ${a.maxConcurrent || 2})${focus ? `, staying inside milestone "${focus}"` : ""}. Facts: every task marked [x] in plans/${project}.md is merged into main; do not re-verify that. If a task truly blocks on unmerged work, dispatch the next one that does not. One line per dispatch.`;
       emitEvent({ kind: "goal", project, text: `auto looked stalled (${Math.round(quietMin)} min quiet, ${a.pending} pending) — nudged Oracle to dispatch${focus ? " in " + focus : ""}`, goal: goal ? goal.text : null });
-      g[project] = { ...(goal || { text: "auto", startedAt: now }), lastNudgeAt: now, nudges: ((goal && goal.nudges) || 0) + 1 }; saveGoals(g);
+      g[project] = { ...(st.text ? st : { text: "auto", startedAt: now }), lastNudgeAt: now, judged: false, nudges: (st.nudges || 0) + 1, nudgeLog: [...recent, now] }; saveGoals(g);
       const r = await gwPost("/api/send", { message: msg });
-      emitEvent({ kind: "goal", project, text: "Oracle: " + String(r.text || r.error || "").replace(/»[a-z]+:[^\n]*/gi, "").trim().slice(0, 240), goal: goal ? goal.text : null });
+      const reply = String(r.text || r.error || "").replace(/»[a-z]+:[^\n]*/gi, "").trim();
+      emitEvent({ kind: "goal", project, text: "Oracle: " + reply.slice(0, 240), goal: st.text || null });
+      if (/can't|cannot|unavailable|disconnected|gateway.*down|still down|no response requested|not available|timeout/i.test(reply)) {
+        const g2 = goals(); g2[project] = { ...(g2[project] || {}), blocked: true, blockedAt: Date.now(), judged: true, fails: (g2[project] && g2[project].fails || 0) + 1 }; saveGoals(g2);
+        emitEvent({ kind: "goal", project, text: "the loop is blocked — Oracle can't dispatch (its fixer tooling is down). I'll stop nudging until the gateway restarts.", blocked: true, goal: st.text || null });
+      }
     } finally { nudging = false; }
   }
 }
@@ -291,6 +304,11 @@ async function handle(req, res) {
       if (!abs.startsWith(repo + "/") || !existsSync(abs) || !statSync(abs).isFile()) { json(res, 404, { error: "no such file" }); return; }
       const buf = readFileSync(abs); if (buf.length > 200_000 || buf.includes(0)) { json(res, 413, { error: "not a small text file" }); return; }
       json(res, 200, { path: rel, content: buf.toString("utf8") }); return;
+    }
+    if (url.pathname === "/nibbi/gateway" && req.method === "POST") { // restart the Oracle daemon (launchd kickstart); the session resumes, fixer tooling reconnects
+      const p = await readJson(req); if (p.action !== "restart") { json(res, 400, { error: "action: restart" }); return; }
+      try { const uid = execFileSync("id", ["-u"], { encoding: "utf8" }).trim(); execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/com.oracle.gateway`], { timeout: 20000 }); emitEvent({ kind: "note", project: "oracle", title: "gateway", text: "restarted the Oracle gateway (launchctl kickstart) — session resumes, fixer tooling reconnects" }); const g = goals(); for (const k of Object.keys(g)) { g[k].blocked = false; g[k].fails = 0; delete g[k].blockedAt; } saveGoals(g); json(res, 200, { ok: true }); }
+      catch (e) { json(res, 500, { error: String(e.message).slice(0, 160) }); } return;
     }
     if (url.pathname === "/nibbi/goal") {
       if (req.method === "POST") {

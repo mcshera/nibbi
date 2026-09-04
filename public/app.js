@@ -593,7 +593,7 @@ function connectEvents() {
   try { evSource = new EventSource('/nibbi/events?since=' + since); } catch { return; }
   evSource.addEventListener('ready', () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; });
   evSource.addEventListener('fixer', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) { evReplay.push(ev); return; } onFixerEvent(ev); });
-  evSource.addEventListener('goal', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, (ev.done ? '🎯 ' : '') + '**' + md.esc(ev.project) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; if (ev.done) { nibbi.setMood('happy'); sound('land'); } refreshStatus(); });
+  evSource.addEventListener('goal', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, (ev.done ? '🎯 ' : '') + '**' + md.esc(ev.project) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; if (ev.done) { nibbi.setMood('happy'); sound('land'); } if (ev.blocked) { T.nib.classList.add('error'); nibbi.setMood('error'); addActs(T, [restartAct(), { label: 'ask nibbi', run: () => send('what is blocking the fixers right now?') }], { sticky: true }); if (document.hidden) notify('nibbi · loop blocked', ev.project + ': Oracle cannot dispatch — restart the gateway'); } refreshStatus(); });
   evSource.addEventListener('note', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, '**' + md.esc(ev.title || ev.id) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; });
   evSource.addEventListener('auto', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; refreshStatus(); toast('auto on ' + ev.project + ' → ' + (ev.to.on ? ev.to.mode : 'off'), 2500); });
   evSource.onerror = () => { /* EventSource reconnects on its own; replay resumes from lastEventTs */ evReady = false; };
@@ -863,10 +863,11 @@ async function send(text, images) {
   scheduleIdleTimers();
 }
 
+const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart Oracle — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
 function errorActs(text) {
   const acts = [{ label: 'try again', run: () => { const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }];
   if (/oauth|authenticate|token/i.test(text)) acts.push({ label: 'how to re-login', warn: true, run: () => { toast('in Terminal: claude setup-token → then restart the gateway', 5000); } });
-  if (/gateway (offline|isn)|failed to fetch|networkerror|not reachable/i.test(text)) { acts.push({ label: 'start the gateway', warn: true, run: () => toast('launchctl kickstart -k gui/$(id -u)/com.oracle.gateway', 6000) }); acts.push({ label: 'use the demo brain', run: () => { S.demo = true; refreshStatus(); const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }); }
+  if (/gateway (offline|isn)|failed to fetch|networkerror|not reachable/i.test(text)) { acts.push(restartAct()); acts.push({ label: 'use the demo brain', run: () => { S.demo = true; refreshStatus(); const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }); }
   return acts;
 }
 function replyActs(text) {
@@ -1063,6 +1064,8 @@ $('#st-project').onclick = () => { const names = projectNames(); if (!names.leng
 $('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn); refreshStatus(); toast(S.voiceOn ? NAME + ' will speak replies' : 'voice off'); if (S.voiceOn) speak('Okay. I\'ll talk.'); };
 $('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real Oracle'); };
 $('#st-clear').onclick = () => tidy();
+$('#st-clear').insertAdjacentHTML('beforebegin', '<button class="row act" id="st-restart" type="button">restart the gateway (twice to confirm)</button>');
+{ let armed = 0; $('#st-restart').onclick = () => { if (!armed) { armed = setTimeout(() => { armed = 0; $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 4000); $('#st-restart').textContent = 'restart Oracle — sure?'; return; } clearTimeout(armed); armed = 0; $('#st-restart').textContent = 'restarting…'; restartAct().run(); setTimeout(() => { $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 8000); }; }
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
 refreshStatus(); setInterval(refreshStatus, 6000); connectEvents();
 function mostActiveProject(list) {
