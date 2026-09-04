@@ -44,7 +44,7 @@ daemon/                     the brain: Claude Agent SDK session, vault memory, f
 vault-template/             SOUL / AGENTS / MEMORY / HEARTBEAT stubs your vault starts from
 launchd/templates/          background services (rendered with your paths by install.sh)
 desktop/                    Tauri v2 shell → Nibbi.app (tray, ⌥Space, notifications, Dock badge)
-site/                       nibbi.com (Cloudflare Pages)
+site/                       nibbi.ai (Cloudflare Pages)
 tools/ · tests/             scenario screenshots + unit tests (`npm test`)
 docs/                       plans, chat plan, fresh-install test protocol
 ```
