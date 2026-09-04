@@ -150,7 +150,7 @@ async function watchdog() {
   if (status.busy || (status.rateLimit && status.rateLimit.status !== "allowed")) return;
   const g = goals(); const now = Date.now();
   for (const [project, a] of Object.entries(auto)) {
-    if (!a.on || a.mode === "suggest") continue;
+    if (project === '__modes' || !a.on || a.mode === "suggest") continue;
     const goal = g[project];
     // goal reached? (focus milestone fully checked)
     if (goal && goal.focus) {
@@ -175,8 +175,8 @@ async function watchdog() {
     nudging = true;
     try {
       const focus = (goal && goal.focus) || a.focus || "";
-      const msg = `[nibbi watchdog] Auto mode on ${project} is ${a.mode} with ${a.pending} tasks pending and nothing in flight for ${Math.round(quietMin)} min. Dispatch the next independent task(s) now with dispatch_fixer (up to ${a.maxConcurrent || 2})${focus ? `, staying inside milestone "${focus}"` : ""}. Facts: every task marked [x] in plans/${project}.md is merged into main; do not re-verify that. If a task truly blocks on unmerged work, dispatch the next one that does not. One line per dispatch.`;
-      emitEvent({ kind: "goal", project, text: `auto looked stalled (${Math.round(quietMin)} min quiet, ${a.pending} pending) — nudged the brain to dispatch${focus ? " in " + focus : ""}`, goal: goal ? goal.text : null });
+      const msg = `[nibbi watchdog] Auto mode on ${project} is ${a.mode} with ${a.pending} tasks pending and nothing in flight for ${quietMin > 1440 ? 'a long time' : Math.round(quietMin) + ' min'}. Dispatch the next independent task(s) now with dispatch_fixer (up to ${a.maxConcurrent || 2})${focus ? `, staying inside milestone "${focus}"` : ""}. Facts: every task marked [x] in plans/${project}.md is merged into main; do not re-verify that. If a task truly blocks on unmerged work, dispatch the next one that does not. One line per dispatch.`;
+      emitEvent({ kind: "goal", project, text: `auto looked stalled (${quietMin > 1440 ? 'a long time' : Math.round(quietMin) + ' min'} quiet, ${a.pending} pending) — nudged the brain to dispatch${focus ? " in " + focus : ""}`, goal: goal ? goal.text : null });
       g[project] = { ...(st.text ? st : { text: "auto", startedAt: now }), lastNudgeAt: now, judged: false, nudges: (st.nudges || 0) + 1, nudgeLog: [...recent, now] }; saveGoals(g);
       const r = await gwPost("/api/send", { message: msg });
       const reply = String(r.text || r.error || "").replace(/»[a-z]+:[^\n]*/gi, "").trim();
@@ -193,6 +193,7 @@ setTimeout(() => { watchdog().catch(() => {}); setInterval(() => { watchdog().ca
 async function pollGateway() {
   const [fixers, auto] = await Promise.all([gwGet("/api/fixers"), gwGet("/api/auto")]);
   if (!fixers) return;
+  try { const g = goals(); let dirty = false; for (const [p, a] of Object.entries(auto || {})) if (a.on && a.mode && a.mode !== 'off' && (g['__modes'] || {})[p] !== a.mode) { g['__modes'] = { ...(g['__modes'] || {}), [p]: a.mode }; dirty = true; } if (dirty) saveGoals(g); } catch { /* */ }
   const cur = { fixers: Object.fromEntries(fixers.map((f) => [f.id, f.status])), auto: Object.fromEntries(Object.entries(auto || {}).map(([p, a]) => [p, { on: !!a.on, mode: a.on ? (a.mode || "stage") : "off" }])) };
   if (evState) {
     for (const f of fixers) {
@@ -335,10 +336,11 @@ async function handle(req, res) {
         if (!project) { json(res, 400, { error: "project required" }); return; }
         if (p.stop) { delete g[project]; saveGoals(g); await gwPost("/api/auto", { project, focus: "" }); json(res, 200, { ok: true, stopped: true }); return; }
         const text = String(p.text || "").trim(); const fm = text.match(/\bM\d+(?:\.\d+)?\b/i); const focus = p.focus || (fm ? fm[0].toUpperCase() : "");
-        g[project] = { text, focus, startedAt: Date.now(), nudges: 0 }; saveGoals(g);
+        const prev = g[project] || {}; g[project] = { text, focus, startedAt: Date.now(), nudges: prev.nudges || 0, lastNudgeAt: prev.lastNudgeAt, nudgeLog: prev.nudgeLog || [], judged: true, fails: 0 }; saveGoals(g);
         const cur = (await gwGet("/api/auto")) || {}; const mode = cur[project] && cur[project].on ? cur[project].mode : null;
-        await gwPost("/api/auto", { project, on: true, ...(mode ? {} : { mode: p.mode || "stage" }), focus });
-        json(res, 200, { ok: true, goal: g[project], mode: mode || p.mode || "stage" }); return;
+        const remembered = (g['__modes'] || {})[project]; const useMode = mode || p.mode || remembered || "stage";
+        await gwPost("/api/auto", { project, on: true, ...(mode ? {} : { mode: useMode }), focus });
+        json(res, 200, { ok: true, goal: g[project], mode: useMode }); return;
       }
       json(res, 200, goals()); return;
     }

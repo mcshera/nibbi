@@ -495,8 +495,19 @@ async function runLocalCommand(name, arg) {
       if (/^stop$/i.test(arg)) { await api.post('/nibbi/goal', { project: proj, stop: true }); refreshStatus(); return { text: 'Goal on **' + proj + '** cleared. Auto stays as it was (' + autoOf(proj).mode + '); `/auto ' + proj + ' off` to stop everything.' }; }
       const st = addStep(T, 'setting the goal and switching auto on');
       const r = await api.post('/nibbi/goal', { project: proj, text: arg }); markStep(st, 'done'); refreshStatus();
+      if (!r.goal.focus) {   // free text → ask the brain to turn it into a milestone with dispatchable tasks, then focus there
+        const st2 = addStep(T, 'asking the brain to plan it as a milestone');
+        try {
+          const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const nextId = 'M' + (ms.reduce((m, x) => Math.max(m, Number((x.name.match(/^M(\d+)/) || [0, 0])[1])), 0) + 1);
+          const rr = await api.post('/api/send', { message: '[nibbi goal] Add milestone ' + nextId + ' to plans/' + proj + '.md for this goal: "' + arg + '". Write 3–7 concrete checkbox tasks, each small enough for one fixer, ordered by dependency, in the same format as the existing milestones (## ' + nextId + ': <short title> then - [ ] ' + nextId + '.1 **name** — what/where). Update index/log per AGENTS.md. Reply with the milestone id and the task list only.' });
+          const text = String(rr.text || '').replace(/»[a-z]+:[^\n]*/gi, '').trim();
+          const found = (text.match(/\bM\d+\b/) || [nextId])[0];
+          await api.post('/nibbi/goal', { project: proj, text: arg, focus: found }); markStep(st2, 'done'); refreshStatus();
+          r.goal.focus = found; r.planned = text;
+        } catch (e) { markStep(st2, 'fail'); r.planErr = e.message; }
+      }
       let prog = ''; if (r.goal.focus) { try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const m = ms.find((x) => x.name.toLowerCase().startsWith(r.goal.focus.toLowerCase())); if (m) prog = ' — ' + m.name + ': ' + (m.total - m.done) + ' task' + (m.total - m.done === 1 ? '' : 's') + ' left'; } catch { /* */ } }
-      return { text: 'Goal on **' + proj + '**: _' + md.esc(arg) + '_' + prog + '.\n\nAuto is **' + r.mode + '**' + (r.mode === 'ship' ? ' — fixers dispatch, test and merge on their own' : ' — fixers dispatch on their own; you approve each merge') + '. I watch the loop: if nothing is in flight for 8 minutes while tasks remain, I nudge the brain to dispatch. Every landing shows up here; `/goal` shows progress; `/goal stop` ends it.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, ...(r.mode !== 'ship' ? [{ label: 'switch to ship', confirm: 'ship = merges itself — sure?', warn: true, run: () => send('/auto ' + proj + ' ship') }] : [])] };
+      return { text: 'Goal on **' + proj + '**: _' + md.esc(arg) + '_' + prog + '.' + (r.planned ? '\n\n' + r.planned.slice(0, 1500) : '') + (r.planErr ? '\n\n_I could not get the brain to plan it (' + md.esc(r.planErr) + ') — try `/plan edit` or say it in chat._' : '') + '\n\nAuto is **' + r.mode + '**' + (r.mode === 'ship' ? ' — fixers dispatch, test and merge on their own' : ' — fixers dispatch on their own; you approve each merge') + '. I watch the loop: if nothing is in flight for 8 minutes while tasks remain, I nudge the brain to dispatch. Every landing shows up here; `/goal` shows progress; `/goal stop` ends it.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, ...(r.mode !== 'ship' ? [{ label: 'switch to ship', confirm: 'ship = merges itself — sure?', warn: true, run: () => send('/auto ' + proj + ' ship') }] : [])] };
     });
     case 'auto': { const m = arg.match(/^(\S+)\s+(off|suggest|stage|ship|pause|resume|on)$/i); return localTurn('/auto ' + arg, async () => {
       if (!m) return { ok: false, text: '`/auto <project> <off|suggest|stage|ship|pause|resume>`' };
