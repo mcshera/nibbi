@@ -15,3 +15,7 @@
 ## 0.3 — the build loop: palette, `/fix` → `/diff` → approve, `/plan`, `/new`, fleet events, `/play`.
 ## 0.2 — mini-Nibbi bubbles, pip eyes, ink animation, agents on the pill.
 ## 0.1 — the character, the pill, the protocol.
+
+## 0.6.2 — 2026-09-04
+- The whole system is Nibbi: daemon at `~/Nibbi`, vault `~/NibbiVault`, state `~/.nibbi`, services `com.nibbi.*` (old paths are symlinks). Telegram removed; daemon notes (briefs, reports, auto events) stream into the app.
+- Watchdog backs off and stops when the brain says its tooling is down; one-tap gateway restart.

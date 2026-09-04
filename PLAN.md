@@ -39,7 +39,7 @@ without ever opening a dashboard.*
 **P0 — the build loop inside Nibbi (this pass) — ✅ shipped in v0.3, verified against the live gateway**
 1. Slash palette: `/` lists every command (Nibbi's and Oracle's) with a one-line description; ↑↓ + Enter.
 2. Project context: `/project [name]` (persisted), status-menu row, chips and `/fix` follow it.
-3. `/new <name>` → creates + registers a repo (`~/OracleProjects/<slug>`), then offers "plan it" (Oracle writes `plans/<slug>.md`).
+3. `/new <name>` → creates + registers a repo (`~/NibbiProjects/<slug>`), then offers "plan it" (Oracle writes `plans/<slug>.md`).
 4. `/fix <issue>` → `POST /api/fix {project, issue}`; the fixer appears on the pill; the reply carries `diff · preview · stop`.
 5. `/diff <id>` → inline diff viewer (diffstat header, coloured hunks, truncation note) with `approve & merge` (two-click confirm) · `preview` · `steer` · `stop`.
 6. Fleet events: when a fixer finishes / fails / merges (polled every 6 s), Nibbi posts one bubble with the right chips.

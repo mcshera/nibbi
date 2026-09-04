@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // server.mjs — Nibbi's tiny host. Zero dependencies.
 //   • serves ./public (the surface)
-//   • proxies /api/* to the Oracle gateway (default http://127.0.0.1:4519), streaming SSE through untouched
+//   • proxies /api/* to the Nibbi gateway (default http://127.0.0.1:4519), streaming SSE through untouched
 //   • /nibbi/health tells the surface whether the brain is reachable
 //   • /nibbi/livereload pushes an SSE ping when a file in ./public changes (dev nicety, no build step)
 //   • --remote: also listen on the LAN (HTTP :port and HTTPS :port+1 with a generated local CA) behind a token,
@@ -24,7 +24,7 @@ const TLS_PORT = PORT + 1;
 const GATEWAY = new URL(args.gateway || process.env.ORACLE_GATEWAY || "http://127.0.0.1:4519");
 const REMOTE = Boolean(args.remote || process.env.NIBBI_REMOTE);
 const PUBLIC = join(dirname(fileURLToPath(import.meta.url)), "public");
-const HOME = join(homedir(), ".oracle");                      // token + TLS material live here, never in the repo or the vault
+const HOME = join(homedir(), ".nibbi");                      // token + TLS material live here, never in the repo or the vault
 
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff", ".ico": "image/x-icon", ".ogg": "audio/ogg", ".mp3": "audio/mpeg" };
 
@@ -121,7 +121,7 @@ async function recoverTurnLimit(f) {
     const ok = await new Promise((resolve) => { const c = spawn("bash", ["-lc", check], { cwd: wt, env: { ...process.env, CI: "true" }, stdio: "ignore" }); const t = setTimeout(() => { try { c.kill("SIGKILL"); } catch { /* */ } resolve(false); }, 10 * 60_000); c.on("close", (code) => { clearTimeout(t); resolve(code === 0); }); c.on("error", () => resolve(false)); });
     if (!ok) { emitEvent({ kind: "note", id: f.id, project: f.game, title: f.title, text: "uncommitted work did not pass the project check — left failed" }); return; }
     execFileSync("git", ["-C", wt, "add", "-A"], { timeout: 10000 });
-    execFileSync("git", ["-C", wt, "-c", "user.name=Oracle fixer " + f.id, "-c", "user.email=oracle@local", "commit", "-q", "-m", `${f.title || f.issue.slice(0, 60)} (work recovered by Nibbi after the turn limit; project check passed)`], { timeout: 20000 });
+    execFileSync("git", ["-C", wt, "-c", "user.name=Nibbi fixer " + f.id, "-c", "user.email=oracle@local", "commit", "-q", "-m", `${f.title || f.issue.slice(0, 60)} (work recovered by Nibbi after the turn limit; project check passed)`], { timeout: 20000 });
     let stat = ""; try { const target = execFileSync("git", ["-C", wt, "rev-parse", "--abbrev-ref", "origin/HEAD"], { encoding: "utf8", timeout: 5000 }).trim().replace("origin/", ""); stat = execFileSync("git", ["-C", wt, "diff", "--stat", `${target}...HEAD`], { encoding: "utf8", timeout: 10000 }).trim(); } catch { try { stat = execFileSync("git", ["-C", wt, "diff", "--stat", "main...HEAD"], { encoding: "utf8", timeout: 10000 }).trim(); } catch { stat = execFileSync("git", ["-C", wt, "show", "--stat", "--format=", "HEAD"], { encoding: "utf8", timeout: 10000 }).trim(); } }
     const reg = join(HOME, "fixers.json"); const all = JSON.parse(readFileSync(reg, "utf8"));
     for (const x of all) if (x.id === f.id) { x.status = "done"; x.diffstat = stat; x.summary = (x.summary || "") + ` — RECOVERED by Nibbi ${new Date().toISOString().slice(0, 16)}: finished work was uncommitted at the turn limit; committed on the branch after the project check passed.`; }
@@ -176,14 +176,14 @@ async function watchdog() {
     try {
       const focus = (goal && goal.focus) || a.focus || "";
       const msg = `[nibbi watchdog] Auto mode on ${project} is ${a.mode} with ${a.pending} tasks pending and nothing in flight for ${Math.round(quietMin)} min. Dispatch the next independent task(s) now with dispatch_fixer (up to ${a.maxConcurrent || 2})${focus ? `, staying inside milestone "${focus}"` : ""}. Facts: every task marked [x] in plans/${project}.md is merged into main; do not re-verify that. If a task truly blocks on unmerged work, dispatch the next one that does not. One line per dispatch.`;
-      emitEvent({ kind: "goal", project, text: `auto looked stalled (${Math.round(quietMin)} min quiet, ${a.pending} pending) — nudged Oracle to dispatch${focus ? " in " + focus : ""}`, goal: goal ? goal.text : null });
+      emitEvent({ kind: "goal", project, text: `auto looked stalled (${Math.round(quietMin)} min quiet, ${a.pending} pending) — nudged the brain to dispatch${focus ? " in " + focus : ""}`, goal: goal ? goal.text : null });
       g[project] = { ...(st.text ? st : { text: "auto", startedAt: now }), lastNudgeAt: now, judged: false, nudges: (st.nudges || 0) + 1, nudgeLog: [...recent, now] }; saveGoals(g);
       const r = await gwPost("/api/send", { message: msg });
       const reply = String(r.text || r.error || "").replace(/»[a-z]+:[^\n]*/gi, "").trim();
-      emitEvent({ kind: "goal", project, text: "Oracle: " + reply.slice(0, 240), goal: st.text || null });
+      emitEvent({ kind: "goal", project, text: "brain: " + reply.slice(0, 240), goal: st.text || null });
       if (/can't|cannot|unavailable|disconnected|gateway.*down|still down|no response requested|not available|timeout/i.test(reply)) {
         const g2 = goals(); g2[project] = { ...(g2[project] || {}), blocked: true, blockedAt: Date.now(), judged: true, fails: (g2[project] && g2[project].fails || 0) + 1 }; saveGoals(g2);
-        emitEvent({ kind: "goal", project, text: "the loop is blocked — Oracle can't dispatch (its fixer tooling is down). I'll stop nudging until the gateway restarts.", blocked: true, goal: st.text || null });
+        emitEvent({ kind: "goal", project, text: "the loop is blocked — the brain can't dispatch (its fixer tooling is down). I'll stop nudging until the gateway restarts.", blocked: true, goal: st.text || null });
       }
     } finally { nudging = false; }
   }
@@ -208,6 +208,25 @@ async function pollGateway() {
   try { writeFileSync(EV_STATE, JSON.stringify(cur)); } catch { /* disk */ }
 }
 setInterval(() => { pollGateway().catch(() => {}); }, 5000); pollGateway().catch(() => {});
+
+/* ---- daemon notes: everything the daemon used to push to Telegram (briefs, reports, auto events) → events for the app ---- */
+const NOTES = join(HOME, "notes.jsonl"), NOTES_POS = join(HOME, "nibbi-notes.pos");
+let notesPos = 0; try { notesPos = Number(readFileSync(NOTES_POS, "utf8")) || 0; } catch { try { notesPos = statSync(NOTES).size; } catch { notesPos = 0; } }
+function tailNotes() {
+  try {
+    if (!existsSync(NOTES)) return; const size = statSync(NOTES).size; if (size < notesPos) notesPos = 0; if (size === notesPos) return;
+    const buf = Buffer.alloc(size - notesPos); const fd = openSyncSafe(NOTES); if (fd === null) return; readSyncSafe(fd, buf, notesPos); closeSyncSafe(fd);
+    const chunk = buf.toString("utf8"); const lines = chunk.split("\n"); const complete = chunk.endsWith("\n") ? lines : lines.slice(0, -1);
+    notesPos += Buffer.byteLength(complete.join("\n") + (complete.length ? "\n" : ""));
+    try { writeFileSync(NOTES_POS, String(notesPos)); } catch { /* disk */ }
+    for (const l of complete) { if (!l.trim()) continue; try { const n = JSON.parse(l); emitEvent({ kind: "brief", text: String(n.text || "").slice(0, 4000), silent: !!n.silent, ts: n.ts || Date.now() }); } catch { /* bad line */ } }
+  } catch { /* transient */ }
+}
+import { openSync, readSync, closeSync } from "node:fs";
+const openSyncSafe = (p) => { try { return openSync(p, "r"); } catch { return null; } };
+const readSyncSafe = (fd, buf, pos) => { try { readSync(fd, buf, 0, buf.length, pos); } catch { /* partial */ } };
+const closeSyncSafe = (fd) => { try { closeSync(fd); } catch { /* */ } };
+setInterval(tailNotes, 5000); setTimeout(tailNotes, 2000);
 
 /* ---- proxy ---- */
 function proxy(req, res) {
@@ -305,9 +324,9 @@ async function handle(req, res) {
       const buf = readFileSync(abs); if (buf.length > 200_000 || buf.includes(0)) { json(res, 413, { error: "not a small text file" }); return; }
       json(res, 200, { path: rel, content: buf.toString("utf8") }); return;
     }
-    if (url.pathname === "/nibbi/gateway" && req.method === "POST") { // restart the Oracle daemon (launchd kickstart); the session resumes, fixer tooling reconnects
+    if (url.pathname === "/nibbi/gateway" && req.method === "POST") { // restart the Nibbi daemon (launchd kickstart); the session resumes, fixer tooling reconnects
       const p = await readJson(req); if (p.action !== "restart") { json(res, 400, { error: "action: restart" }); return; }
-      try { const uid = execFileSync("id", ["-u"], { encoding: "utf8" }).trim(); execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/com.oracle.gateway`], { timeout: 20000 }); emitEvent({ kind: "note", project: "oracle", title: "gateway", text: "restarted the Oracle gateway (launchctl kickstart) — session resumes, fixer tooling reconnects" }); const g = goals(); for (const k of Object.keys(g)) { g[k].blocked = false; g[k].fails = 0; delete g[k].blockedAt; } saveGoals(g); json(res, 200, { ok: true }); }
+      try { const uid = execFileSync("id", ["-u"], { encoding: "utf8" }).trim(); execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/com.nibbi.gateway`], { timeout: 20000 }); emitEvent({ kind: "note", project: "oracle", title: "gateway", text: "restarted the Nibbi gateway (launchctl kickstart) — session resumes, fixer tooling reconnects" }); const g = goals(); for (const k of Object.keys(g)) { g[k].blocked = false; g[k].fails = 0; delete g[k].blockedAt; } saveGoals(g); json(res, 200, { ok: true }); }
       catch (e) { json(res, 500, { error: String(e.message).slice(0, 160) }); } return;
     }
     if (url.pathname === "/nibbi/goal") {
@@ -325,7 +344,7 @@ async function handle(req, res) {
     }
     if (url.pathname === "/nibbi/scaffold" && req.method === "POST") { await scaffold(req, res); return; }
     if (url.pathname === "/nibbi/vault-write" && req.method === "POST") { // creates folders; never protected files; logs the write
-      const p = await readJson(req); const VAULT = join(homedir(), "OracleVault"); const rel = String(p.path || ""); const abs = normalize(join(VAULT, rel));
+      const p = await readJson(req); const VAULT = join(homedir(), "NibbiVault"); const rel = String(p.path || ""); const abs = normalize(join(VAULT, rel));
       if (!rel || typeof p.content !== "string" || !abs.startsWith(VAULT + "/")) { json(res, 400, { error: "path (inside the vault) + content required" }); return; }
       if (/(^|\/)(SOUL|AGENTS)\.md$/.test(abs)) { json(res, 403, { error: "protected — SOUL/AGENTS change via proposals" }); return; }
       try { mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs + ".tmp", p.content); execFileSync("mv", ["-f", abs + ".tmp", abs]); if (p.log) appendFileSync(join(VAULT, "log.md"), `\n## [${new Date().toISOString().slice(0, 16).replace("T", " ")}] ${String(p.log).replace(/\n/g, " ").slice(0, 300)}\n`); json(res, 200, { ok: true, path: rel }); }
@@ -377,7 +396,7 @@ async function scaffold(req, res) {
 }
 function readdirSyncSafe(p) { try { return readdirSync(p); } catch { return []; } }
 
-/* screenshot a URL with playwright-core (if available) into ~/.oracle/artifacts — used after /preview */
+/* screenshot a URL with playwright-core (if available) into ~/.nibbi/artifacts — used after /preview */
 async function shot(req, res) {
   const p = await readJson(req); const target = String(p.url || ""), name = String(p.name || "shot").replace(/[^a-zA-Z0-9._-]/g, "") || "shot";
   if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(target)) { json(res, 400, { error: "local http(s) URLs only" }); return; }

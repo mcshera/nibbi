@@ -18,7 +18,7 @@ newest first. Errors: Nibbi flinches, flattens, and offers the fix. Escape (or d
     styles.css        paper, pill, feed, chips (single easing curve; 120/220/420 ms tiers)
   tools/              shot.mjs (screenshot + DOM probe) · verify.mjs (scenario suite → .shots/)
   desktop/            Tauri v2 shell → Nibbi.app (tray, ⌥ Space, window-state, auto-starts the host)
-  launchd/            com.oracle.nibbi.plist (keep the host alive at login) + install script
+  launchd/            com.nibbi.host.plist (keep the host alive at login) + install script
 ```
 
 ## Run
@@ -30,12 +30,12 @@ npm start                       # host on http://127.0.0.1:4527 and opens it (ne
 node server.mjs --port 4527 --gateway http://127.0.0.1:4519
 ```
 
-The brain is the existing Oracle gateway (`com.oracle.gateway`, port 4519). If it's down, Nibbi says so
+The brain is the existing Oracle gateway (`com.nibbi.gateway`, port 4519). If it's down, Nibbi says so
 (status dot → “gateway offline”) and can fall back to a scripted **demo brain** (`?demo=1`, or the status menu)
 so the choreography can be seen anywhere. Restart the gateway with
-`launchctl kickstart -k gui/$(id -u)/com.oracle.gateway`.
+`launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway`.
 
-Keep the host alive across logins: `sh launchd/install.sh` (installs `com.oracle.nibbi`, KeepAlive).
+Keep the host alive across logins: `sh launchd/install.sh` (installs `com.nibbi.host`, KeepAlive).
 
 Desktop app: `cd desktop && npm i && npx tauri build` → `src-tauri/target/release/bundle/macos/Nibbi.app`
 (copy to `~/Applications`). The app starts the host itself if nothing is listening on 4527.
@@ -55,7 +55,7 @@ The phone app (installable PWA, LAN token gate, local-CA https, `/phone` pairing
 - **Images**: paste or drop up to 4 — sent with the message (Oracle has vision).
 - **Slash commands** pass straight through: `/fixers`, `/fix <issue>`, `/playtest shipless`, `/approve <id>` …
 - **`/play <project>`** (`… stop` / `… status`) launches a project's web dev server through the gateway's sanctioned
-  launcher (`/api/play`, detached, logged to `~/.oracle/play-<project>.log`, auto-stopped after an hour) and opens the
+  launcher (`/api/play`, detached, logged to `~/.nibbi/play-<project>.log`, auto-stopped after an hour) and opens the
   URL. Oracle's own Bash is deliberately allowlisted (`policy.ts`) and cannot do this — Nibbi offers a `launch <project>`
   chip whenever Oracle talks about running a server, and `play <project>` in the focus suggestions.
 - **While it works**: the send button becomes a stop square — click to stop watching (Oracle keeps working).
@@ -73,7 +73,7 @@ Type `/` for the palette. Nibbi answers these itself (no model call; they use th
 | command | what happens |
 |---|---|
 | `/project [name]` | show or switch the active project (persisted); status menu row cycles it |
-| `/new <name>` | git repo in `~/OracleProjects/<slug>`, registered with Oracle, becomes active → `plan it` |
+| `/new <name>` | git repo in `~/NibbiProjects/<slug>`, registered with Oracle, becomes active → `plan it` |
 | `/fix <issue>` | dispatches a fixer on the active project (`POST /api/fix`); it appears on the pill |
 | `/diff <id>` | inline diff viewer (diffstat, coloured hunks) with `preview` · `approve & merge` (two-click) · `stop` · `steer` |
 | `/plan [project]` | milestones from `plans/<project>.md` with progress bars + auto state → `dispatch next`, `pause auto` |
@@ -92,7 +92,7 @@ Type `/` for the palette. Nibbi answers these itself (no model call; they use th
 
 Oracle's own commands still pass through: `/approve`, `/preview`, `/fixers`, `/playtest`, `/endtest`, `/golden`, `/proposals`, `/export`, `/clear`.
 
-**Fleet events**: the host watches the gateway itself (every 5 s, always on) and streams transitions to the surface (`/nibbi/events`, replayed from `~/.oracle/nibbi-events.jsonl`), so "while you were away" is exact even if the window was closed. When a fixer finishes, fails or merges, Nibbi posts one bubble with `diff · preview ·
+**Fleet events**: the host watches the gateway itself (every 5 s, always on) and streams transitions to the surface (`/nibbi/events`, replayed from `~/.nibbi/nibbi-events.jsonl`), so "while you were away" is exact even if the window was closed. When a fixer finishes, fails or merges, Nibbi posts one bubble with `diff · preview ·
 approve & merge` (or `log · requeue`), plus thumbnails of any screenshots the fixer wrote (`<repo>/.oracle-shots/`).
 **Playtest mode** (`/playtest <game>`): the pill gets a tag and the chips become `bug · balance · idea · rules question`
 prefixes. The status menu shows lifetime spend and rate-limit state. Agent cards on the pill carry the same actions; auto mode lives in the project menu (top-left), not as an agent. Every irreversible chip (merge, stop, ship, unqueue) needs a second click.
@@ -130,7 +130,7 @@ npm test                # unit tests (node --test) + scenario screenshots → .s
 node tools/shot.mjs "http://127.0.0.1:4527/?demo=1" .shots/x.png --demo "fix the login bug" --at 500,3000,9000 --probe
 ```
 
-Character rendering came out of the `~/Oracle/design/variants5` explorations (5f-shader); the eye rig is the
+Character rendering came out of the `~/Nibbi/design/variants5` explorations (5f-shader); the eye rig is the
 `pip` study from `nibbi-story` (low, wide-set, oversized pupils, twin catchlights — `LOOK` in `nibbi.js`). The name
 is one constant (`NAME` in `app.js`, the placeholder in `index.html`).
 

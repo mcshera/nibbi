@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.oracle.nibbi</string>
+  <key>Label</key><string>com.nibbi.host</string>
   <key>ProgramArguments</key><array>
     <string>/Users/Matty/.local/node/current/bin/node</string>
     <string>/Users/Matty/Documents/Nibbi/server.mjs</string>
@@ -10,6 +10,6 @@
   <key>WorkingDirectory</key><string>/Users/Matty/Documents/Nibbi</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/Users/Matty/.oracle/logs/nibbi.log</string>
-  <key>StandardErrorPath</key><string>/Users/Matty/.oracle/logs/nibbi.log</string>
+  <key>StandardOutPath</key><string>/Users/Matty/.nibbi/logs/nibbi.log</string>
+  <key>StandardErrorPath</key><string>/Users/Matty/.nibbi/logs/nibbi.log</string>
 </dict></plist>

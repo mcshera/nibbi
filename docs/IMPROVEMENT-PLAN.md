@@ -28,7 +28,7 @@
 
 ### B. Never miss what happened
 - **Host-side event log**: `server.mjs` polls the gateway itself (every 5 s, always on) and records fixer/auto transitions
-  to `~/.oracle/nibbi-events.jsonl`; the surface subscribes via SSE (`/nibbi/events`) — no more 6 s client polling, and
+  to `~/.nibbi/nibbi-events.jsonl`; the surface subscribes via SSE (`/nibbi/events`) — no more 6 s client polling, and
   events that happened while the window was closed are replayed as the "while you were away" bubble (exactly, not inferred).
 - **macOS notifications** from the desktop shell when a fixer lands and Nibbi is hidden (Tauri notification plugin);
   Dock badge = staged fixers awaiting review.

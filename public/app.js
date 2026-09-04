@@ -245,11 +245,11 @@ async function* demoTurn(message, _images, signal) {
     return;
   }
   if (/hello|hi\b|hey|who are you|what can you/.test(m)) {
-    yield* say('Hi. I\'m ' + NAME + ' — Oracle\'s face on the table. Ask me to build, fix, plan or remember something and I\'ll show my work right here while I do it.');
-    yield { ev: 'done', text: 'Hi. I\'m ' + NAME + ' — Oracle\'s face on the table. Ask me to build, fix, plan or remember something and I\'ll show my work right here while I do it.', costUsd: 0, isError: false }; return;
+    yield* say('Hi. I\'m ' + NAME + '. Ask me to build, fix, plan or remember something and I\'ll show my work right here while I do it.');
+    yield { ev: 'done', text: 'Hi. I\'m ' + NAME + '. Ask me to build, fix, plan or remember something and I\'ll show my work right here while I do it.', costUsd: 0, isError: false }; return;
   }
   yield { ev: 'tool', name: 'Read' }; await wait(900); yield { ev: 'tool', name: 'Grep' }; await wait(700);
-  const t = 'Here\'s what I know (demo brain — the real Oracle gateway isn\'t reachable right now).\n\nYou asked: *' + message.replace(/\*/g, '') + '*\n\nWhen the gateway is up I answer from the vault and the live repos, and every tool I touch shows up above this line as I work.';
+  const t = 'Here\'s what I know (demo brain — the real one isn\'t reachable right now).\n\nYou asked: *' + message.replace(/\*/g, '') + '*\n\nWhen the gateway is up I answer from the vault and the live repos, and every tool I touch shows up above this line as I work.';
   yield* say(t); yield { ev: 'done', text: t, costUsd: 0, isError: false };
 }
 
@@ -342,19 +342,19 @@ function renderDiff(d) {
 const COMMANDS = [
   { cmd: '/fix', args: '<issue>', desc: 'dispatch a fixer on the active project', local: true },
   { cmd: '/diff', args: '<fixer-id>', desc: 'review a fixer\'s changes inline', local: true },
-  { cmd: '/approve', args: '<fixer-id>', desc: 'merge a finished fixer (Oracle runs the gate)', local: false },
+  { cmd: '/approve', args: '<fixer-id>', desc: 'merge a finished fixer (the brain runs the gate)', local: false },
   { cmd: '/preview', args: '<fixer-id> [stop]', desc: 'run the fixer\'s branch on a preview server', local: false },
   { cmd: '/steer', args: '<fixer-id> <note>', desc: 'send a running fixer a course correction', local: true },
   { cmd: '/stop', args: '<fixer-id>', desc: 'stop a running fixer', local: true },
   { cmd: '/fixers', args: '', desc: 'list recent fixers', local: false },
   { cmd: '/review', args: '[project|all]', desc: 'walk staged fixers: j/k next/prev · a approve · x discard · p preview', local: true },
-  { cmd: '/plan', args: '[project] | edit <instruction>', desc: 'milestones, progress and what auto is doing; `edit` asks Oracle to rewrite the plan', local: true },
+  { cmd: '/plan', args: '[project] | edit <instruction>', desc: 'milestones, progress and what auto is doing; `edit` asks nibbi to rewrite the plan', local: true },
   { cmd: '/auto', args: '<project> <off|suggest|stage|ship|pause|resume>', desc: 'steer autonomy for a project', local: true },
   { cmd: '/goal', args: '<text> | stop', desc: 'run the active project toward a goal for as long as it takes (auto + a watchdog that unsticks it)', local: true },
   { cmd: '/play', args: '<project> [stop|status]', desc: 'launch the project\'s dev server and open it', local: true },
   { cmd: '/project', args: '[name]', desc: 'show or switch the active project', local: true },
-  { cmd: '/new', args: '<name> [web|game]', desc: 'start a new project (git repo in ~/OracleProjects; web = vite scaffold, game = rules/design + plan)', local: true },
-  { cmd: '/issue', args: '<text>', desc: 'file an issue to the vault for the active project (Oracle triages it)', local: true },
+  { cmd: '/new', args: '<name> [web|game]', desc: 'start a new project (git repo in ~/NibbiProjects; web = vite scaffold, game = rules/design + plan)', local: true },
+  { cmd: '/issue', args: '<text>', desc: 'file an issue to the vault for the active project (nibbi triages it)', local: true },
   { cmd: '/playtest', args: '[project]', desc: 'playtest mode: every report gets logged and triaged', local: false },
   { cmd: '/endtest', args: '', desc: 'end playtest mode with a session summary', local: false },
   { cmd: '/artifacts', args: '[project]', desc: 'what fixers produced: diffs, exports, screenshots', local: true },
@@ -364,7 +364,7 @@ const COMMANDS = [
   { cmd: '/recent', args: '[n]', desc: 'bring back the last exchanges, oldest first', local: true },
   { cmd: '/vault', args: '<path>', desc: 'read a file from the brain (e.g. plans/battalion.md)', local: true },
   { cmd: '/journal', args: '[YYYY-MM-DD]', desc: 'today\'s journal page (or a given day)', local: true },
-  { cmd: '/model', args: '[default|opus|sonnet|haiku]', desc: 'switch Oracle\'s model', local: true },
+  { cmd: '/model', args: '[default|opus|sonnet|haiku]', desc: 'switch the brain\'s model', local: true },
   { cmd: '/golden', args: '', desc: 'run the regression exams for the brain', local: false },
   { cmd: '/proposals', args: '', desc: 'pending self-improvement proposals', local: false },
   { cmd: '/export', args: '', desc: 'export the transcript to the vault', local: false },
@@ -443,7 +443,7 @@ async function runLocalCommand(name, arg) {
       if (!arg) { const open = f ? (f.content.match(/^\s*[-*]\s*\[ \][^\n]*/gm) || []).slice(0, 12) : []; return { text: open.length ? '**' + proj + '** — ' + open.length + ' open issue' + (open.length > 1 ? 's' : '') + ' (`' + f.path + '`)\n\n' + open.map((l) => l.trim()).join('\n') : 'No open issues for **' + proj + '**' + (f ? ' in `' + f.path + '`' : '') + '. File one with `/issue <text>`.', acts: [{ label: 'triage them', run: () => send('triage the open issues in ' + (f ? f.path : 'the issues file') + ' for ' + proj + ': bug / balance / idea, severity, and which one to fix first') }] }; }
       const path = f ? f.path : ((S.projects || []).find((x) => x.name === proj && x.kind === 'game') ? 'games/' : 'projects/') + proj + '/issues.md';
       const stamp = new Date().toISOString().slice(0, 10); const line = '- [ ] ' + stamp + ' · ' + arg.replace(/\n+/g, ' ');
-      const cur = f ? f.content.replace(/\s+$/, '') : '# ' + proj + ' — issues\n\n> Filed from Nibbi; Oracle triages (bug · balance · idea) and links fixes.\n';
+      const cur = f ? f.content.replace(/\s+$/, '') : '# ' + proj + ' — issues\n\n> Filed from the app; nibbi triages (bug · balance · idea) and links fixes.\n';
       const st = addStep(T, 'filing to ' + path); await api.post('/nibbi/vault-write', { path, content: cur + '\n' + line + '\n', log: 'issue | ' + proj + ': ' + arg.slice(0, 120) + ' (filed from Nibbi → ' + path + ')' }); markStep(st, 'done');
       return { text: 'Filed to `' + path + '`:\n\n' + line, acts: [{ label: 'fix it now', run: () => send('/fix ' + arg) }, { label: 'ask nibbi to triage', run: () => send('triage the newest issue in ' + path + ' (bug / balance / idea, severity) and tell me whether to dispatch a fixer') }] };
     });
@@ -489,14 +489,14 @@ async function runLocalCommand(name, arg) {
     });
     case 'goal': return localTurn('/goal' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = activeProject();
-      if (!arg) { const g = await api.get('/nibbi/goal'); const mine = g[proj]; const a = autoOf(proj); if (!mine) return { text: 'No goal on **' + proj + '**' + (a.on ? ' (auto is ' + a.mode + ' — it follows the whole plan)' : '') + '. Set one: `/goal finish M9` — I keep dispatching and merging toward it, and nudge Oracle if the loop stalls.', acts: [{ label: 'goal: next milestone', run: () => { ask.value = '/goal finish '; ask.focus(); autosize(); } }] };
+      if (!arg) { const g = await api.get('/nibbi/goal'); const mine = g[proj]; const a = autoOf(proj); if (!mine) return { text: 'No goal on **' + proj + '**' + (a.on ? ' (auto is ' + a.mode + ' — it follows the whole plan)' : '') + '. Set one: `/goal finish M9` — I keep dispatching and merging toward it, and nudge the brain if the loop stalls.', acts: [{ label: 'goal: next milestone', run: () => { ask.value = '/goal finish '; ask.focus(); autosize(); } }] };
         let prog = ''; if (mine.focus) { try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const m = ms.find((x) => x.name.toLowerCase().startsWith(mine.focus.toLowerCase())); if (m) prog = ' · ' + m.done + '/' + m.total + ' tasks'; } catch { /* */ } }
         return { text: 'Goal on **' + proj + '**: _' + md.esc(mine.text) + '_' + (mine.focus ? ' (milestone ' + mine.focus + prog + ')' : '') + ' — since ' + relTime(mine.startedAt) + ', auto **' + a.mode + '**, ' + a.inflight + ' in flight · ' + a.pending + ' pending' + (mine.nudges ? ' · nudged ' + mine.nudges + '×' : '') + '.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, { label: 'stop the goal', confirm: 'stop — sure?', run: () => send('/goal stop') }] }; }
       if (/^stop$/i.test(arg)) { await api.post('/nibbi/goal', { project: proj, stop: true }); refreshStatus(); return { text: 'Goal on **' + proj + '** cleared. Auto stays as it was (' + autoOf(proj).mode + '); `/auto ' + proj + ' off` to stop everything.' }; }
       const st = addStep(T, 'setting the goal and switching auto on');
       const r = await api.post('/nibbi/goal', { project: proj, text: arg }); markStep(st, 'done'); refreshStatus();
       let prog = ''; if (r.goal.focus) { try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const m = ms.find((x) => x.name.toLowerCase().startsWith(r.goal.focus.toLowerCase())); if (m) prog = ' — ' + m.name + ': ' + (m.total - m.done) + ' task' + (m.total - m.done === 1 ? '' : 's') + ' left'; } catch { /* */ } }
-      return { text: 'Goal on **' + proj + '**: _' + md.esc(arg) + '_' + prog + '.\n\nAuto is **' + r.mode + '**' + (r.mode === 'ship' ? ' — fixers dispatch, test and merge on their own' : ' — fixers dispatch on their own; you approve each merge') + '. I watch the loop: if nothing is in flight for 8 minutes while tasks remain, I nudge Oracle to dispatch. Every landing shows up here; `/goal` shows progress; `/goal stop` ends it.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, ...(r.mode !== 'ship' ? [{ label: 'switch to ship', confirm: 'ship = merges itself — sure?', warn: true, run: () => send('/auto ' + proj + ' ship') }] : [])] };
+      return { text: 'Goal on **' + proj + '**: _' + md.esc(arg) + '_' + prog + '.\n\nAuto is **' + r.mode + '**' + (r.mode === 'ship' ? ' — fixers dispatch, test and merge on their own' : ' — fixers dispatch on their own; you approve each merge') + '. I watch the loop: if nothing is in flight for 8 minutes while tasks remain, I nudge the brain to dispatch. Every landing shows up here; `/goal` shows progress; `/goal stop` ends it.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, ...(r.mode !== 'ship' ? [{ label: 'switch to ship', confirm: 'ship = merges itself — sure?', warn: true, run: () => send('/auto ' + proj + ' ship') }] : [])] };
     });
     case 'auto': { const m = arg.match(/^(\S+)\s+(off|suggest|stage|ship|pause|resume|on)$/i); return localTurn('/auto ' + arg, async () => {
       if (!m) return { ok: false, text: '`/auto <project> <off|suggest|stage|ship|pause|resume>`' };
@@ -594,6 +594,7 @@ function connectEvents() {
   evSource.addEventListener('ready', () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; });
   evSource.addEventListener('fixer', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) { evReplay.push(ev); return; } onFixerEvent(ev); });
   evSource.addEventListener('goal', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, (ev.done ? '🎯 ' : '') + '**' + md.esc(ev.project) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; if (ev.done) { nibbi.setMood('happy'); sound('land'); } if (ev.blocked) { T.nib.classList.add('error'); nibbi.setMood('error'); addActs(T, [restartAct(), { label: 'ask nibbi', run: () => send('what is blocking the fixers right now?') }], { sticky: true }); if (document.hidden) notify('nibbi · loop blocked', ev.project + ': Oracle cannot dispatch — restart the gateway'); } refreshStatus(); });
+  evSource.addEventListener('brief', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) { evReplay.push({ ...ev, to: 'brief' }); return; } setMode('talk'); body.classList.remove('rest'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, ev.text, false); setMeta(T, {}); T.done = true; if (!ev.silent) { nibbi.setMood('speaking'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); if (document.hidden) notify('nibbi', stripMd(ev.text).slice(0, 120)); if (S.voiceOn && !S.demo) speak(firstSentences(stripMd(ev.text), 2, 260)); } refreshStatus(); });
   evSource.addEventListener('note', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, '**' + md.esc(ev.title || ev.id) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; });
   evSource.addEventListener('auto', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; refreshStatus(); toast('auto on ' + ev.project + ' → ' + (ev.to.on ? ev.to.mode : 'off'), 2500); });
   evSource.onerror = () => { /* EventSource reconnects on its own; replay resumes from lastEventTs */ evReady = false; };
@@ -623,6 +624,8 @@ function postFixerBubble(f) {
 }
 function postAwayBubble(evs) {
   const latest = new Map(); for (const e of evs) latest.set(e.id, e);   // one line per fixer: its latest state
+  const briefs = evs.filter((e) => e.to === 'brief' && !e.silent);
+  for (const b of briefs.slice(-3)) { setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, b.text, false); T.at = b.ts; setMeta(T, {}); T.done = true; }
   const done = [...latest.values()].filter((e) => ['done', 'failed', 'merged'].includes(e.to));
   if (!done.length) return;
   setMode('talk'); body.classList.remove('rest');
@@ -767,7 +770,7 @@ async function playFlow(project, action) {
       markStep(st, r.url ? 'done' : 'fail');
       if (r.url) { url = r.url; text = '**' + project + '** is up at ' + url + ' — opening it. It runs for an hour, then I put it away.'; openUrl(url); }
       else if (action === 'status') { text = '**' + project + '** isn\'t running.' + (r.playable ? ' Want me to start it?' : ' It has no web dev server (' + (r.kind || 'terminal') + ').'); }
-      else { ok = false; text = 'The server didn\'t come up in a minute. The log is at `~/.oracle/play-' + project + '.log`.'; }
+      else { ok = false; text = 'The server didn\'t come up in a minute. The log is at `~/.nibbi/play-' + project + '.log`.'; }
     }
   } catch (e) { ok = false; text = /unknown project/i.test(e.message) ? 'I don\'t know a project called **' + project + '**. Registered projects: ' + ((S.projects || []).map((p) => p.name).join(', ') || 'none yet') + '.' : /no web dev server|terminal game/i.test(e.message) ? '**' + project + '** has no web dev server — it\'s a terminal game (`npm run play`).' : 'I couldn\'t launch it — ' + e.message; }
   finishSteps(T, ok); setSaid(T, text, false); setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
@@ -811,7 +814,7 @@ async function send(text, images) {
 
   const ctrl = new AbortController(); S.abort = ctrl;
   const brain = S.demo ? demoTurn : (S.link === 'offline' ? offlineTurn : sseTurn);
-  let waitStep = null; if (!S.demo && S.status && S.status.busy) waitStep = addStep(T, 'waiting — Oracle is busy with another turn (cron or fixer); yours is queued');
+  let waitStep = null; if (!S.demo && S.status && S.status.busy) waitStep = addStep(T, 'waiting — the brain is busy with another turn (cron or fixer); yours is queued');
   if (!S.demo && S.status && S.status.rateLimit && S.status.rateLimit.status !== 'allowed') waitStep = waitStep || addStep(T, 'rate-limited until ' + new Date((S.status.rateLimit.resetsAt || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' — trying anyway');
   let result = null, spoke = false, toolCount = 0, lastFixerPoll = 0;
   sentenceCursor = 0; sentencesSpoken = 0; S.spokeStream = false; stopSpeaking();
@@ -863,7 +866,7 @@ async function send(text, images) {
   scheduleIdleTimers();
 }
 
-const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart Oracle — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
+const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart the brain — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
 function errorActs(text) {
   const acts = [{ label: 'try again', run: () => { const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }];
   if (/oauth|authenticate|token/i.test(text)) acts.push({ label: 'how to re-login', warn: true, run: () => { toast('in Terminal: claude setup-token → then restart the gateway', 5000); } });
@@ -1029,7 +1032,7 @@ let linkFreshT = 0;
 function setLink(l) {
   if (S.link !== l) { body.classList.add('link-fresh'); clearTimeout(linkFreshT); linkFreshT = setTimeout(() => body.classList.remove('link-fresh'), 2600); }
   S.link = l; body.dataset.link = l;
-  $('.label', status).textContent = { live: 'oracle', busy: 'working', demo: 'demo brain', offline: 'gateway offline', booting: 'waking' }[l] || l;
+  $('.label', status).textContent = { live: 'nibbi', busy: 'working', demo: 'demo brain', offline: 'brain offline', booting: 'waking' }[l] || l;
 }
 async function refreshStatus() {
   try {
@@ -1044,7 +1047,7 @@ async function refreshStatus() {
     } else {
       if (!S.busy) { setLink(S.demo ? 'demo' : 'offline'); if (!S.demo && S.mode === 'idle' && nibbi.mood() === 'idle') nibbi.setMood('sleep'); }
       $('#st-brain').textContent = 'brain · unreachable at ' + (h.gateway || 'gateway');
-      $('#st-session').textContent = 'launchctl kickstart -k gui/$(id -u)/com.oracle.gateway';
+      $('#st-session').textContent = 'launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway';
       $('#st-model').textContent = 'model · —';
     }
     if (!S.busy) { try { const fr = await fetch('/api/fixers'); if (fr.ok) S.fixers = await fr.json(); } catch { /* ignore */ } }
@@ -1062,10 +1065,10 @@ async function refreshStatus() {
 }
 $('#st-project').onclick = () => { const names = projectNames(); if (!names.length) return; const i = names.indexOf(activeProject()); send('/project ' + names[(i + 1) % names.length]); };
 $('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn); refreshStatus(); toast(S.voiceOn ? NAME + ' will speak replies' : 'voice off'); if (S.voiceOn) speak('Okay. I\'ll talk.'); };
-$('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real Oracle'); };
+$('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); };
 $('#st-clear').onclick = () => tidy();
 $('#st-clear').insertAdjacentHTML('beforebegin', '<button class="row act" id="st-restart" type="button">restart the gateway (twice to confirm)</button>');
-{ let armed = 0; $('#st-restart').onclick = () => { if (!armed) { armed = setTimeout(() => { armed = 0; $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 4000); $('#st-restart').textContent = 'restart Oracle — sure?'; return; } clearTimeout(armed); armed = 0; $('#st-restart').textContent = 'restarting…'; restartAct().run(); setTimeout(() => { $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 8000); }; }
+{ let armed = 0; $('#st-restart').onclick = () => { if (!armed) { armed = setTimeout(() => { armed = 0; $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 4000); $('#st-restart').textContent = 'restart the brain — sure?'; return; } clearTimeout(armed); armed = 0; $('#st-restart').textContent = 'restarting…'; restartAct().run(); setTimeout(() => { $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 8000); }; }
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
 refreshStatus(); setInterval(refreshStatus, 6000); connectEvents();
 function mostActiveProject(list) {
@@ -1116,7 +1119,7 @@ function showChips(when) {
   chipsShown = true;
   clearTimeout(S.chipTimer); S.chipTimer = setTimeout(hideChips, when === 'after' ? 14000 : 30000);
 }
-function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; ask.focus(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); ask.focus(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.oracle.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
+function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; ask.focus(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); ask.focus(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
@@ -1218,7 +1221,7 @@ async function playNext() {
     await a.play();
   } catch { speakingAudio = null; playNext(); }
 }
-/* streaming: speak sentences as they complete (unless Oracle wrote a »voice: line — then only that) */
+/* streaming: speak sentences as they complete (unless the brain wrote a »voice: line — then only that) */
 let sentenceCursor = 0, sentencesSpoken = 0;
 function streamSpeech(T) {
   if (!S.voiceOn || S.demo || S.link === 'offline') return;
