@@ -56,6 +56,67 @@ body[data-mode="talk"] .feed { opacity: 1; pointer-events: auto; }
 .v6 .set { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; } .v6 .set span:last-child { color: var(--ink-3); }
 .v6 .status { display: none; } .v6 .project { display: none; }
 .v6 .up::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 12px; height: 12px; background: #faf8f4; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+
+/* ===== 5a handwritten annotations ===== */
+.v5a .marg { position: fixed; top: 168px; z-index: 6; font: italic 15px/1.55 "Bradley Hand", "Marker Felt", "Noteworthy", Geist, sans-serif; color: var(--ink-2); width: 150px; }
+.v5a .marg.left { left: 22px; } .v5a .marg.right { right: 22px; text-align: right; }
+.v5a .marg b { font-weight: 700; color: var(--ink); } .v5a .marg .dim { color: var(--ink-3); font-size: 13px; }
+.v5a .marg svg { display: block; margin: 4px 0 8px; } .v5a .marg.right svg { margin-left: auto; }
+.v5a .marg .d { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); vertical-align: middle; margin-right: 6px; } .v5a .marg .d.off { background: transparent; box-shadow: inset 0 0 0 1.5px #cfcac1; }
+/* ===== 5b spines ===== */
+.v5b .spine { position: fixed; top: 130px; z-index: 6; display: flex; gap: 6px; }
+.v5b .spine.left { left: 14px; } .v5b .spine.right { right: 14px; }
+.v5b .sp { writing-mode: vertical-rl; transform: rotate(180deg); padding: 12px 6px; border-radius: 8px; font-size: 12px; letter-spacing: .06em; color: var(--ink-3); border: 1px solid transparent; }
+.v5b .sp.active { color: var(--ink); font-weight: 600; background: rgba(21,20,19,.05); border-color: var(--line); }
+.v5b .sp .d { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink); margin-top: 8px; } .v5b .sp .d.off { background: transparent; box-shadow: inset 0 0 0 1.5px #cfcac1; }
+.v5b .spine.right .sp { transform: none; color: var(--ink-4); }
+.v5b .spine.right .sp.hot { color: var(--ink-2); }
+/* ===== 5c glyph margins that expand on hover ===== */
+.v5c .gm { position: fixed; top: 160px; z-index: 6; display: flex; flex-direction: column; gap: 10px; }
+.v5c .gm.left { left: 22px; } .v5c .gm.right { right: 22px; align-items: flex-end; }
+.v5c .g { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 12.5px; }
+.v5c .gm.right .g { flex-direction: row-reverse; }
+.v5c .g .ic { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: rgba(21,20,19,.05); border: 1px solid var(--line); color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.v5c .g.active .ic { background: var(--ink); color: #f5f2ec; border-color: transparent; }
+.v5c .g .lab { opacity: .0; transition: opacity .2s; } .v5c .gm:hover .g .lab, .v5c .gm.show .g .lab { opacity: 1; }
+.v5c .g .lab b { color: var(--ink); }
+/* ===== 6a tag + gear + sheet (refined: tag collapses while typing) ===== */
+.v6a .pill { padding-left: 8px; }
+.v6a .ptag { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 999px; background: rgba(21,20,19,.06); color: var(--ink); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.v6a .ptag .d { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); } .v6a .ptag .caret { color: var(--ink-4); font-weight: 400; }
+.v6a .gear { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; color: var(--ink-3); display: grid; place-items: center; }
+.v6a .pill .ico.mic { display: none; }
+.v6a .sheet6 { position: fixed; left: 50%; transform: translateX(-50%); bottom: 190px; z-index: 6; width: min(720px, calc(100vw - 56px)); display: grid; grid-template-columns: 1.2fr 1fr; border-radius: 20px; background: var(--pill-bg); border: 1px solid var(--line); box-shadow: 0 12px 34px -18px rgba(21,20,19,.28); backdrop-filter: blur(14px); overflow: hidden; font-size: 12.5px; color: var(--ink-2); }
+.v6a .sheet6 > div { padding: 12px 14px; } .v6a .sheet6 > div + div { border-left: 1px solid var(--line); }
+.v6a .sheet6 h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
+.v6a .prow { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 7px 8px; border-radius: 10px; } .v6a .prow.active { background: rgba(21,20,19,.05); } .v6a .prow b { color: var(--ink); } .v6a .prow .m { color: var(--ink-3); font-size: 11.5px; grid-column: 1 / -1; }
+.v6a .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: rgba(21,20,19,.06); } .v6a .seg span { font-size: 11px; padding: 3px 8px; border-radius: 999px; color: var(--ink-3); } .v6a .seg span.on { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(21,20,19,.12); } .v6a .seg span.ship.on { background: var(--ink); color: #f5f2ec; }
+.v6a .set { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; } .v6a .set span:last-child { color: var(--ink-3); }
+.v6a .ptag.typing { padding: 8px 10px; } .v6a .ptag.typing .n, .v6a .ptag.typing .caret { display: none; }
+/* ===== 6b split pill: project segment + input + settings segment; projects strip above ===== */
+.v6b .pill { padding: 0; overflow: hidden; gap: 0; align-items: stretch; }
+.v6b .pseg { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 12px 18px 12px 22px; border-right: 1px solid var(--line); background: rgba(21,20,19,.035); min-width: 150px; }
+.v6b .pseg .n { font-size: 14px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 8px; } .v6b .pseg .n .d { width: 7px; height: 7px; border-radius: 50%; background: #3b4a9c; }
+.v6b .pseg .m { font-size: 11px; color: var(--ink-3); } .v6b .pseg .bar { height: 3px; border-radius: 2px; background: rgba(21,20,19,.1); margin-top: 3px; } .v6b .pseg .bar i { display: block; width: 41%; height: 100%; background: var(--ink); border-radius: 2px; }
+.v6b .pill textarea { padding: 14px 16px; }
+.v6b .sseg { display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px; border-left: 1px solid var(--line); background: rgba(21,20,19,.035); }
+.v6b .sseg .g { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-3); }
+.v6b .pill .ico.mic { display: none; }
+.v6b .strip { position: fixed; left: 50%; transform: translateX(-50%); bottom: 140px; z-index: 6; display: flex; gap: 8px; align-items: center; }
+.v6b .pch { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: var(--pill-bg); border: 1px solid var(--line); font-size: 13px; color: var(--ink-2); box-shadow: 0 8px 24px -16px rgba(21,20,19,.3); }
+.v6b .pch.active { background: var(--ink); color: #f5f2ec; border-color: transparent; }
+.v6b .pch .d { width: 7px; height: 7px; border-radius: 50%; } .v6b .pch .m { font-size: 11px; opacity: .7; }
+/* ===== 6c a handle on the pill: fixers perch on it; click flips open ===== */
+.v6c .handle { position: fixed; left: 50%; transform: translateX(-50%); bottom: 124px; z-index: 6; display: flex; align-items: center; gap: 12px; width: min(560px, calc(100vw - 120px)); padding: 6px 14px 4px; border-radius: 16px 16px 0 0; background: rgba(21,20,19,.05); border: 1px solid var(--line); border-bottom: 0; font-size: 12.5px; color: var(--ink-3); }
+.v6c .handle b { color: var(--ink); font-weight: 600; } .v6c .handle .d { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); }
+.v6c .handle .sp { flex: 1; } .v6c .handle .g { color: var(--ink-4); display: inline-flex; align-items: center; gap: 6px; }
+.v6c .agents { bottom: 150px !important; z-index: 7; }
+.v6c .pill { border-top-left-radius: 22px; border-top-right-radius: 22px; }
+.v6c .pill .ico.mic { display: none; }
+.v6c .flip { position: fixed; left: 50%; transform: translateX(-50%); bottom: 126px; z-index: 5; width: min(720px, calc(100vw - 56px)); padding: 12px 16px 26px; border-radius: 20px 20px 0 0; background: rgba(250,248,243,.7); border: 1px solid var(--line); border-bottom: 0; font-size: 12.5px; color: var(--ink-2); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.v6c .flip h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
+.v6c .flip .col b { color: var(--ink); } .v6c .flip .col div { padding: 3px 0; }
+
 /* hide the app's current treatment in all variants except the baseline */
 .vx .status, .vx .project { display: none; }
 </style></head>
@@ -77,7 +138,7 @@ body[data-mode="talk"] .feed { opacity: 1; pointer-events: auto; }
 <div class="mocklabel" id="mocklabel"></div>
 <script src="../../public/nibbi.js"></script>
 <script>
-const V = Number(new URLSearchParams(location.search).get('v') || 0);
+const V = new URLSearchParams(location.search).get('v') || '0';
 const GEAR = '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></svg>';
 const PROJECTS = [['battalion','ship','2 in flight · 5 pending · $14.20',true],['shipless','off','main is good · nothing pending',false],['nibbi','off','28/29 · staged 0',false]];
 const SETTINGS = [['voice','on'],['sounds','off'],['model','opus'],['notifications','on'],['demo brain','off'],['brain','ready · 39k ctx'],['restart the gateway','']];
@@ -95,9 +156,22 @@ const html = {
        + '<div class="marg right"><b>voice</b> on<br><span class="dim">sounds off</span><br><span class="dim">opus</span><div class="rule"></div><span class="dim">brain ready</span><br><span class="dim">39k ctx · $14.20</span><div class="rule"></div><span class="dim"><u>restart</u> · <u>tidy</u></span></div>',
   6: () => '',
 };
-const el = document.getElementById('variant'); el.className = 'v' + V; document.body.classList.add(V ? 'vx' : 'v0', 'v' + V);
+
+const SQUIG = '<svg width="90" height="8" viewBox="0 0 90 8"><path d="M1 5 Q 12 1 22 5 T 44 5 T 66 5 T 89 4" fill="none" stroke="rgba(21,20,19,.45)" stroke-width="1.4" stroke-linecap="round"/></svg>';
+html['5a'] = () => '<div class="marg left"><span class="d"></span><b>battalion</b><br><span class="dim">ship · 2 in flight · $14 of $40</span>' + SQUIG + '<span class="d off"></span>shipless<br><span class="d off"></span>nibbi<br><span class="dim">+ new</span></div>'
+  + '<div class="marg right"><b>voice</b> on · sounds off<br><span class="dim">thinking with opus</span>' + SQUIG + '<span class="dim">brain ready · 39k ctx</span><br><span class="dim">restart · tidy</span></div>';
+html['5b'] = () => '<div class="spine left"><div class="sp active">battalion<span class="d"></span></div><div class="sp">shipless<span class="d off"></span></div><div class="sp">nibbi<span class="d off"></span></div><div class="sp">+</div></div>'
+  + '<div class="spine right"><div class="sp hot">voice on</div><div class="sp">sounds off</div><div class="sp">opus</div><div class="sp">brain ready</div><div class="sp">⚙</div></div>';
+html['5c'] = () => '<div class="gm left show"><div class="g active"><span class="ic">b</span><span class="lab"><b>battalion</b> · ship · 2 in flight</span></div><div class="g"><span class="ic">s</span><span class="lab">shipless · off</span></div><div class="g"><span class="ic">n</span><span class="lab">nibbi · off</span></div><div class="g"><span class="ic">+</span><span class="lab">new project</span></div></div>'
+  + '<div class="gm right"><div class="g active"><span class="ic">♪</span><span class="lab"><b>voice</b> on</span></div><div class="g"><span class="ic">◐</span><span class="lab">sounds off</span></div><div class="g"><span class="ic">✦</span><span class="lab">opus</span></div><div class="g"><span class="ic">●</span><span class="lab">brain ready · 39k</span></div><div class="g"><span class="ic">' + GEAR + '</span><span class="lab">settings</span></div></div>';
+html['6a'] = () => '';
+html['6b'] = () => '<div class="strip"><span class="pch active"><span class="d" style="background:#f5f2ec"></span>battalion <span class="m">ship · 2 in flight</span></span><span class="pch"><span class="d" style="box-shadow:inset 0 0 0 1.5px #cfcac1"></span>shipless</span><span class="pch"><span class="d" style="box-shadow:inset 0 0 0 1.5px #cfcac1"></span>nibbi</span><span class="pch">+</span></div>';
+html['6c'] = () => '<div class="handle"><span class="d"></span><b>battalion</b><span>ship · 2 in flight · $14 of $40</span><span class="sp"></span><span class="g">' + GEAR + ' voice on · opus</span></div>'
+  + '<div class="flip"><div class="col"><h4>projects</h4><div><b>battalion</b> · ship</div><div>shipless · off</div><div>nibbi · off</div><div style="color:var(--ink-4)">+ new</div></div><div class="col"><h4>this project</h4><div>41% of plan</div><div>goal: M12</div><div>cap $40 · $14.20</div><div>plan · play · fix…</div></div><div class="col"><h4>settings</h4><div>voice on · sounds off</div><div>model opus</div><div>notifications on</div><div>restart · demo · tidy</div></div></div>';
+
+const el = document.getElementById('variant'); el.className = 'v' + V; document.body.classList.add(V !== '0' ? 'vx' : 'v0', 'v' + V);
 el.innerHTML = (html[V] || (() => ''))();
-if (V === 6) {
+if (V === '6' || V === '6a') {
   const pill = document.getElementById('pill'); const ta = document.getElementById('ask');
   const tag = document.createElement('div'); tag.className = 'ptag'; tag.innerHTML = '<span class="d"></span>battalion <span class="caret">▾</span>'; pill.insertBefore(tag, ta);
   ta.placeholder = 'Ask nibbi to build something in battalion…';
@@ -106,9 +180,9 @@ if (V === 6) {
   up.innerHTML = '<div><h4>project</h4>' + PROJECTS.map(([n, m, s, a]) => '<div class="prow' + (a ? ' active' : '') + '"><span>' + dot(m) + ' <b>' + n + '</b></span><span class="seg"><span class="' + (m === 'off' ? 'on' : '') + '">off</span><span>suggest</span><span class="' + (m === 'stage' ? 'on' : '') + '">stage</span><span class="ship ' + (m === 'ship' ? 'on' : '') + '">ship</span></span><span class="m">' + s + '</span></div>').join('') + '<div class="prow"><span style="color:var(--ink-4)">+ new project</span></div></div>'
     + '<div><h4>settings</h4>' + SETTINGS.map(([k, v]) => '<div class="set"><span>' + k + '</span><span>' + (v || '↻') + '</span></div>').join('') + '</div>';
   document.body.appendChild(up);
-  document.querySelector('.v6 .pill .ico.mic').style.display = 'none';
+  const mic6 = document.querySelector('.pill .ico.mic'); if (mic6) mic6.style.display = 'none';
 }
-document.getElementById('mocklabel').textContent = ['0 · current: label top-left + dot top-right', '1 · folder tabs on the left edge', '2 · ink stamps', '3 · dock under the pill', '4 · title line + sheet', '5 · marginalia', '6 · inside the text entry box'][V] || '';
+document.getElementById('mocklabel').textContent = ({ '0': '0 · current: label top-left + dot top-right', '1': '1 · folder tabs on the left edge', '2': '2 · ink stamps', '3': '3 · dock under the pill', '4': '4 · title line + sheet', '5': '5 · marginalia', '6': '6 · inside the text entry box', '5a': '5a · handwritten annotations', '5b': '5b · spines (vertical labels on both edges)', '5c': '5c · glyph margins that unfold on hover', '6a': '6a · tag + gear in the pill; sheet opens upward', '6b': '6b · split pill: project segment · input · settings segment; strip above', '6c': '6c · a handle on the pill — fixers perch on it; it flips open' })[V] || '';
 /* the character, mirrors and two fixer agents, like the app */
 const n = createNibbi({ ink: document.getElementById('ink'), fx: document.getElementById('fx') });
 document.body.style.backgroundImage = 'url(' + n.paperDataURL() + ')';
@@ -119,5 +193,7 @@ const ag = [...document.querySelectorAll('.agent .ava')];
 n.setAgents([{ id: 'a', canvas: ag[0], color: [0.23, 0.29, 0.61], mood: 'working', seed: 0.2 }, { id: 'b', canvas: ag[1], color: [0.18, 0.5, 0.46], mood: 'working', seed: 0.7 }]);
 document.documentElement.style.setProperty('--feed-bottom', (innerHeight - document.getElementById('pill').getBoundingClientRect().top + 18 + 52) + 'px');
 document.documentElement.style.setProperty('--agents-bottom', (innerHeight - document.getElementById('pill').getBoundingClientRect().top - 3) + 'px');
-if (V === 3) { document.querySelector('.agents').style.display = 'none'; }   // the dock takes that space; fixers would perch on the pill's top edge instead
+if (V === '3') { document.querySelector('.agents').style.display = 'none'; }
+if (V === '6a') { document.querySelector('.up').className = 'sheet6'; document.querySelector('.ptag').innerHTML = '<span class="d"></span><span class="n">battalion</span> <span class="caret">▾</span>'; }
+if (V === '6b') { const pill = document.getElementById('pill'); const ta = document.getElementById('ask'); const seg = document.createElement('div'); seg.className = 'pseg'; seg.innerHTML = '<span class="n"><span class="d"></span>battalion</span><span class="m">ship · 2 in flight</span><span class="bar"><i></i></span>'; pill.insertBefore(seg, ta); const s = document.createElement('div'); s.className = 'sseg'; s.innerHTML = '<span class="g">' + GEAR + '</span>'; pill.insertBefore(s, pill.querySelector('.send')); pill.querySelector('.send').style.margin = '10px 10px 10px 0'; ta.placeholder = 'Ask nibbi to build something…'; }   // the dock takes that space; fixers would perch on the pill's top edge instead
 </script></body></html>
