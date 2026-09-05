@@ -41,7 +41,10 @@ export function setAuto(project: string, cfg: Partial<AutoCfg>): AutoCfg {
   const all = autoConfig(); const cur = all[project] ?? { on: false, maxConcurrent: 2, autoMerge: false, mode: 'off' };
   const next = { ...cur, ...cfg };
   next.maxConcurrent = Math.max(1, Math.min(4, Math.floor(next.maxConcurrent || 2)));
-  next.mode = cfg.mode ?? (!next.on ? 'off' : next.autoMerge ? 'ship' : 'stage');
+  const legacyMode = !next.on ? 'off' : next.autoMerge ? 'ship' : 'stage';
+  const switchesChanged = cfg.on !== undefined || cfg.autoMerge !== undefined;
+  // Notes and other settings cannot expand the owner's selected execution mode.
+  next.mode = cfg.mode ?? (switchesChanged ? legacyMode : cur.mode ?? legacyMode);
   next.on = next.mode !== 'off'; next.autoMerge = next.mode === 'ship';
   if (next.autoMerge && !hasCheck(games()[project].check)) throw new Error('Ship mode requires a real verification command');
   if (next.on && !cur.on) next.onAt = new Date().toISOString();

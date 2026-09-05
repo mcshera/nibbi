@@ -198,6 +198,7 @@ function addActs(T, acts, opts) {
   const w = document.createElement('div'); w.className = 'acts' + (opts && opts.sticky ? ' sticky' : '');
   for (const a of acts) {
     const c = document.createElement('button'); c.type = 'button'; c.className = 'chip in' + (a.warn ? ' warn' : ''); c.textContent = a.label;
+    if (a.reviewMutation) { c.dataset.reviewMutation = ''; c.disabled = !!S.review?.pending; }
     if (a.confirm) { let armed = 0; c.onclick = () => { if (!armed) { armed = setTimeout(() => { armed = 0; c.textContent = a.label; c.classList.remove('armed'); }, 4000); c.textContent = a.confirm; c.classList.add('armed'); return; } clearTimeout(armed); armed = 0; a.run(); }; }
     else c.onclick = () => a.run();
     w.appendChild(c);
@@ -208,6 +209,7 @@ function addActs(T, acts, opts) {
 let tidied = null;
 function tidy() {
   if (S.busy || !S.turns.length) return;
+  if (S.review) endReview();
   const saved = { turns: S.turns, nodes: [...feed.children] };
   for (const T of S.turns) T.el.classList.add('leave');
   setTimeout(() => { if (tidied === saved) feed.replaceChildren(); }, 240);
@@ -665,38 +667,59 @@ function postAwayBubble(evs) {
 /* ------------------------------------------------------------------ review mode: one staged fixer at a time, from the keyboard */
 async function showReview() {
   const R = S.review; if (!R) return;
+  const render = R.render = (R.render || 0) + 1;
   const id = R.ids[R.i]; const f = fixerById(id) || { id, status: 'staged' };
+  const current = () => S.review === R && R.render === render && R.ids[R.i] === id;
   if (!R.T) { R.T = newTurn('/review'); R.T.plain = false; R.T.bubble.classList.remove('live'); R.T.el.classList.add('review'); }
   const T = R.T; T.said.replaceChildren(); const old = T.body.querySelector('.acts'); if (old) old.remove();
   const head = document.createElement('div'); head.className = 'rhead'; head.innerHTML = '<b>' + (R.i + 1) + ' of ' + R.ids.length + '</b> · ' + escapeHtml(fixerTitle(f)) + ' <span class="m">' + escapeHtml([f.game, f.model, f.costUsd ? '$' + Number(f.costUsd).toFixed(2) : null, f.group].filter(Boolean).join(' · ')) + '</span><span class="keys">j/k next · a approve · x discard · p preview</span>';
   T.said.appendChild(head);
   if (f.summary) { const s = document.createElement('div'); s.className = 'rsum'; s.textContent = String(f.summary).slice(0, 400); T.said.appendChild(s); }
-  try { const d = await api.get('/api/fixer-diff?id=' + encodeURIComponent(id)); T.said.appendChild(renderDiff(d)); } catch (e) { const p = document.createElement('p'); p.textContent = 'diff unavailable — ' + e.message; T.said.appendChild(p); }
+  try { const d = await api.get('/api/fixer-diff?id=' + encodeURIComponent(id)); if (!current()) return; T.said.appendChild(renderDiff(d)); } catch (e) { if (!current()) return; const p = document.createElement('p'); p.textContent = 'diff unavailable — ' + e.message; T.said.appendChild(p); }
   const acts = [];
   if (R.ids.length > 1) acts.push({ label: 'next (j)', run: () => reviewStep(1) });
-  acts.push({ label: 'approve & merge (a)', confirm: 'merge — sure?', warn: true, run: () => reviewAct('approve') }, { label: 'preview (p)', run: () => send('/preview ' + id) }, { label: 'discard (x)', confirm: 'discard this fixer — sure?', run: () => reviewAct('discard') });
-  if (R.ids.length > 1 && f.group && R.ids.filter((x) => (fixerById(x) || {}).group === f.group).length > 1) acts.push({ label: 'merge whole group', confirm: 'merge all of "' + f.group + '" — sure?', warn: true, run: () => api.post('/api/group-merge', { project: f.game, group: f.group }).then((r) => { toast(r.text || 'merged', 4000); endReview(); }).catch((e) => toast(e.message)) });
+  acts.push({ label: 'approve & merge (a)', confirm: 'merge — sure?', warn: true, reviewMutation: true, run: () => reviewAct('approve', R, id) }, { label: 'preview (p)', run: () => send('/preview ' + id) }, { label: 'discard (x)', confirm: 'discard this fixer — sure?', reviewMutation: true, run: () => reviewAct('discard', R, id) });
+  if (R.ids.length > 1 && f.group && R.ids.filter((x) => { const other = fixerById(x); return other?.group === f.group && other.game === f.game; }).length > 1) acts.push({ label: 'merge whole group', confirm: 'merge all of "' + f.group + '" — sure?', warn: true, reviewMutation: true, run: () => reviewAct('group', R, id) });
   acts.push({ label: 'done reviewing', run: endReview });
   addActs(T, acts); S.stick = true; scrollFeed(true);
 }
 function reviewStep(d) { const R = S.review; if (!R) return; R.i = (R.i + d + R.ids.length) % R.ids.length; showReview(); }
-async function reviewAct(kind) {
-  const R = S.review; if (!R) return; const id = R.ids[R.i];
+function reviewPending(R, pending) {
+  R.pending = pending;
+  for (const button of R.T.body.querySelectorAll('[data-review-mutation]')) button.disabled = pending;
+}
+async function reviewAct(kind, R, id) {
+  if (S.review !== R || R.pending || !R.ids.includes(id)) return;
+  const f = fixerById(id), removed = kind === 'group' ? R.ids.filter(x => { const other = fixerById(x); return other?.group === f.group && other.game === f.game; }) : [id];
+  reviewPending(R, true);
   try {
-    if (kind === 'approve') { const r = await api.command('run.merge', { id }); toast((r.text || 'merged').slice(0, 140), 4000); sound('land'); }
+    if (kind === 'group') { const r = await api.post('/api/group-merge', { project: f.game, group: f.group }); toast((r.text || 'merged').slice(0, 140), 4000); sound('land'); }
+    else if (kind === 'approve') { const r = await api.command('run.merge', { id }); toast((r.text || 'merged').slice(0, 140), 4000); sound('land'); }
     else { const r = await api.command('run.discard', { id }); toast((r.text || 'discarded').slice(0, 120), 3000); }
   } catch (e) { toast(e.message); return; }
-  R.ids.splice(R.i, 1); if (!R.ids.length) { endReview(true); return; } if (R.i >= R.ids.length) R.i = 0; refreshStatus(); showReview();
+  finally { reviewPending(R, false); }
+  refreshStatus();
+  if (S.review !== R) return;
+  const selected = R.ids[R.i], previousIndex = R.i;
+  R.ids = R.ids.filter(x => !removed.includes(x));
+  if (!R.ids.length) { endReview(true); return; }
+  const selectedIndex = R.ids.indexOf(selected);
+  R.i = selectedIndex >= 0 ? selectedIndex : Math.min(previousIndex, R.ids.length - 1);
+  showReview();
 }
 function endReview(done) { const R = S.review; if (!R) return; S.review = null; if (R.T) { R.T.said.replaceChildren(renderMd(done ? 'Review done — nothing left staged.' : 'Left review mode.')); const a = R.T.body.querySelector('.acts'); if (a) a.remove(); R.T.el.classList.remove('review'); } refreshStatus(); }
+function keyboardInputOwned(e, allowComposer = false) {
+  const target = e.target instanceof Element ? e.target : document.activeElement;
+  return e.defaultPrevented || e.isComposing || !!document.querySelector('dialog[open]') || ((!allowComposer || target !== ask) && !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'));
+}
 addEventListener('keydown', (e) => {
-  if (!S.review || document.activeElement === ask || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!S.review || keyboardInputOwned(e) || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   if (e.key === 'j' || e.key === 'ArrowRight') { e.preventDefault(); reviewStep(1); }
   else if (e.key === 'k' || e.key === 'ArrowLeft') { e.preventDefault(); reviewStep(-1); }
   else if (e.key === 'a') { e.preventDefault(); const c = [...S.review.T.body.querySelectorAll('.chip')].find((x) => /approve/.test(x.textContent)); c && c.click(); }
   else if (e.key === 'x') { e.preventDefault(); const c = [...S.review.T.body.querySelectorAll('.chip')].find((x) => /discard/.test(x.textContent)); c && c.click(); }
   else if (e.key === 'p') { e.preventDefault(); send('/preview ' + S.review.ids[S.review.i]); }
-  else if (e.key === 'Escape') { endReview(); }
+  else if (e.key === 'Escape') { e.preventDefault(); endReview(); }
 }, true);
 
 /* ------------------------------------------------------------------ fleet events: when a fixer lands while you weren't looking, nibbi says so */
@@ -1151,6 +1174,7 @@ ask.addEventListener('keydown', (e) => {
 pill.addEventListener('submit', (e) => { e.preventDefault(); if (S.busy) { if (S.activeRunId) { api.command('turn.stop', { id: S.activeRunId }).then(() => { S.abort?.abort(); toast('turn stopped; work preserved'); }).catch((e) => toast(e.message)); } else if (S.abort) { S.abort.abort(); toast('connection closed; check Activity for queued work'); } return; } send(ask.value, pendingImages.slice()); });
 addEventListener('keyup', (e) => { if (e.code === 'Space' && S.holdStarted && listening === true && performance.now() - (S.holdAt || 0) > 350) { S.holdStarted = false; stopListen(true); } }, { passive: true });
 addEventListener('keydown', (e) => {
+  if (keyboardInputOwned(e, true)) return;
   if (e.altKey && e.code === 'Space') { e.preventDefault(); if (e.repeat) return; S.holdAt = performance.now(); if (!listening) { S.holdStarted = true; startListen(); } else { S.holdStarted = false; stopListen(true); } return; }
   if (e.key === 'Escape' && document.activeElement !== ask && S.mode === 'talk' && !S.busy) { tidy(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;

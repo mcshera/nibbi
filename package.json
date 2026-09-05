@@ -12,7 +12,7 @@
     "typecheck": "npm run build -w @nibbi/contracts && npm run typecheck -w @nibbi/daemon && tsc -p tsconfig.ui.json",
     "serve": "node server.mjs",
     "shot": "node tools/shot.mjs",
-    "verify": "node tools/verify.mjs",
+    "verify": "node tools/verify.mjs && node tools/review-verify.mjs",
     "fixture": "node tools/test-backend.mjs",
     "test": "npm run build -w @nibbi/contracts && npm run test:unit && npm test -w @nibbi/daemon",
     "deploy": "bash scripts/deploy-app.sh",

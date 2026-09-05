@@ -5,6 +5,8 @@ import { chromium } from 'playwright';
 import { testBackend } from './test-backend.mjs';
 const fixture = await testBackend(); const errors = []; const out = new URL('../output/playwright/', import.meta.url).pathname; mkdirSync(out, { recursive: true });
 let browser;
+const pendingReleases = [];
+const hold = () => { let release; const promise = new Promise(resolve => { release = resolve; }); pendingReleases.push(release); return { promise, release }; };
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -40,6 +42,37 @@ try {
   await page.getByText('A private, temporary test vault.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Schedules', exact: true }).click();
   await page.getByRole('button', { name: 'Enable', exact: true }).first().waitFor();
+  // A delayed response from a previous tab must never replace the selected view.
+  const heldProposals = hold();
+  await page.route('**/api/proposals', async route => { await heldProposals.promise; await route.fulfill({ json: [] }); });
+  const sawProposals = page.waitForRequest(request => request.url().endsWith('/api/proposals'));
+  await page.getByRole('button', { name: 'Proposals', exact: true }).click();
+  await sawProposals;
+  await page.getByRole('button', { name: 'Schedules', exact: true }).click();
+  await page.getByRole('button', { name: 'Enable', exact: true }).first().waitFor();
+  const oldTabResponse = page.waitForResponse(response => response.url().endsWith('/api/proposals'));
+  heldProposals.release(); await oldTabResponse;
+  // Wait for the browser to consume the response and finish its render microtasks.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.ok(await page.getByRole('button', { name: 'Enable', exact: true }).count(), 'A stale tab response must not overwrite Schedules');
+  assert.equal(await page.getByText('No proposals to review.', { exact: true }).count(), 0);
+  await page.unroute('**/api/proposals');
+  // Completing a save after navigating away must not reopen its old tab.
+  const heldSchedule = hold();
+  await page.route('**/api/commands', async route => {
+    if (route.request().postDataJSON().name !== 'schedule.set') return route.fallback();
+    await heldSchedule.promise; await route.fulfill({ json: { ok: true, data: {} } });
+  });
+  const sawSchedule = page.waitForRequest(request => request.url().endsWith('/api/commands') && request.postDataJSON().name === 'schedule.set');
+  await page.getByRole('button', { name: 'Enable', exact: true }).first().click();
+  await sawSchedule;
+  await page.getByRole('button', { name: 'Phone', exact: true }).click();
+  await page.getByRole('button', { name: 'Generate one-use pairing code', exact: true }).waitFor();
+  const oldSaveResponse = page.waitForResponse(response => response.url().endsWith('/api/commands'));
+  heldSchedule.release(); await oldSaveResponse;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.ok(await page.getByRole('button', { name: 'Generate one-use pairing code', exact: true }).count(), 'Finishing a previous tab save must not navigate away from Phone');
+  await page.unroute('**/api/commands');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.evaluate(() => window.nibbiApp.send('/project fixture'));
   await page.waitForFunction(() => !window.nibbiApp.state().busy);
@@ -74,5 +107,5 @@ try {
   assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'No horizontal overflow on phone');
   await mobile.close();
   assert.deepEqual(errors, [], 'No unexpected browser errors');
-  console.log('Browser checks passed: desktop, phone, Claude sign-in controls, skill activation/inspection, vault, schedules, stage-only goals, failed-review retention, event replay, idempotency and origin protection.');
-} finally { await browser?.close(); await fixture.close(); }
+  console.log('Browser checks passed: desktop, phone, Claude sign-in controls, skill activation/inspection, vault, schedules, stale settings responses/saves, stage-only goals, failed-review retention, event replay, idempotency and origin protection.');
+} finally { for (const release of pendingReleases) release(); await browser?.close(); await fixture.close(); }

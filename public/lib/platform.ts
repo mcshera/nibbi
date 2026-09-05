@@ -5,12 +5,18 @@ const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTM
 export function platformPanel(activeProject: () => string | undefined, changed: () => void) {
   const api = createClient(activeProject), dialog = node('dialog'); dialog.className = 'platform-panel'; dialog.setAttribute('aria-label', 'Nibbi settings'); document.body.append(dialog);
   const header = node('header'), title = node('h2', 'Your Nibbi'), close = node('button', 'Close'); close.type = 'button'; close.onclick = () => dialog.close(); header.append(title, close);
-  const tabs = node('nav'), content = node('section'), message = node('p'); message.className = 'panel-message'; message.setAttribute('role', 'status'); dialog.append(header, tabs, message, content);
-  const action = (label: string, run: () => Promise<unknown>): HTMLButtonElement => {
-    const button = node('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; message.textContent = ''; try { await run(); changed(); } catch (error) { message.textContent = (error as Error).message; } finally { button.disabled = false; } }; return button;
-  };
+  const tabs = node('nav'); dialog.append(header, tabs);
+  let view: HTMLElement[] = [];
   const input = (label: string, value = ''): { label: HTMLLabelElement; input: HTMLInputElement } => { const l = node('label', label), field = node('input'); field.value = value; l.append(field); return { label: l, input: field }; };
   const show = async (tab: string): Promise<void> => {
+    // Each visit owns its nodes: delayed reads and saves from an old tab can
+    // finish without overwriting the view the owner has since selected.
+    const content = node('section'), message = node('p'); message.className = 'panel-message'; message.setAttribute('role', 'status');
+    for (const element of view) element.remove(); view = [message, content]; dialog.append(...view);
+    const refresh = async (): Promise<void> => { if (dialog.open && content.isConnected) await show(tab); };
+    const action = (label: string, run: () => Promise<unknown>): HTMLButtonElement => {
+      const button = node('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; message.textContent = ''; try { await run(); changed(); } catch (error) { message.textContent = (error as Error).message; } finally { button.disabled = false; } }; return button;
+    };
     content.replaceChildren(node('p', 'Loading…')); message.textContent = ''; for (const child of tabs.children) child.setAttribute('aria-current', child.textContent === tab ? 'page' : 'false');
     try {
       if (tab === 'Providers') {
@@ -44,7 +50,7 @@ export function platformPanel(activeProject: () => string | undefined, changed: 
             const skill: SkillDescriptor = pinned && pinned.revision !== latest.revision ? (await api.get('/api/skills/content?id=' + encodeURIComponent(pinned.id) + '&revision=' + pinned.revision)).skill : latest;
             const label = node('label'), check = node('input'); check.type = 'checkbox'; check.checked = selected.settings.some(ref => ref.id === skill.id && ref.revision === skill.revision); check.disabled = skill.status !== 'available';
             label.append(check, document.createTextNode(skill.name + ' · ' + skill.revision.slice(0, 8) + ' · ' + skill.status)); group.append(label, node('small', skill.description)); checks.push({ input: check, skill });
-            if (skill.revision !== latest.revision) group.append(action('Upgrade ' + skill.name + ' to ' + latest.revision.slice(0, 8), async () => { if (!confirm('Switch future runs to the new revision? Inspect the new package from its local source first.')) return; await api.command('skills.enable', { role, refs: selected.settings.map(ref => ref.id === latest.id ? { id: latest.id, revision: latest.revision } : ref) }, project); await show('Skills'); }));
+            if (skill.revision !== latest.revision) group.append(action('Upgrade ' + skill.name + ' to ' + latest.revision.slice(0, 8), async () => { if (!confirm('Switch future runs to the new revision? Inspect the new package from its local source first.')) return; await api.command('skills.enable', { role, refs: selected.settings.map(ref => ref.id === latest.id ? { id: latest.id, revision: latest.revision } : ref) }, project); await refresh(); }));
             group.append(action('Inspect ' + skill.name, async () => {
               const query = '/api/skills/content?id=' + encodeURIComponent(skill.id) + '&revision=' + skill.revision;
               const detail = await api.get(query), viewer = node('article'), files = node('select'), pre = node('pre', detail.content);
@@ -52,14 +58,14 @@ export function platformPanel(activeProject: () => string | undefined, changed: 
               for (const name of detail.files) { const option = node('option', name); option.value = name; files.append(option); } files.value = 'SKILL.md';
               files.onchange = () => { void api.get(query + '&file=' + encodeURIComponent(files.value)).then(result => { pre.textContent = result.content; }).catch(error => { message.textContent = error.message; }); };
               viewer.append(node('h3', skill.name + ' · ' + skill.revision.slice(0, 8)), node('p', 'Dependencies: ' + (skill.dependencies.join(', ') || 'none')), files, pre); content.append(viewer);
-              if (skill.status === 'draft') viewer.append(action('Approve this revision', async () => { if (!confirm('Have you reviewed this package, its evidence, scripts and dependencies? Approval does not enable it.')) return; await api.command('skills.review', { id: skill.id, revision: skill.revision }); await show('Skills'); }));
+              if (skill.status === 'draft') viewer.append(action('Approve this revision', async () => { if (!confirm('Have you reviewed this package, its evidence, scripts and dependencies? Approval does not enable it.')) return; await api.command('skills.review', { id: skill.id, revision: skill.revision }); await refresh(); }));
             }));
           }
           group.append(action('Save ' + role + ' skills', async () => { await api.command('skills.enable', { role, refs: checks.filter(check => check.input.checked).map(check => ({ id: check.skill.id, revision: check.skill.revision })) }, project); message.textContent = 'Saved pinned revisions for the next run.'; })); content.append(group);
         }
-        const path = input('Import a local skill folder'); content.append(path.label, action('Validate and import', async () => { await api.command('skills.import', { path: path.input.value }); await show('Skills'); }));
+        const path = input('Import a local skill folder'); content.append(path.label, action('Validate and import', async () => { await api.command('skills.import', { path: path.input.value }); await refresh(); }));
         const draft = node('fieldset'), name = input('Skill name (lowercase-with-hyphens)'), description = input('When should this skill be used?'), evidence = input('Evidence run IDs (comma separated)'), body = node('textarea'), label = node('label', 'Workflow instructions'); body.rows = 8; label.append(body);
-        draft.append(node('legend', 'Draft a learned workflow'), node('p', 'Requires observations from two completed runs. Drafting never enables a skill.'), name.label, description.label, evidence.label, label, action('Save draft for review', async () => { await api.command('skills.draft', { name: name.input.value, description: description.input.value, body: body.value, evidence: evidence.input.value.split(',').map(id => id.trim()).filter(Boolean) }); await show('Skills'); })); content.append(draft);
+        draft.append(node('legend', 'Draft a learned workflow'), node('p', 'Requires observations from two completed runs. Drafting never enables a skill.'), name.label, description.label, evidence.label, label, action('Save draft for review', async () => { await api.command('skills.draft', { name: name.input.value, description: description.input.value, body: body.value, evidence: evidence.input.value.split(',').map(id => id.trim()).filter(Boolean) }); await refresh(); })); content.append(draft);
       } else if (tab === 'Vault') {
         const browse = async (path = ''): Promise<void> => { const entries = await api.get<Array<{ name: string; directory: boolean }>>('/api/vault-tree?path=' + encodeURIComponent(path)); content.replaceChildren(node('h3', path || 'Vault')); if (!path) content.append(action('Checkpoint vault', async () => { if (!confirm('Commit all current vault changes, including your own edits? Review the vault first.')) return; const result = await api.command<{ text: string }>('vault.checkpoint'); message.textContent = result.text; })); if (path) content.append(action('Back', () => browse(path.split('/').slice(0, -1).join('/')))); for (const entry of entries) content.append(action(entry.name + (entry.directory ? '/' : ''), async () => { const next = [path, entry.name].filter(Boolean).join('/'); if (entry.directory) await browse(next); else { const result = await api.get('/api/vault?p=' + encodeURIComponent(next)); content.replaceChildren(action('Back to files', () => browse(path)), node('h3', next), node('pre', result.content)); } })); }; await browse();
       } else if (tab === 'Proposals') {
@@ -72,10 +78,10 @@ export function platformPanel(activeProject: () => string | undefined, changed: 
         }));
       } else if (tab === 'Schedules') {
         const schedules = await api.get<Array<{ id: string; name: string; when: string; enabled: boolean; desc: string; next?: string; error?: string }>>('/api/schedules'); content.replaceChildren(node('p', 'Schedules run on this Mac, in its local timezone. New installations start with schedules off.'));
-        for (const schedule of schedules) { const group = node('fieldset'); group.append(node('legend', schedule.name), node('p', schedule.when + ' · ' + schedule.desc), node('small', schedule.error || 'Next: ' + (schedule.next ?? 'none')), action(schedule.enabled ? 'Disable' : 'Enable', async () => { await api.command('schedule.set', { id: schedule.id, enabled: !schedule.enabled }); await show('Schedules'); })); content.append(group); }
+        for (const schedule of schedules) { const group = node('fieldset'); group.append(node('legend', schedule.name), node('p', schedule.when + ' · ' + schedule.desc), node('small', schedule.error || 'Next: ' + (schedule.next ?? 'none')), action(schedule.enabled ? 'Disable' : 'Enable', async () => { await api.command('schedule.set', { id: schedule.id, enabled: !schedule.enabled }); await refresh(); })); content.append(group); }
       } else if (tab === 'Activity') {
         const snapshot = await api.get('/api/snapshot'); content.replaceChildren(node('p', 'Durable run history — preserved across restarts.'));
-        for (const run of snapshot.fixers.slice().reverse()) { const article = node('article'); article.append(node('h3', run.title || run.id), node('p', [run.game, run.provider ?? 'legacy', run.status, run.verification?.status ?? 'unverified', run.costUsd === undefined ? 'cost unavailable' : '$' + run.costUsd.toFixed(2)].join(' · '))); if (run.summary) article.append(node('p', run.summary)); article.append(node('small', run.id)); if (['staged', 'failed', 'interrupted'].includes(run.status)) article.append(action('Verify retained commit', async () => { await api.command('run.verify', { id: run.id }, run.game); await show('Activity'); })); content.append(article); }
+        for (const run of snapshot.fixers.slice().reverse()) { const article = node('article'); article.append(node('h3', run.title || run.id), node('p', [run.game, run.provider ?? 'legacy', run.status, run.verification?.status ?? 'unverified', run.costUsd === undefined ? 'cost unavailable' : '$' + run.costUsd.toFixed(2)].join(' · '))); if (run.summary) article.append(node('p', run.summary)); article.append(node('small', run.id)); if (['staged', 'failed', 'interrupted'].includes(run.status)) article.append(action('Verify retained commit', async () => { await api.command('run.verify', { id: run.id }, run.game); await refresh(); })); content.append(article); }
       } else if (tab === 'Phone') {
         const health = await api.get('/nibbi/health'); content.replaceChildren(node('p', 'Phone access stays on your LAN and requires HTTPS. Generate pairing codes only on this Mac.'));
         if (!health.remote) content.append(node('p', 'Start Nibbi with --remote to enable the HTTPS listener. Local-only mode is the default.'));
@@ -84,6 +90,8 @@ export function platformPanel(activeProject: () => string | undefined, changed: 
       }
     } catch (error) { content.replaceChildren(); message.textContent = (error as Error).message; }
   };
-  for (const tab of ['Providers', 'Skills', 'Vault', 'Proposals', 'Schedules', 'Activity', 'Phone']) tabs.append(action(tab, () => show(tab)));
+  for (const tab of ['Providers', 'Skills', 'Vault', 'Proposals', 'Schedules', 'Activity', 'Phone']) {
+    const button = node('button', tab); button.type = 'button'; button.onclick = () => { void show(tab); }; tabs.append(button);
+  }
   return (tab = 'Providers'): void => { if (!dialog.open) dialog.showModal(); void show(tab); };
 }
