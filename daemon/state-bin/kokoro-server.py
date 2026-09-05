@@ -3,8 +3,8 @@
 import hashlib, os, subprocess, sys, time, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-CACHE = os.path.expanduser("~/.nibbi/tts-cache")
-FFMPEG = os.path.expanduser("~/.nibbi/bin/ffmpeg")
+CACHE = os.path.join(os.environ.get("NIBBI_STATE_DIR", os.path.expanduser("~/.nibbi")), "tts-cache")
+FFMPEG = os.path.join(os.environ.get("NIBBI_STATE_DIR", os.path.expanduser("~/.nibbi")), "bin", "ffmpeg")
 os.makedirs(CACHE, exist_ok=True)
 
 sys.stderr.write("loading Kokoro-82M...\n"); sys.stderr.flush()

@@ -1,0 +1,30 @@
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+const directory = mkdtempSync(join(tmpdir(), 'nibbi-pairing-')); process.env.NIBBI_STATE_DIR = directory;
+const { config } = await import('../src/config.js');
+const { pairingCode, paired, pairingRoute, requestAllowed } = await import('../src/lan.js');
+const { closeRuntime } = await import('../src/store.js');
+after(() => { closeRuntime(); rmSync(directory, { recursive: true, force: true }); });
+const request = (headers: Record<string, string> = {}, remoteAddress = '127.0.0.1', value = {}) => Object.assign(Readable.from([Buffer.from(JSON.stringify(value))]), { method: 'POST', headers: { host: '127.0.0.1:' + config.port, ...headers }, socket: { remoteAddress } }) as unknown as IncomingMessage;
+test('host/origin checks reject rebinding, cross-site requests and cleartext LAN', () => {
+  assert.throws(() => requestAllowed(request({ host: 'attacker.example:' + config.port }), false), /host/);
+  assert.throws(() => requestAllowed(request({ origin: 'https://attacker.example' }), false), /Cross-origin/);
+  assert.throws(() => requestAllowed(request({ 'sec-fetch-site': 'cross-site' }), false), /Cross-site/);
+  assert.throws(() => requestAllowed(request({}, '192.168.1.9'), false), /HTTPS/);
+  assert.doesNotThrow(() => requestAllowed(request({ origin: 'http://127.0.0.1:' + config.port }), false));
+});
+test('pairing is one-use, cookies are protected, and revocation invalidates existing sessions', async () => {
+  const pair = pairingCode(); let cookie = '';
+  const response = { setHeader(name: string, value: string) { if (name === 'set-cookie') cookie = value; }, writeHead() {}, end() {} } as unknown as ServerResponse;
+  const url = new URL('https://127.0.0.1:' + (config.port + 1) + '/api/pairing/accept');
+  await pairingRoute(request({}, '192.168.1.9', { code: pair.code }), response, url);
+  assert.match(cookie, /HttpOnly; Secure; SameSite=Strict/); assert.equal(paired(request({ cookie })), true);
+  await assert.rejects(pairingRoute(request({}, '192.168.1.9', { code: pair.code }), response, url), /invalid or expired/);
+  await assert.rejects(pairingRoute(request({}, '192.168.1.9'), response, new URL('/api/pairing/new', url)), /from this Mac/);
+  await pairingRoute(request(), response, new URL('/api/pairing/revoke', url)); assert.equal(paired(request({ cookie })), false);
+});

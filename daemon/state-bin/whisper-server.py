@@ -3,7 +3,7 @@
 import json, os, subprocess, sys, tempfile, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-FFMPEG = os.path.expanduser("~/.nibbi/bin/ffmpeg")
+FFMPEG = os.path.join(os.environ.get("NIBBI_STATE_DIR", os.path.expanduser("~/.nibbi")), "bin", "ffmpeg")
 REPO = "mlx-community/whisper-large-v3-turbo"
 REPO_FAST = "mlx-community/whisper-small-mlx"
 VOCAB = "Nibbi, SHIPLESS, Matty, fixer, playtest, golden gate, worktree, vault, Telegram, Kokoro, derelict."

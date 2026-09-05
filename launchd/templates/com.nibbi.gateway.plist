@@ -3,16 +3,23 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.nibbi.gateway</string>
   <key>ProgramArguments</key><array>
-    <string>__REPO__/daemon/bin/nibbi</string>
-    <string>daemon</string>
+    <string>__NODE__</string>
+    <string>__REPO__/server.mjs</string>
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>15</integer>
-  <key>StandardOutPath</key><string>__HOME__/.nibbi/logs/launchd.out.log</string>
-  <key>StandardErrorPath</key><string>__HOME__/.nibbi/logs/launchd.err.log</string>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>StandardOutPath</key><string>__STATE__/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>__STATE__/logs/launchd.err.log</string>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>__NODEDIR__:__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>HOME</key><string>__HOME__</string>
+    <key>NIBBI_STATE_DIR</key><string>__STATE__</string>
+    <key>NIBBI_VAULT_DIR</key><string>__VAULT__</string>
+    <key>NIBBI_WORK_DIR</key><string>__WORK__</string>
+    <key>NIBBI_PROJECTS_DIR</key><string>__PROJECTS__</string>
+    <key>NIBBI_PORT</key><string>__PORT__</string>
+    <key>NIBBI_LEGACY_API</key><string>1</string>
   </dict>
 </dict></plist>

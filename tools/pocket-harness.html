@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pocket spring deterministic QA</title>
+<style>
+html,body{margin:0;overflow:hidden;background:#f5f2ec;color:#252820;font:12px system-ui}#ink,#fx{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none}#fx{z-index:1}.qa-hud{position:fixed;left:14px;top:12px;z-index:3;background:#f5f2ece8;padding:8px;border:1px solid #d8d9cf;border-radius:5px;max-width:65vw}.qa-hud b{display:block}.copies{position:fixed;bottom:14px;left:14px;display:flex;align-items:end;gap:12px;z-index:3}.copy{background:#f5f2ec;border:1px solid #d8d9cf;padding:4px;text-align:center}.copy canvas{display:block;width:58px;height:46px}.copy.small canvas{width:44px;height:36px}.copy span{font-size:9px}
+</style>
+<script>
+(() => {
+  const pending = new Set(), nativeRAF = window.requestAnimationFrame.bind(window), nativeCancel = window.cancelAnimationFrame.bind(window);
+  const audit = window.__qaRAF = { requested: 0, cancelled: 0, pending: () => pending.size };
+  window.requestAnimationFrame = callback => { let id; id = nativeRAF(time => { pending.delete(id); callback(time); }); pending.add(id); audit.requested++; return id; };
+  window.cancelAnimationFrame = id => { pending.delete(id); audit.cancelled++; return nativeCancel(id); };
+  if (new URLSearchParams(location.search).has('2d')) {
+    const native = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (kind, ...options) { return /^(webgl2?|experimental-webgl)$/.test(kind) ? null : native.call(this, kind, ...options); };
+  }
+})();
+</script>
+<script src="/pocket-motion.js"></script><script src="/nibbi.js"></script></head>
+<body><canvas id="ink"></canvas><canvas id="fx"></canvas>
+<div class="qa-hud"><b>Pocket spring · isolated renderer harness</b><span id="qa-label">Manual test clock. No app backend.</span></div>
+<div class="copies"><div class="copy"><canvas id="mirror"></canvas><span>mirror 58×46</span></div><div class="copy small"><canvas id="mirror-small"></canvas><span>mirror 44×36</span></div><div class="copy"><canvas id="agent"></canvas><span>agent</span></div><div class="copy small"><canvas id="agent-small"></canvas><span>small agent</span></div></div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let nibbi = null, target = null, hidden = false;
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
+  function probe(canvases) {
+    const first = canvases[0], rect = first.getBoundingClientRect();
+    const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.min(360, first.width)); cv.height = Math.max(1, Math.min(270, first.height));
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    for (const source of canvases) if (source.width && source.height) ctx.drawImage(source, 0, 0, cv.width, cv.height);
+    const bytes = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    let alpha = 0, opaque = 0, edgeOpaque = 0, hash = 2166136261, l = cv.width, t = cv.height, r = -1, b = -1, sx = 0, sy = 0;
+    for (let i = 0; i < bytes.length; i++) hash = Math.imul(hash ^ bytes[i], 16777619) >>> 0;
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+      const a = bytes[(y * cv.width + x) * 4 + 3];
+      if (a > 20) { alpha++; sx += x; sy += y; l = Math.min(l,x); r = Math.max(r,x); t = Math.min(t,y); b = Math.max(b,y); }
+      if (a > 170) { opaque++; if (x === 0 || y === 0 || x === cv.width-1 || y === cv.height-1) edgeOpaque++; }
+    }
+    return { hash: hash.toString(16), alpha, opaque, edgeOpaque, width: first.width, height: first.height,
+      css: { width: rect.width, height: rect.height },
+      bounds: alpha ? { left:l/cv.width*rect.width, top:t/cv.height*rect.height, right:(r+1)/cv.width*rect.width, bottom:(b+1)/cv.height*rect.height } : null,
+      centroid: alpha ? { x:(sx/alpha+.5)/cv.width*rect.width, y:(sy/alpha+.5)/cv.height*rect.height } : null };
+  }
+  function capture(pixels = true) {
+    const state = nibbi.state(), result = { state, target, raf: { requested: __qaRAF.requested, cancelled: __qaRAF.cancelled, pending: __qaRAF.pending() } };
+    if (pixels) result.pixels = { main: probe([$ ('ink'),$('fx')]), mirror: probe([$ ('mirror')]), smallMirror: probe([$ ('mirror-small')]), agent: probe([$ ('agent')]), smallAgent: probe([$ ('agent-small')]) };
+    const centers = state.eyeCenters || state.geometry?.eyeCenters || [];
+    result.hit = { far: nibbi.hitTest(-10000,-10000), eyes: centers.map(p => nibbi.hitTest(p.x ?? p[0], p.y ?? p[1])) };
+    return result;
+  }
+  function step(ms = 0, pixels = true) { nibbi.advance(ms); return capture(pixels); }
+  function boot(options = {}) {
+    nibbi?.destroy?.(); hidden = false;
+    target = options.target || {x:innerWidth/2,y:innerHeight*.49,r:135};
+    const before = __qaRAF.requested;
+    nibbi = window.nibbi = createNibbi({ink:$('ink'),fx:$('fx'),manual:options.manual !== false,force2D:!!options.force2D,motion:options.legacy ? 'legacy' : undefined});
+    nibbi.snapTarget(target); nibbi.setReducedMotion(!!options.reduced); nibbi.setMotionEnergy?.(options.energy ?? 1.5);
+    nibbi.addMirror($('mirror')); nibbi.addMirror($('mirror-small'));
+    nibbi.setAgents([{id:'qa-agent',canvas:$('agent'),color:[.37,.18,.15],mood:'working',seed:.2},{id:'qa-small-agent',canvas:$('agent-small'),color:[.17,.25,.37],mood:'thinking',seed:.7}]);
+    if (options.manual !== false && typeof nibbi.advance === 'function') nibbi.advance(0);
+    $('qa-label').textContent = `${options.name || 'scene'} · ${target.r}px base radius · ${options.force2D ? 'forced fallback' : 'WebGL requested'}`;
+    const result = capture(); result.rafDuringBoot = __qaRAF.requested - before; return result;
+  }
+  function play(id, options = {}, reset = true) {
+    if (reset) { nibbi.stopAnimation(); nibbi.advance(1500); }
+    const admitted = nibbi.animate(id, {priority:80,interrupt:true,...options}); nibbi.advance(0);
+    $('qa-label').textContent = `${id} · ${target.r}px base radius`;
+    return { admitted, ...capture(false) };
+  }
+  function visibility(value) { hidden = !!value; document.dispatchEvent(new Event('visibilitychange')); }
+  window.pocketQA = { ready:true, boot, step, play, capture, visibility, probe,
+    setTarget(t) { target = {...target,...t}; nibbi.setTarget(target); return step(0); },
+    destroy() { nibbi.destroy(); nibbi.destroy(); return {raf:{pending:__qaRAF.pending()},state:nibbi.state()}; },
+    contextLoss() { const gl = $('ink').getContext('webgl') || $('ink').getContext('experimental-webgl'); const extension = gl?.getExtension('WEBGL_lose_context'); if (!extension) return false; $('ink').addEventListener('webglcontextlost', () => { window.__qaLost = true; }, {once:true}); extension.loseContext(); return true; } };
+})();
+</script></body></html>

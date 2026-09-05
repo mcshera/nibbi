@@ -1,3 +1,7 @@
+import './platform.css';
+import { installPocketInteractions } from './lib/pocket-interactions.js';
+import { createClient, parseSse, subscribeEvents, requestId } from './lib/client.ts';
+import { platformPanel } from './lib/platform.ts';
 import { escapeHtml, md, parseActs, firstSentences, stripMd, TOOL_LABEL, toolLabel, humanError, questionActs, relTime, parseDiff } from './lib/text.js';
 /* app.js — Nibbi: the surface. One character, one pill, and UI that only shows up when it's needed. */
 (() => {
@@ -12,7 +16,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 /* ------------------------------------------------------------------ dom */
 const body = document.body, feed = $('#feed'), pill = $('#pill'), ask = $('#ask'), sendBtn = $('#send'), micBtn = $('#mic'), chipsEl = $('#chips'), status = $('#status'), attachEl = $('#attach'), listenEl = $('#listen');
 const fxCv = $('#fx');
-const nibbi = createNibbi({ ink: $('#ink'), fx: fxCv });
+const nibbi = createNibbi({ ink: $('#ink'), fx: fxCv, motion: Q.get('motion') === 'legacy' ? 'legacy' : 'pocket' });
 body.style.backgroundImage = 'url(' + nibbi.paperDataURL() + ')';
 
 /* ------------------------------------------------------------------ state */
@@ -54,6 +58,18 @@ function layout(snap) {
 }
 addEventListener('resize', () => layout(false));
 layout(true);
+const interactions = installPocketInteractions({ nibbi, canvas: fxCv,
+  getContext: () => ({ busy: S.busy, mode: S.mode, mood: nibbi.mood() }), onInteract: () => activity() });
+let calmMotion = LS.get('pocketCalm', false) === true;
+function syncMotionPreference() {
+  const system = reducedMotion.matches, calm = system || calmMotion;
+  nibbi.setReducedMotion(calm); interactions.setReducedMotion(calm);
+  const control = $('#st-motion'); control.disabled = system;
+  control.textContent = system ? 'motion: calm (system preference)' : 'motion: ' + (calm ? 'calm' : 'playful');
+  control.setAttribute('aria-pressed', String(calm));
+}
+$('#st-motion').onclick = () => { calmMotion = !calmMotion; LS.set('pocketCalm', calmMotion); syncMotionPreference(); };
+reducedMotion.addEventListener('change', syncMotionPreference);
 
 function setMode(m) {
   if (S.mode === m) return;
@@ -63,14 +79,11 @@ function setMode(m) {
 
 /* ------------------------------------------------------------------ pointer → nibbi */
 addEventListener('pointermove', (e) => { nibbi.pointer(e.clientX, e.clientY); fxCv.classList.toggle('grab', nibbi.hitTest(e.clientX, e.clientY)); activity(); }, { passive: true });
-fxCv.addEventListener('click', (e) => { if (nibbi.hitTest(e.clientX, e.clientY)) { nibbi.hop(); if (!S.busy) nibbi.setMood('happy'), setTimeout(() => !S.busy && nibbi.setMood(S.mode === 'talk' ? 'idle' : 'idle'), 1300); } });
-fxCv.addEventListener('dblclick', (e) => { if (nibbi.hitTest(e.clientX, e.clientY) && !S.busy) tidy(); });
-
 /* ------------------------------------------------------------------ activity / rest / sleep */
 function activity() {
   S.lastActivity = performance.now();
   if (body.classList.contains('rest')) body.classList.remove('rest');
-  if (!S.busy && nibbi.mood() === 'sleep') nibbi.setMood('idle');
+  if (!S.busy && nibbi.mood() === 'sleep') { nibbi.setMood('idle'); interactions.event('wake'); }
   scheduleIdleTimers();
 }
 function scheduleIdleTimers() {
@@ -171,7 +184,7 @@ function setMeta(T, r) {
   const bits = [];
   T.at = T.at || Date.now(); const tm = document.createElement('time'); tm.dateTime = new Date(T.at).toISOString(); tm.title = new Date(T.at).toLocaleString(); tm.textContent = relTime(T.at); T.timeEl = tm;
   bits.push('');
-  if (r && r.costUsd) { bits.push('$' + r.costUsd.toFixed(3)); T.cost = r.costUsd; }
+  if (r && r.costUsd !== undefined) { bits.push('$' + r.costUsd.toFixed(3)); T.cost = r.costUsd; } else if (r && r.runId) bits.push('cost unavailable');
   if (r && r.local) bits.push('local model');
   if (r && r.raw) bits.push(String(r.raw).replace(/^\s*error:\s*/i, '').slice(0, 90));
   T.meta.textContent = bits.filter(Boolean).join(' · '); T.meta.prepend(tm, document.createTextNode(bits.filter(Boolean).length ? ' · ' : ''));
@@ -199,7 +212,7 @@ function tidy() {
   for (const T of S.turns) T.el.classList.add('leave');
   setTimeout(() => { if (tidied === saved) feed.replaceChildren(); }, 240);
   S.turns = []; tidied = saved; LS.set('transcript', null);
-  setMode('idle'); body.classList.remove('rest'); nibbi.lookFree(); nibbi.setMood('idle'); nibbi.hop(); hideChips();
+  setMode('idle'); body.classList.remove('rest'); nibbi.lookFree(); nibbi.setMood('idle'); interactions.event('tidy'); hideChips();
   toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); persistTranscript(); } });
 }
 
@@ -209,22 +222,8 @@ function toast(msg, ms, act) { try { if (typeof clientLog === 'function') client
 
 /* ------------------------------------------------------------------ brain client */
 async function* sseTurn(message, images, signal) {
-  const res = await fetch('/api/send', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message, stream: true, images }), signal });
-  if (!res.ok) { let err = 'HTTP ' + res.status; try { err = (await res.json()).error || err; } catch { /* plain */ } throw new Error(err); }
-  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
-  for (;;) {
-    const { value, done } = await reader.read(); if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let i;
-    while ((i = buf.indexOf('\n\n')) >= 0) {
-      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-      let ev = 'message', data = '';
-      for (const line of chunk.split('\n')) { if (line.startsWith('event:')) ev = line.slice(6).trim(); else if (line.startsWith('data:')) data += line.slice(5).trim(); }
-      if (!data) continue;
-      let d = null; try { d = JSON.parse(data); } catch { continue; }
-      yield { ev, ...d };
-    }
-  }
+  const response = await fetch('/api/send', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': requestId() }, body: JSON.stringify({ message, project: activeProject(), stream: true, images }), signal });
+  yield* parseSse(response);
 }
 
 /* a scripted brain so the choreography can be seen without the gateway */
@@ -256,12 +255,11 @@ async function* demoTurn(message, _images, signal) {
 async function* offlineTurn() { await sleep(600); yield { ev: 'done', text: 'gateway offline', isError: true, offline: true }; }
 
 /* ------------------------------------------------------------------ client-side commands: the build loop lives here */
-const api = {
-  get: (p) => fetch(p).then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; }),
-  post: (p, body) => fetch(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }).then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; }),
-};
+const api = createClient(() => activeProject());
+const openPlatform = platformPanel(() => activeProject(), () => { refreshProjects(); refreshStatus(); });
+$('#st-platform').onclick = () => openPlatform();
 const projectNames = () => (S.projects || []).map((p) => p.name);
-const activeProject = () => (S.project && (!S.projects || projectNames().includes(S.project)) ? S.project : projectNames()[0]) || 'shipless';
+const activeProject = () => (S.project && (!S.projects || projectNames().includes(S.project)) ? S.project : projectNames()[0]) || 'vault';
 const bar = (done, total) => { const n = 12, f = total ? Math.round(n * done / total) : 0; return '`' + '█'.repeat(f) + '░'.repeat(n - f) + '`'; };
 
 /* a turn that nibbi answers itself (no model call): fn(T) → { text, acts?, ok?, plain?, html? } */
@@ -278,7 +276,7 @@ async function localTurn(userText, fn, opts) {
   setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
   if (!ok) T.nib.classList.add('error');
   if (out.acts && out.acts.length) addActs(T, out.acts);
-  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1400 : 2600);
+  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1400 : 2600);
   $('#sr').textContent = stripMd(out.text || ''); scheduleIdleTimers(); refreshStatus();
   return T;
 }
@@ -293,7 +291,7 @@ const fixerById = (id) => (S.fixers || []).find((f) => f.id === id);
 const fixerTitle = (f) => f.title || (f.issue || '').slice(0, 60) || f.id;
 function fixerActs(f, opts) {
   const a = []; const st = f.status;
-  if (st === 'done') a.push({ label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) }, { label: 'approve & merge', confirm: 'merge into ' + (opts && opts.target || 'the branch') + ' — sure?', warn: true, run: () => send('/approve ' + f.id) });
+  if (st === 'staged') a.push({ label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) }, { label: 'approve & merge', confirm: 'merge into ' + (opts && opts.target || 'the branch') + ' — sure?', warn: true, run: () => send('/approve ' + f.id) });
   if (st === 'running' || st === 'installing') a.push({ label: 'steer', run: () => { ask.value = '/steer ' + f.id + ' '; ask.focus(); autosize(); } }, { label: 'stop', confirm: 'stop it — sure?', warn: true, run: () => send('/stop ' + f.id) });
   if (st === 'queued') a.push({ label: 'unqueue', confirm: 'drop it from the queue?', run: () => api.post('/api/fix-unqueue', { id: f.id }).then(() => toast('unqueued')).catch((e) => toast(e.message)) });
   if (st === 'failed') a.push({ label: 'log', run: () => send('/log ' + f.id) }, { label: 'requeue', run: () => api.post('/api/fix-requeue', { id: f.id }).then(() => toast('requeued')).catch((e) => toast(e.message)) });
@@ -343,14 +341,14 @@ const COMMANDS = [
   { cmd: '/fix', args: '<issue>', desc: 'dispatch a fixer on the active project', local: true },
   { cmd: '/diff', args: '<fixer-id>', desc: 'review a fixer\'s changes inline', local: true },
   { cmd: '/approve', args: '<fixer-id>', desc: 'merge a finished fixer (the brain runs the gate)', local: false },
-  { cmd: '/preview', args: '<fixer-id> [stop]', desc: 'run the fixer\'s branch on a preview server', local: false },
+  { cmd: '/preview', args: '<fixer-id> [stop]', desc: 'run the fixer\'s branch on a preview server', local: true },
   { cmd: '/steer', args: '<fixer-id> <note>', desc: 'send a running fixer a course correction', local: true },
   { cmd: '/stop', args: '<fixer-id>', desc: 'stop a running fixer', local: true },
   { cmd: '/fixers', args: '', desc: 'list recent fixers', local: false },
   { cmd: '/review', args: '[project|all]', desc: 'walk staged fixers: j/k next/prev · a approve · x discard · p preview', local: true },
   { cmd: '/plan', args: '[project] | edit <instruction>', desc: 'milestones, progress and what auto is doing; `edit` asks nibbi to rewrite the plan', local: true },
   { cmd: '/auto', args: '<project> <off|suggest|stage|ship|pause|resume>', desc: 'steer autonomy for a project', local: true },
-  { cmd: '/goal', args: '<text> | stop', desc: 'run the active project toward a goal for as long as it takes (auto + a watchdog that unsticks it)', local: true },
+  { cmd: '/goal', args: '<text> | stop', desc: 'run the active project toward a goal for as long as it takes (stage mode, verified changes and explicit merge approval)', local: true },
   { cmd: '/play', args: '<project> [stop|status]', desc: 'launch the project\'s dev server and open it', local: true },
   { cmd: '/project', args: '[name]', desc: 'show or switch the active project', local: true },
   { cmd: '/new', args: '<name> [web|game]', desc: 'start a new project (git repo in ~/NibbiProjects; web = vite scaffold, game = rules/design + plan)', local: true },
@@ -365,23 +363,32 @@ const COMMANDS = [
   { cmd: '/vault', args: '<path>', desc: 'read a file from the brain (e.g. plans/battalion.md)', local: true },
   { cmd: '/journal', args: '[YYYY-MM-DD]', desc: 'today\'s journal page (or a given day)', local: true },
   { cmd: '/model', args: '[default|opus|sonnet|haiku]', desc: 'switch the brain\'s model', local: true },
-  { cmd: '/golden', args: '', desc: 'run the regression exams for the brain', local: false },
-  { cmd: '/proposals', args: '', desc: 'pending self-improvement proposals', local: false },
-  { cmd: '/export', args: '', desc: 'export the transcript to the vault', local: false },
+  { cmd: '/proposals', args: '', desc: 'review protected-file changes', local: true },
   { cmd: '/clear', args: '', desc: 'fresh working context (vault memory carries forward)', local: false },
   { cmd: '/deploy', args: '<project>', desc: 'run the project\'s own deploy script (two clicks, live log)', local: true },
-  { cmd: '/phone', args: '', desc: 'put nibbi on your phone (QR + steps) — parked on the `phone` branch', local: true, hidden: true },
+  { cmd: '/phone', args: '', desc: 'pair a phone over local HTTPS', local: true },
+  { cmd: '/settings', args: '', desc: 'providers, skills, vault, schedules and activity', local: true },
+  { cmd: '/skills', args: '', desc: 'inspect and enable pinned skill revisions', local: true },
+  { cmd: '/activity', args: '', desc: 'all retained runs and recovery actions', local: true },
   { cmd: '/help', args: '', desc: 'this list', local: true },
 ];
 
 async function runLocalCommand(name, arg) {
   switch (name) {
+    case 'preview': return localTurn('/preview ' + arg, async () => {
+      const [id, action] = arg.split(/\s+/); if (!id) return { ok: false, text: 'Use /preview <fixer-id> [stop].' };
+      if (action === 'stop') { await api.command('preview.stop', { id }); return { text: 'Preview stopping.' }; }
+      await api.command('preview.start', { id }); let status;
+      for (let i = 0; i < 20; i++) { status = await api.get('/api/preview?id=' + encodeURIComponent(id)); if (status.url || !status.running) break; await sleep(500); }
+      if (status.error) throw new Error(status.error);
+      return { text: status.url ? 'Preview ready: ' + status.url : 'Preview is still starting. Run /preview ' + id + ' again to check.', acts: status.url ? [{ label: 'open preview', run: () => openUrl(status.url) }] : [] };
+    });
     case 'deploy': { const go = /(^|\s)--go$/.test(arg || ''); const proj = (arg || '').replace(/(^|\s)--go$/, '').trim() || activeProject();
       return localTurn('/deploy ' + proj, async (T) => {
         if (!go) return { text: 'Deploy **' + proj + '**? I run the project\'s own `npm run deploy` here on this Mac and show the log as it goes.', acts: [{ label: 'deploy', confirm: 'deploy ' + proj + ' — sure?', warn: true, run: () => send('/deploy ' + proj + ' --go') }] };
         const st = addStep(T, 'running npm run deploy in ' + proj);
         const logEl = document.createElement('pre'); logEl.className = 'runlog'; T.said.appendChild(logEl);
-        const res = await fetch('/nibbi/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: proj, script: 'deploy' }) });
+        const res = await fetch('/nibbi/run', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': requestId() }, body: JSON.stringify({ project: proj, script: 'deploy' }) });
         if (!res.ok) { const j = await res.json().catch(() => ({})); markStep(st, 'fail'); if (res.status === 409) return { ok: false, text: '**' + proj + '** has no `deploy` script yet. Add one to its `package.json` — e.g. `"deploy": "sh scripts/deploy.sh"` — and `/deploy ' + proj + '` will run it with a live log.' + (j.scripts && j.scripts.length ? ' Scripts it has: ' + j.scripts.map((s) => '`' + s + '`').join(', ') + '.' : ''), acts: [{ label: 'ask nibbi to write one', run: () => send('write a deploy script for ' + proj + ' and add it as npm run deploy — ask me where it deploys to first') }] }; return { ok: false, text: humanError(j.error || ('HTTP ' + res.status)) }; }
         const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '', code = null, lines = [];
         for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); let ev = '', data = ''; for (const l of chunk.split('\n')) { if (l.startsWith('event:')) ev = l.slice(6).trim(); else if (l.startsWith('data:')) data += l.slice(5).trim(); } if (!data) continue; const d = JSON.parse(data); if (ev === 'line') { lines.push(d.t); logEl.textContent = lines.slice(-14).join('\n'); nibbi.pulse(0.3); } else if (ev === 'done') code = d.code; } }
@@ -389,17 +396,12 @@ async function runLocalCommand(name, arg) {
         const ok = code === 0; const tail = lines.slice(-6).join('\n');
         return { ok, text: (ok ? '**' + proj + '** deployed ✓' : 'Deploy of **' + proj + '** exited with code ' + code + '.') + (tail ? '\n\n```\n' + tail + '\n```' : ''), acts: ok ? [] : [{ label: 'try again', run: () => send('/deploy ' + proj + ' --go') }] };
       }); }
-    case 'phone': return localTurn('/phone', async () => {
-      let r; try { r = await api.get('/nibbi/remote'); } catch (e) { return { ok: false, text: 'I can only pair from the desk app (this host says: ' + e.message + ').' }; }
-      if (!r.remote) return { ok: false, text: 'The host isn\'t listening on the network yet. Start it with `node server.mjs --remote` (the launchd plist and Nibbi.app do this by default now), then run `/phone` again.' };
-      if (!r.ip) return { ok: false, text: 'No Wi-Fi/LAN address found on this Mac — join a network first.' };
-      const w = document.createElement('div'); w.className = 'phonev';
-      try { const q = qrcode(0, 'M'); q.addData(r.setup); q.make(); const box = document.createElement('div'); box.className = 'qr'; box.innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); w.appendChild(box); } catch { /* no qr */ }
-      const txt = document.createElement('div'); txt.className = 'ptxt';
-      txt.innerHTML = '<b>Scan with your phone</b> (same Wi-Fi), or open<br><code>' + escapeHtml(r.setup) + '</code><br><br>' + '1 · trust this Mac (one-time certificate)<br>2 · open Nibbi over https' + (r.tls ? '' : ' <i>(https not ready — check the host log)</i>') + '<br>3 · Share → <b>Add to Home Screen</b><br><br><small>The pairing link carries a token; the gateway itself never leaves this Mac. Plain http works too, minus the microphone.</small>';
-      w.appendChild(txt);
-      return { html: w, text: 'Pairing link: ' + r.setup, acts: [{ label: 'copy link', run: () => { navigator.clipboard?.writeText(r.setup); toast('copied'); } }, { label: 'open setup page', run: () => openUrl(r.setup) }] };
-    });
+    case 'phone': openPlatform('Phone'); return true;
+    case 'settings': openPlatform('Providers'); return true;
+    case 'skills': openPlatform('Skills'); return true;
+    case 'schedules': openPlatform('Schedules'); return true;
+    case 'activity': openPlatform('Activity'); return true;
+    case 'proposals': openPlatform('Proposals'); return true;
     case 'help': return localTurn('/help', async () => ({ text: COMMANDS.filter((c) => !c.hidden).map((c) => '`' + c.cmd + (c.args ? ' ' + c.args : '') + '` — ' + c.desc).join('\n'), acts: [{ label: 'what\'s new?', run: () => send('what\'s new since we last talked?') }] }));
     case 'project': return localTurn('/project' + (arg ? ' ' + arg : ''), async (T) => {
       if (!S.projects || !S.projects.length) await refreshProjects();
@@ -413,7 +415,7 @@ async function runLocalCommand(name, arg) {
       try { const f = await issuesFile(p.name); issues = f ? (f.content.match(/^\s*[-*]\s*\[ \]/gm) || []).length : null; } catch { /* none */ }
       const done = ms.reduce((a, m) => a + m.done, 0), total = ms.reduce((a, m) => a + m.total, 0);
       const auto = (S.auto || {})[p.name];
-      const staged = (S.fixers || []).filter((f) => f.status === 'done' && (f.game || f.project) === p.name).length;
+      const staged = (S.fixers || []).filter((f) => f.status === 'staged' && (f.game || f.project) === p.name).length;
       const lines = ['Working in **' + p.name + '** — `' + p.repo + '`', readme ? '_' + md.esc(readme) + '_' : '', '`' + (p.branch || '?') + '`' + (p.dirty ? ' · ' + p.dirty + ' dirty file' + (p.dirty > 1 ? 's' : '') : ''), total ? 'plan · ' + done + '/' + total + ' tasks (' + Math.round(100 * done / total) + '%)' : 'no plan file yet (`plans/' + p.name + '.md`)', auto ? 'auto ' + (auto.on ? auto.mode + ' mode · ' + auto.inflight + ' in flight · ' + auto.pending + ' pending · ' + auto.staged + ' staged' : 'off') : '', (issues !== null ? issues + ' open issue' + (issues === 1 ? '' : 's') : 'no issues file yet') + (staged ? ' · ' + staged + ' fix' + (staged > 1 ? 'es' : '') + ' staged for review' : ''), commits.length ? '\n**recent commits**\n' + commits.map((c) => '`' + c.hash + '` ' + md.esc(c.msg).slice(0, 70) + ' — ' + relTime(c.at)).join('\n') : ''].filter(Boolean);
       const others = projectNames().filter((n) => n !== p.name);
       return { text: lines.join('\n'), acts: [{ label: 'plan', run: () => send('/plan ' + p.name) }, ...(staged ? [{ label: 'review', run: () => send('/review ' + p.name) }] : []), ...(S.playable || []).filter((x) => x.name === p.name).map(() => ({ label: 'play', run: () => send('/play ' + p.name) })), { label: 'issues', run: () => send('/issue') }, ...others.slice(0, 1).map((n) => ({ label: 'switch to ' + n, run: () => send('/project ' + n) }))] };
@@ -422,17 +424,13 @@ async function runLocalCommand(name, arg) {
       return localTurn('/new ' + arg, async (T) => {
       if (!name) return { ok: false, text: 'Give it a name: `/new <name> [web|game]`.' };
       const st = addStep(T, 'creating the repo');
-      const r = await api.post('/api/project-create', { mode: 'new', name });
+      const existing = template && (S.projects || []).find(p => p.name === name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+      const r = existing ? { slug: existing.name, repo: existing.repo } : await api.post('/api/project-create', { mode: 'new', name });
       markStep(st, 'done'); await refreshProjects(); S.project = r.slug; LS.set('project', r.slug);
       if (!template) return { text: '**' + md.esc(name) + '** exists now — `' + r.repo + '`, git initialised and registered. It\'s the active project.\n\nWant a starting point?', acts: [{ label: 'web app (vite)', run: () => send('/new ' + name + ' web') }, { label: 'game (rules + plan)', run: () => send('/new ' + name + ' game') }, { label: 'plan it', run: () => { ask.value = 'Plan ' + name + ': '; ask.focus(); autosize(); } }] };
       const st2 = addStep(T, 'laying down the ' + template + ' template' + (template === 'web' ? ' + npm install' : ''));
-      const logEl = document.createElement('pre'); logEl.className = 'runlog'; T.said.appendChild(logEl); const lines = [];
-      const res = await fetch('/nibbi/scaffold', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: r.slug, template, name }) });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); markStep(st2, 'fail'); return { ok: false, text: humanError(j.error || ('HTTP ' + res.status)) }; }
-      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '', code = null, files = [];
-      for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); let ev = '', data = ''; for (const l of chunk.split('\n')) { if (l.startsWith('event:')) ev = l.slice(6).trim(); else if (l.startsWith('data:')) data += l.slice(5).trim(); } if (!data) continue; const d = JSON.parse(data); if (ev === 'start') files = d.files; else if (ev === 'line') { lines.push(d.t); logEl.textContent = lines.slice(-10).join('\n'); } else if (ev === 'done') code = d.code; } }
-      if (!lines.length) logEl.remove();
-      markStep(st2, code === 0 ? 'done' : 'fail');
+      const result = await api.command('project.scaffold', { template }, r.slug);
+      const files = result.files, code = 0; markStep(st2, 'done');
       if (template === 'game') { const st3 = addStep(T, 'writing plans/' + r.slug + '.md'); try { await api.post('/nibbi/vault-write', { log: 'plan | ' + r.slug + ': roadmap skeleton created from Nibbi (/new game)', path: 'plans/' + r.slug + '.md', content: '# ' + name + ' — Roadmap\n\n**Vision:** (one sentence — Nibbi will refine this with you)\n\n## M1: Rules on paper\n- [ ] Write design.md pillars and core loop\n- [ ] Write rules.md: setup, turn, winning\n- [ ] First hand-played session logged in playtests/\n\n## M2: Simulation\n- [ ] Card/component data as JSON\n- [ ] src/sim.js plays a full game with random policies\n- [ ] Balance report from 1000 sims\n\n## M3: Playable digital slice\n- [ ] Web hot-seat client\n- [ ] Playtest mode reports flow into issues.md\n' }); markStep(st3, 'done'); } catch { markStep(st3, 'fail'); } await refreshProjects(); }
       await refreshProjects();
       const ok = code === 0;
@@ -457,16 +455,16 @@ async function runLocalCommand(name, arg) {
     case 'diff': return localTurn('/diff ' + arg, async (T) => {
       if (!arg) return { ok: false, text: 'Which one? `/diff <fixer-id>`' };
       const f0 = fixerById(arg);
-      if (f0 && f0.status === 'merged') { const st0 = addStep(T, 'finding the merge commit'); let commits = []; try { commits = await api.get('/nibbi/git?project=' + encodeURIComponent(f0.game || f0.project) + '&n=30'); } catch { /* none */ } markStep(st0, 'done'); const title = fixerTitle(f0); const hit = commits.find((c) => c.msg.includes(f0.id) || c.msg.toLowerCase().includes(title.toLowerCase().slice(0, 24))); return { text: '**' + md.esc(title) + '** is already **merged** into **' + (f0.game || f0.project) + '**' + (hit ? ' — `' + hit.hash + '` ' + md.esc(hit.msg).slice(0, 120) + ' (' + relTime(hit.at) + ')' : '') + (f0.diffstat ? '\n\n```\n' + String(f0.diffstat).trim() + '\n```' : '') + '\n\nThe branch and worktree are gone; the change lives in the project history now.', acts: [{ label: 'play ' + (f0.game || f0.project), run: () => send('/play ' + (f0.game || f0.project)) }, { label: 'plan', run: () => send('/plan ' + (f0.game || f0.project)) }] }; }
+      if (f0 && f0.status === 'merged') { const st0 = addStep(T, 'finding the merge commit'); let commits = []; try { commits = await api.get('/nibbi/git?project=' + encodeURIComponent(f0.game || f0.project) + '&n=30'); } catch { /* none */ } markStep(st0, 'done'); const title = fixerTitle(f0); const hit = commits.find((c) => c.msg.includes(f0.id) || c.msg.toLowerCase().includes(title.toLowerCase().slice(0, 24))); return { text: '**' + md.esc(title) + '** is already **merged** into **' + (f0.game || f0.project) + '**' + (hit ? ' — `' + hit.hash + '` ' + md.esc(hit.msg).slice(0, 120) + ' (' + relTime(hit.at) + ')' : '') + (f0.diffstat ? '\n\n```\n' + String(f0.diffstat).trim() + '\n```' : '') + '\n\nThe change lives in project history. Its evidence branch and worktree are retained.', acts: [{ label: 'play ' + (f0.game || f0.project), run: () => send('/play ' + (f0.game || f0.project)) }, { label: 'plan', run: () => send('/plan ' + (f0.game || f0.project)) }] }; }
       const st = addStep(T, 'reading the diff'); const d = await api.get('/api/fixer-diff?id=' + encodeURIComponent(arg)); markStep(st, 'done');
-      const f = f0 || { id: arg, status: 'done' };
+      const f = f0 || { id: arg, status: 'staged' };
       return { html: renderDiff(d), text: (d.diffstat || '').trim(), acts: fixerActs(f, { target: d.target }).filter((a) => a.label !== 'diff' && a.label !== 'what changed') };
     });
     case 'review': {
       if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
       try { S.fixers = await api.get('/api/fixers'); } catch { /* keep */ }
       const all = arg === 'all'; const proj = all ? null : (arg || activeProject());
-      const ids = (S.fixers || []).filter((f) => f.status === 'done' && (all || (f.game || f.project) === proj)).sort((a, b) => String(a.endedAt).localeCompare(String(b.endedAt))).map((f) => f.id);
+      const ids = (S.fixers || []).filter((f) => f.status === 'staged' && (all || (f.game || f.project) === proj)).sort((a, b) => String(a.endedAt).localeCompare(String(b.endedAt))).map((f) => f.id);
       if (!ids.length) return localTurn('/review' + (arg ? ' ' + arg : ''), async () => ({ text: 'Nothing staged' + (all ? '' : ' on **' + proj + '**') + ' — when a fixer finishes it lands here for review.', acts: [{ label: 'review all projects', run: () => send('/review all') }] }));
       S.review = { ids, i: 0, T: null }; hideChips(); setMode('talk');
       await showReview();
@@ -487,27 +485,16 @@ async function runLocalCommand(name, arg) {
       const text = proj + ' — ' + done + '/' + total + ' tasks. ' + ms.map((m) => m.name + ' ' + m.done + '/' + m.total).join('; ');
       return { html, text, acts: [next ? { label: 'dispatch next', run: () => send('dispatch the next task in "' + next.name + '" for ' + proj + ' as a fixer') } : null, { label: 'what\'s staged?', run: () => send('/artifacts ' + proj) }, auto && auto.on ? { label: 'pause auto', confirm: 'pause auto on ' + proj + '?', run: () => send('/auto ' + proj + ' pause') } : { label: 'turn auto on', run: () => send('/auto ' + proj + ' stage') }].filter(Boolean) };
     });
-    case 'goal': return localTurn('/goal' + (arg ? ' ' + arg : ''), async (T) => {
+    case 'goal': return localTurn('/goal' + (arg ? ' ' + arg : ''), async () => {
       const proj = activeProject();
-      if (!arg) { const g = await api.get('/nibbi/goal'); const mine = g[proj]; const a = autoOf(proj); if (!mine) return { text: 'No goal on **' + proj + '**' + (a.on ? ' (auto is ' + a.mode + ' — it follows the whole plan)' : '') + '. Set one: `/goal finish M9` — I keep dispatching and merging toward it, and nudge the brain if the loop stalls.', acts: [{ label: 'goal: next milestone', run: () => { ask.value = '/goal finish '; ask.focus(); autosize(); } }] };
-        let prog = ''; if (mine.focus) { try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const m = ms.find((x) => x.name.toLowerCase().startsWith(mine.focus.toLowerCase())); if (m) prog = ' · ' + m.done + '/' + m.total + ' tasks'; } catch { /* */ } }
-        return { text: 'Goal on **' + proj + '**: _' + md.esc(mine.text) + '_' + (mine.focus ? ' (milestone ' + mine.focus + prog + ')' : '') + ' — since ' + relTime(mine.startedAt) + ', auto **' + a.mode + '**, ' + a.inflight + ' in flight · ' + a.pending + ' pending' + (mine.nudges ? ' · nudged ' + mine.nudges + '×' : '') + '.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, { label: 'stop the goal', confirm: 'stop — sure?', run: () => send('/goal stop') }] }; }
-      if (/^stop$/i.test(arg)) { await api.post('/nibbi/goal', { project: proj, stop: true }); refreshStatus(); return { text: 'Goal on **' + proj + '** cleared. Auto stays as it was (' + autoOf(proj).mode + '); `/auto ' + proj + ' off` to stop everything.' }; }
-      const st = addStep(T, 'setting the goal and switching auto on');
-      const r = await api.post('/nibbi/goal', { project: proj, text: arg }); markStep(st, 'done'); refreshStatus();
-      if (!r.goal.focus) {   // free text → ask the brain to turn it into a milestone with dispatchable tasks, then focus there
-        const st2 = addStep(T, 'asking the brain to plan it as a milestone');
-        try {
-          const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const nextId = 'M' + (ms.reduce((m, x) => Math.max(m, Number((x.name.match(/^M(\d+)/) || [0, 0])[1])), 0) + 1);
-          const rr = await api.post('/api/send', { message: '[nibbi goal] Add milestone ' + nextId + ' to plans/' + proj + '.md for this goal: "' + arg + '". Write 3–7 concrete checkbox tasks, each small enough for one fixer, ordered by dependency, in the same format as the existing milestones (## ' + nextId + ': <short title> then - [ ] ' + nextId + '.1 **name** — what/where). Update index/log per AGENTS.md. Reply with the milestone id and the task list only.' });
-          const text = String(rr.text || '').replace(/»[a-z]+:[^\n]*/gi, '').trim();
-          const found = (text.match(/\bM\d+\b/) || [nextId])[0];
-          await api.post('/nibbi/goal', { project: proj, text: arg, focus: found }); markStep(st2, 'done'); refreshStatus();
-          r.goal.focus = found; r.planned = text;
-        } catch (e) { markStep(st2, 'fail'); r.planErr = e.message; }
-      }
-      let prog = ''; if (r.goal.focus) { try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); const m = ms.find((x) => x.name.toLowerCase().startsWith(r.goal.focus.toLowerCase())); if (m) prog = ' — ' + m.name + ': ' + (m.total - m.done) + ' task' + (m.total - m.done === 1 ? '' : 's') + ' left'; } catch { /* */ } }
-      return { text: 'Goal on **' + proj + '**: _' + md.esc(arg) + '_' + prog + '.' + (r.planned ? '\n\n' + r.planned.slice(0, 1500) : '') + (r.planErr ? '\n\n_I could not get the brain to plan it (' + md.esc(r.planErr) + ') — try `/plan edit` or say it in chat._' : '') + '\n\nAuto is **' + r.mode + '**' + (r.mode === 'ship' ? ' — fixers dispatch, test and merge on their own' : ' — fixers dispatch on their own; you approve each merge') + '. I watch the loop: if nothing is in flight for 8 minutes while tasks remain, I nudge the brain to dispatch. Every landing shows up here; `/goal` shows progress; `/goal stop` ends it.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, ...(r.mode !== 'ship' ? [{ label: 'switch to ship', confirm: 'ship = merges itself — sure?', warn: true, run: () => send('/auto ' + proj + ' ship') }] : [])] };
+      if (!arg) { const all = await api.get('/nibbi/goal'), goal = all[proj]; return { text: goal ? 'Goal: ' + goal.text + ' · ' + (goal.done ? 'complete' : autoOf(proj).mode) + (goal.focus ? ' · ' + goal.focus : '') : 'No goal set. Use /goal finish <milestone ID>, or /goal roadmap for the existing whole plan.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }] }; }
+      if (/^stop$/i.test(arg)) { await api.command('goal.set', { stop: true }, proj); refreshStatus(); return { text: 'Goal cleared and automatic dispatch turned off. Already-running fixers are preserved; use /stop to cancel them.' }; }
+      const milestones = await api.get('/api/milestones?project=' + encodeURIComponent(proj));
+      const id = arg.match(/\bM\d+\b/i)?.[0], matches = milestones.filter(m => id ? m.name.toLowerCase().match(/^m\d+\b/)?.[0] === id.toLowerCase() : m.name.toLowerCase() === arg.replace(/^finish\s+/i, '').toLowerCase());
+      if (!milestones.length || (!/^roadmap$/i.test(arg) && matches.length !== 1)) return { text: 'Choose one existing milestone from /plan, or use /goal roadmap for the whole plan. For a new goal, ask me to write a milestone first.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }, { label: 'plan this goal', run: () => send('Plan a milestone for this goal in plans/' + proj + '.md: ' + arg + '. Do not dispatch yet.') }] };
+      const focus = matches[0]?.name;
+      await api.command('goal.set', { text: arg, focus, mode: 'stage' }, proj); refreshStatus();
+      return { text: 'Goal set on ' + proj + (focus ? ': ' + focus : ': the whole roadmap') + '. Auto is in stage mode: fixers work and verify; you approve each merge. Failures pause dispatch for review. /goal stop turns auto off.', acts: [{ label: 'plan', run: () => send('/plan ' + proj) }] };
     });
     case 'auto': { const m = arg.match(/^(\S+)\s+(off|suggest|stage|ship|pause|resume|on)$/i); return localTurn('/auto ' + arg, async () => {
       if (!m) return { ok: false, text: '`/auto <project> <off|suggest|stage|ship|pause|resume>`' };
@@ -516,7 +503,7 @@ async function runLocalCommand(name, arg) {
       const r = await api.post('/api/auto', { project: proj, ...patch }); refreshStatus();
       const cfg = r && r[proj] ? r[proj] : (r || {});
       return { text: 'Auto on **' + proj + '** is now ' + (cfg.on === false || mode === 'pause' || mode === 'off' ? '**off**' : '**' + (cfg.mode || mode) + '** mode' + (cfg.maxConcurrent ? ' · up to ' + cfg.maxConcurrent + ' fixers at once' : '')) + '.' + (mode === 'ship' ? '\n\n_ship = fixers merge themselves when the gate passes. Stage keeps you in the loop._' : ''), acts: [{ label: 'plan', run: () => send('/plan ' + proj) }] }; }); }
-    case 'model': return localTurn('/model' + (arg ? ' ' + arg : ''), async () => { if (!arg) { const r = await api.get('/api/model'); return { text: 'Model: **' + r.current + '** (options: ' + r.options.join(', ') + ')', acts: r.options.filter((o) => o !== r.current).slice(0, 3).map((o) => ({ label: o, run: () => send('/model ' + o) })) }; } const r = await api.post('/api/model', { model: arg }); refreshStatus(); return { text: 'Switched to **' + r.current + '**.' }; });
+    case 'model': openPlatform('Providers'); return true;
     case 'recent': {
       if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
       let items = []; try { items = await api.get('/api/history?n=' + Math.min(200, (Number(arg) || 12) * 4)); } catch (e) { toast('history unavailable: ' + e.message); return; }
@@ -543,8 +530,8 @@ async function runLocalCommand(name, arg) {
       const proj = arg || activeProject(); const r = await api.get('/api/artifacts?project=' + encodeURIComponent(proj));
       const ch = (r.changes || []).slice(0, 10);
       if (!ch.length && !(r.files || []).length) return { text: 'Nothing produced for **' + proj + '** yet.' };
-      const staged = ch.filter((c) => c.status === 'done');
-      const lines = ['**' + proj + '** — ' + staged.length + ' staged for review, ' + ch.filter((c) => c.status === 'merged').length + ' merged recently', ...ch.map((c) => (c.status === 'done' ? '◦ ' : '✓ ') + '`' + c.id + '` ' + md.esc(c.title) + ' — ' + String(c.diffstat || '').trim().split('\n').pop() + (c.costUsd ? ' · $' + c.costUsd.toFixed(2) : ''))];
+      const staged = ch.filter((c) => c.status === 'staged');
+      const lines = ['**' + proj + '** — ' + staged.length + ' staged for review, ' + ch.filter((c) => c.status === 'merged').length + ' merged recently', ...ch.map((c) => (c.status === 'staged' ? '◦ ' : '✓ ') + '`' + c.id + '` ' + md.esc(c.title) + ' — ' + String(c.diffstat || '').trim().split('\n').pop() + (c.costUsd ? ' · $' + c.costUsd.toFixed(2) : ''))];
       if ((r.files || []).length) lines.push('', 'files: ' + r.files.slice(0, 6).map((f) => '`' + f.name + '`').join(' '));
       return { text: lines.join('\n'), acts: staged.slice(0, 3).map((c) => ({ label: 'diff ' + c.id, run: () => send('/diff ' + c.id) })) };
     });
@@ -594,29 +581,49 @@ async function notify(title, body) {
   } catch { /* no notifications here */ }
 }
 async function setBadge(n) { try { const W = window.__TAURI__ && window.__TAURI__.window; if (W && W.getCurrentWindow) { const w = W.getCurrentWindow(); if (w.setBadgeCount) await w.setBadgeCount(n > 0 ? n : undefined); } } catch { /* unsupported */ } }
-function refreshBadge() { const n = (S.fixers || []).filter((f) => f.status === 'done' && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length; if (n !== S.badge) { S.badge = n; setBadge(n); } }
+function refreshBadge() { const n = (S.fixers || []).filter((f) => f.status === 'staged' && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length; if (n !== S.badge) { S.badge = n; setBadge(n); } }
 
 /* ------------------------------------------------------------------ host event stream: exact history of what fixers did, even while the window was closed */
 let evSource = null, evReady = false, evReplay = [];
 function connectEvents() {
-  if (S.demo || evSource) return;
-  const since = LS.get('lastEventTs', Date.now() - 12 * 3600000);
-  try { evSource = new EventSource('/nibbi/events?since=' + since); } catch { return; }
-  evSource.addEventListener('ready', () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; });
-  evSource.addEventListener('fixer', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) { evReplay.push(ev); return; } onFixerEvent(ev); });
-  evSource.addEventListener('goal', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, (ev.done ? '🎯 ' : '') + '**' + md.esc(ev.project) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; if (ev.done) { nibbi.setMood('happy'); sound('land'); } if (ev.blocked) { T.nib.classList.add('error'); nibbi.setMood('error'); addActs(T, [restartAct(), { label: 'ask nibbi', run: () => send('what is blocking the fixers right now?') }], { sticky: true }); if (document.hidden) notify('nibbi · loop blocked', ev.project + ': Oracle cannot dispatch — restart the gateway'); } refreshStatus(); });
-  evSource.addEventListener('brief', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) { evReplay.push({ ...ev, to: 'brief' }); return; } setMode('talk'); body.classList.remove('rest'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, ev.text, false); setMeta(T, {}); T.done = true; if (!ev.silent) { nibbi.setMood('speaking'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); if (document.hidden) notify('nibbi', stripMd(ev.text).slice(0, 120)); if (S.voiceOn && !S.demo) speak(firstSentences(stripMd(ev.text), 2, 260)); } refreshStatus(); });
-  evSource.addEventListener('note', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, '**' + md.esc(ev.title || ev.id) + '** — ' + md.esc(ev.text), false); setMeta(T, {}); T.done = true; });
-  evSource.addEventListener('auto', (e) => { const ev = JSON.parse(e.data); LS.set('lastEventTs', ev.ts); if (!evReady) return; refreshStatus(); toast('auto on ' + ev.project + ' → ' + (ev.to.on ? ev.to.mode : 'off'), 2500); });
-  evSource.onerror = () => { /* EventSource reconnects on its own; replay resumes from lastEventTs */ evReady = false; };
+  if (S.demo || evSource || !Number.isSafeInteger(S.snapshotCursor)) return;
+  // A first visit already has current state from the snapshot. Start there;
+  // returning windows retain their cursor and receive changes since last seen.
+  const savedCursor = LS.get('eventCursor', null);
+  const after = Number.isSafeInteger(savedCursor) && savedCursor > 0 ? savedCursor : S.snapshotCursor;
+  LS.set('eventCursor', after);
+  const close = subscribeEvents({
+    after, onCursor: (id) => LS.set('eventCursor', id),
+    onReady: () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; refreshStatus(); },
+    onOffline: () => { evReady = false; setLink('offline'); },
+    onEvent: (event) => {
+      if (event.type === 'run.updated') {
+        const run = event.payload.run; if (!run) return; if (run.status === 'done') run.status = 'staged';
+        S.fixers = [...(S.fixers || []).filter((f) => f.id !== run.id), run];
+        renderAgents(S.fixers, S.auto); renderProject(); refreshBadge();
+        const ev = { ...run, id: run.id, kind: 'fixer', project: run.game, to: run.status, ts: event.at };
+        if (!evReady) evReplay.push(ev); else if (['staged', 'failed', 'merged', 'interrupted', 'cancelled'].includes(run.status)) postFixerBubble(run);
+      } else if (event.type === 'process.output' || event.type === 'tool.started') {
+        const a = agentEls.get(event.runId); if (a) { const tail = a.card.querySelector('.tail'); if (tail) tail.textContent = String(event.payload.text || event.payload.name || '').slice(-400); }
+      } else if (['brief', 'goal.updated', 'goal.completed', 'scheduler.error'].includes(event.type)) {
+        const text = event.payload.text || event.payload.message || (event.payload.goal && event.payload.goal.text);
+        if (!text) return;
+        const ev = { id: 'event-' + event.id, text, ts: event.at, to: 'brief', silent: event.payload.silent };
+        if (!evReady) evReplay.push(ev); else { setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, text, false); setMeta(T, {}); T.done = true; }
+      } else if (event.type === 'auto.updated') {
+        S.auto = { ...(S.auto || {}), [event.projectId]: event.payload.config }; renderProject();
+      }
+    }
+  });
+  evSource = { close };
 }
 async function onFixerEvent(ev) {
-  if (!['done', 'failed', 'merged'].includes(ev.to)) { refreshStatus(); return; }
+  if (!['staged', 'failed', 'merged'].includes(ev.to)) { refreshStatus(); return; }
   try { S.fixers = await api.get('/api/fixers'); } catch { /* keep */ }
   const f = fixerById(ev.id) || { id: ev.id, status: ev.to, game: ev.project, title: ev.title, costUsd: ev.costUsd, model: ev.model, diffstat: ev.diffstat };
   postFixerBubble(f);
   renderAgents(S.fixers, S.auto); renderProject(); refreshBadge();
-  if (document.hidden) notify('nibbi · ' + (ev.to === 'done' ? 'ready to review' : ev.to), (ev.title || ev.id) + ' — ' + ev.to + ' on ' + ev.project);
+  if (document.hidden) notify('nibbi · ' + (ev.to === 'staged' ? 'ready to review' : ev.to), (ev.title || ev.id) + ' — ' + ev.to + ' on ' + ev.project);
 }
 function postFixerBubble(f) {
   if (S.busy) { setTimeout(() => postFixerBubble(f), 3000); return; }
@@ -625,11 +632,11 @@ function postFixerBubble(f) {
   const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
   const cost = (f.costUsd ? ' · $' + Number(f.costUsd).toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
   const mode = autoOf(f.game || f.project).mode;
-  const text = f.status === 'done' ? (mode === 'ship' ? 'Fixer **' + title + '** finished on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Ship mode: it merges itself once you\'ve been quiet a few minutes (rebase → checks → main). I\'ll say when it lands.' : 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?') : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**' + cost + (mode === 'ship' ? ' — on its own.' : '.') : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '') + (/maximum number of turns/i.test(String(f.summary || '')) ? ' Checking its worktree for finished work…' : '');
+  const text = f.status === 'staged' ? (mode === 'ship' ? 'Fixer **' + title + '** finished on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Ship mode: it merges itself once you\'ve been quiet a few minutes (isolated integration → checks → target). I\'ll say when it lands.' : 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?') : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**' + cost + (mode === 'ship' ? ' — on its own.' : '.') : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '') + (/maximum number of turns/i.test(String(f.summary || '')) ? ' Work is preserved; inspect it before an explicit retry.' : '');
   setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
-  addActs(T, (f.status === 'done' && mode === 'ship') ? fixerActs(f).filter((a) => !/approve/.test(a.label)) : fixerActs(f), { sticky: true }); T.fixerId = f.id; if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
+  addActs(T, (f.status === 'staged' && mode === 'ship') ? fixerActs(f).filter((a) => !/approve/.test(a.label)) : fixerActs(f), { sticky: true }); T.fixerId = f.id; if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
   const a = agentEls.get(f.id); if (a) { const r = a.canvas.getBoundingClientRect(); nibbi.lookAt(r.left + r.width / 2, r.top); setTimeout(() => nibbi.lookFree(), 1800); nibbi.splash(AGENT_INK[hashId(f.id) % AGENT_INK.length], f.status === 'merged' ? 8 : 4); }
-  nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
+  nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); if (f.status !== 'failed') interactions.event(f.status === 'merged' ? 'milestone' : 'success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
   sound(f.status === 'failed' ? 'error' : 'land');
   $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(stripMd(text));
 }
@@ -637,7 +644,7 @@ function postAwayBubble(evs) {
   const latest = new Map(); for (const e of evs) latest.set(e.id, e);   // one line per fixer: its latest state
   const briefs = evs.filter((e) => e.to === 'brief' && !e.silent);
   for (const b of briefs.slice(-3)) { setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, b.text, false); T.at = b.ts; setMeta(T, {}); T.done = true; }
-  const done = [...latest.values()].filter((e) => ['done', 'failed', 'merged'].includes(e.to));
+  const done = [...latest.values()].filter((e) => ['staged', 'failed', 'merged'].includes(e.to));
   if (!done.length) return;
   setMode('talk'); body.classList.remove('rest');
   const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
@@ -645,12 +652,12 @@ function postAwayBubble(evs) {
   const grp = (st) => done.filter((e) => e.to === st);
   const parts = [];
   if (grp('merged').length) parts.push(grp('merged').length + ' merged (' + grp('merged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
-  if (grp('done').length) parts.push(grp('done').length + ' staged for review (' + grp('done').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
+  if (grp('staged').length) parts.push(grp('staged').length + ' staged for review (' + grp('staged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('failed').length) parts.push(grp('failed').length + ' failed (' + grp('failed').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   const text = 'While you were away' + (ago >= 1 ? ' (last ' + ago + 'h)' : '') + ': ' + parts.join(' · ') + '.';
   setSaid(T, text, false); setMeta(T, {}); T.done = true;
-  const acts = grp('done').slice(0, 2).map((e) => ({ label: 'diff ' + (e.title || e.id).slice(0, 18), run: () => send('/diff ' + e.id) }));
-  if (grp('done').length > 1) acts.push({ label: 'review all', run: () => send('/review') });
+  const acts = grp('staged').slice(0, 2).map((e) => ({ label: 'diff ' + (e.title || e.id).slice(0, 18), run: () => send('/diff ' + e.id) }));
+  if (grp('staged').length > 1) acts.push({ label: 'review all', run: () => send('/review') });
   acts.push({ label: 'full report', run: () => send('/report ' + Math.max(1, Math.min(72, ago + 1))) });
   addActs(T, acts); $('#sr').textContent = stripMd(text);
 }
@@ -658,7 +665,7 @@ function postAwayBubble(evs) {
 /* ------------------------------------------------------------------ review mode: one staged fixer at a time, from the keyboard */
 async function showReview() {
   const R = S.review; if (!R) return;
-  const id = R.ids[R.i]; const f = fixerById(id) || { id, status: 'done' };
+  const id = R.ids[R.i]; const f = fixerById(id) || { id, status: 'staged' };
   if (!R.T) { R.T = newTurn('/review'); R.T.plain = false; R.T.bubble.classList.remove('live'); R.T.el.classList.add('review'); }
   const T = R.T; T.said.replaceChildren(); const old = T.body.querySelector('.acts'); if (old) old.remove();
   const head = document.createElement('div'); head.className = 'rhead'; head.innerHTML = '<b>' + (R.i + 1) + ' of ' + R.ids.length + '</b> · ' + escapeHtml(fixerTitle(f)) + ' <span class="m">' + escapeHtml([f.game, f.model, f.costUsd ? '$' + Number(f.costUsd).toFixed(2) : null, f.group].filter(Boolean).join(' · ')) + '</span><span class="keys">j/k next · a approve · x discard · p preview</span>';
@@ -676,8 +683,8 @@ function reviewStep(d) { const R = S.review; if (!R) return; R.i = (R.i + d + R.
 async function reviewAct(kind) {
   const R = S.review; if (!R) return; const id = R.ids[R.i];
   try {
-    if (kind === 'approve') { const r = await api.post('/api/send', { message: '/approve ' + id }); toast((r.text || 'merged').slice(0, 140), 4000); sound('land'); }
-    else { const r = await api.post('/api/fixer-stop', { id }); toast((r.text || 'discarded').slice(0, 120), 3000); }
+    if (kind === 'approve') { const r = await api.command('run.merge', { id }); toast((r.text || 'merged').slice(0, 140), 4000); sound('land'); }
+    else { const r = await api.command('run.discard', { id }); toast((r.text || 'discarded').slice(0, 120), 3000); }
   } catch (e) { toast(e.message); return; }
   R.ids.splice(R.i, 1); if (!R.ids.length) { endReview(true); return; } if (R.i >= R.ids.length) R.i = 0; refreshStatus(); showReview();
 }
@@ -697,7 +704,7 @@ let fleetSeen = null;
 function awayBubble(list) {
   const last = LS.get('lastSeen', 0); const now = Date.now(); LS.set('lastSeen', now);
   if (!last || now - last < 20 * 60000) return;
-  const since = list.filter((f) => f.endedAt && Date.parse(f.endedAt) > last && ['done', 'failed', 'merged'].includes(f.status));
+  const since = list.filter((f) => f.endedAt && Date.parse(f.endedAt) > last && ['staged', 'failed', 'merged'].includes(f.status));
   if (!since.length) return;
   setMode('talk'); body.classList.remove('rest');
   const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
@@ -705,11 +712,11 @@ function awayBubble(list) {
   const grp = (st) => since.filter((f) => f.status === st);
   const parts = [];
   if (grp('merged').length) parts.push(grp('merged').length + ' merged (' + grp('merged').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
-  if (grp('done').length) parts.push(grp('done').length + ' staged for your review (' + grp('done').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
+  if (grp('staged').length) parts.push(grp('staged').length + ' staged for your review (' + grp('staged').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
   if (grp('failed').length) parts.push(grp('failed').length + ' failed (' + grp('failed').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
   const text = 'While you were away' + (away >= 1 ? ' (' + away + 'h)' : '') + ': ' + parts.join(' · ') + '.';
   setSaid(T, text, false); setMeta(T, {}); T.done = true;
-  const acts = grp('done').slice(0, 2).map((f) => ({ label: 'diff ' + fixerTitle(f).slice(0, 18), run: () => send('/diff ' + f.id) }));
+  const acts = grp('staged').slice(0, 2).map((f) => ({ label: 'diff ' + fixerTitle(f).slice(0, 18), run: () => send('/diff ' + f.id) }));
   acts.push({ label: 'full report', run: () => send('/report ' + Math.max(1, Math.min(72, away + 1))) });
   addActs(T, acts); $('#sr').textContent = stripMd(text);
 }
@@ -720,15 +727,15 @@ function fleetEvents(list) {
   for (const f of list) {
     const prev = fleetSeen.get(f.id);
     if (prev === f.status || (prev === undefined && !ACTIVE.has(f.status))) continue;
-    if (!['done', 'failed', 'merged'].includes(f.status) || S.busy) continue;
+    if (!['staged', 'failed', 'merged'].includes(f.status) || S.busy) continue;
     setMode('talk'); body.classList.remove('rest');
     const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
     const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
     const cost = (f.costUsd ? ' · $' + f.costUsd.toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
-    const text = f.status === 'done' ? 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?' : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**.' : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '');
+    const text = f.status === 'staged' ? 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?' : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**.' : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '');
     setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
     addActs(T, fixerActs(f)); if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
-    nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
+    nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); if (f.status !== 'failed') interactions.event(f.status === 'merged' ? 'milestone' : 'success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
     $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(stripMd(text));
   }
   fleetSeen = cur;
@@ -763,12 +770,12 @@ ask.addEventListener('keydown', (e) => {
 }, true);
 
 /* ------------------------------------------------------------------ /play: launch a project's dev server through the gateway's sanctioned launcher */
-const openUrl = (u) => { if (window.__TAURI__) fetch('/api/open?url=' + encodeURIComponent(u)).catch(() => window.open(u, '_blank')); else window.open(u, '_blank'); };
+const openUrl = (u) => { if (window.__TAURI__) api.post('/api/open', { url: u }).catch(() => window.open(u, '_blank')); else window.open(u, '_blank'); };
 async function playFlow(project, action) {
   S.busy = true; body.classList.add('busy'); activity(); hideChips(); ask.value = ''; autosize(); setMode('talk');
   const T = newTurn('/play ' + project + (action !== 'start' ? ' ' + action : '')); T.plain = false;
   nibbi.setMood('working'); const fr = feed.getBoundingClientRect(); nibbi.lookAt(innerWidth / 2 + 40, fr.top + 30);
-  const api = (a) => fetch('/api/play?project=' + encodeURIComponent(project) + '&action=' + a).then((r) => r.json());
+  const api = (action) => action === 'status' ? createClient(() => project).get('/api/play?project=' + encodeURIComponent(project)) : createClient(() => project).post('/api/play', { project, action });
   let ok = true, text = '', url = null;
   try {
     if (action === 'stop') { const st = addStep(T, 'stopping the ' + project + ' server'); await api('stop'); markStep(st, 'done'); text = 'Stopped the **' + project + '** server.'; }
@@ -777,11 +784,11 @@ async function playFlow(project, action) {
       let r = action === 'status' ? await api('status') : await api('start');
       if (r.error) throw new Error(r.error);
       const t0 = performance.now();
-      while (!r.url && performance.now() - t0 < 60000) { await sleep(1200); r = await api('status'); if (!r.running && !r.starting && action === 'status') break; }
+      while (!r.url && performance.now() - t0 < 60000) { await sleep(1200); r = await api('status'); if (r.error) throw new Error(r.error); if (!r.running && !r.starting) break; }
       markStep(st, r.url ? 'done' : 'fail');
       if (r.url) { url = r.url; text = '**' + project + '** is up at ' + url + ' — opening it. It runs for an hour, then I put it away.'; openUrl(url); }
       else if (action === 'status') { text = '**' + project + '** isn\'t running.' + (r.playable ? ' Want me to start it?' : ' It has no web dev server (' + (r.kind || 'terminal') + ').'); }
-      else { ok = false; text = 'The server didn\'t come up in a minute. The log is at `~/.nibbi/play-' + project + '.log`.'; }
+      else { ok = false; text = r.error || 'The server did not become ready. Check the configured preview command in Settings.'; }
     }
   } catch (e) { ok = false; text = /unknown project/i.test(e.message) ? 'I don\'t know a project called **' + project + '**. Registered projects: ' + ((S.projects || []).map((p) => p.name).join(', ') || 'none yet') + '.' : /no web dev server|terminal game/i.test(e.message) ? '**' + project + '** has no web dev server — it\'s a terminal game (`npm run play`).' : 'I couldn\'t launch it — ' + e.message; }
   finishSteps(T, ok); setSaid(T, text, false); setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
@@ -791,7 +798,7 @@ async function playFlow(project, action) {
   else if (ok && action === 'status' && /Want me to start/.test(text)) acts.push({ label: 'start it', run: () => send('/play ' + project) });
   else if (!ok) acts.push({ label: 'try again', run: () => send('/play ' + project) });
   addActs(T, acts, { sticky: !!url });
-  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1500 : 2600);
+  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1500 : 2600);
   $('#sr').textContent = stripMd(text); scheduleIdleTimers();
 }
 function launchActsFor(text) {
@@ -810,6 +817,7 @@ async function send(text, images) {
   if (!text && !images.length) return;
   if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
   const isCommand = text.startsWith('/');
+  if (S.demo && isCommand) { toast('Demo is read-only. Leave demo mode to run commands.'); return; }
   const pm = text.match(/^\/play\s+([\w.-]+)(?:\s+(stop|status))?\s*$/i);
   if (pm) { await playFlow(pm[1].toLowerCase(), (pm[2] || 'start').toLowerCase()); return; }
   const cm = text.match(/^\/(\w+)\s*([\s\S]*)$/);
@@ -819,7 +827,7 @@ async function send(text, images) {
   ask.value = ''; autosize(); clearAttach(); sound('send');
   setMode('talk');
   const T = newTurn(text, images); T.plain = isCommand;
-  nibbi.setMood('thinking');
+  nibbi.setMood('thinking'); interactions.event('send');
   const feedRect = feed.getBoundingClientRect(); nibbi.lookAt(innerWidth / 2 + 40, feedRect.top + 30);
   setLink('busy');
 
@@ -833,7 +841,8 @@ async function send(text, images) {
   try {
     for await (const e of brain(text, images, ctrl.signal)) {
       if (waitStep) { markStep(waitStep, 'done'); if (T.liveStep === waitStep) T.liveStep = null; waitStep = null; }
-      if (e.ev === 'tool' && e.name) {
+      if (e.ev === 'start') { S.activeRunId = e.runId; }
+      else if (e.ev === 'tool' && e.name) {
         toolCount++;
         if (spoke && T.acc && !/\n\s*$/.test(T.acc)) { T.acc += '\n\n'; }
         addStep(T, toolLabel(e.name));
@@ -850,7 +859,7 @@ async function send(text, images) {
     if (err.name === 'AbortError') result = { text: T.acc || '_stopped watching — ' + NAME + ' may still be working in the background._', isError: false, aborted: true };
     else result = { text: (err.message || String(err)), isError: true };
   }
-  result = result || { text: T.acc || '(no reply)', isError: false };
+  result = result || { text: 'No terminal result was received. Check Activity before retrying.', isError: true }; S.activeRunId = null;
   const squash = (s) => String(s || '').replace(/»(voice|acts):[^\n]*\n?/g, '').replace(/\s+/g, '');
   if (T.acc && result.text && squash(T.acc) === squash(result.text)) result.text = T.acc.replace(/»voice:[^\n]*\n?/g, '');
   const ok = !result.isError;
@@ -866,10 +875,10 @@ async function send(text, images) {
   S.busy = false; body.classList.remove('busy'); sendBtn.setAttribute('aria-label', 'send'); S.abort = null;
   nibbi.lookFree();
   if (!ok) { nibbi.setMood('error'); addActs(T, errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
-  else if (!result.aborted) { nibbi.setMood('happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); }
+  else if (!result.aborted) { nibbi.setMood('happy'); interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); }
   else nibbi.setMood('idle');
   if (ok && !result.aborted && !S.spokeStream) speak(result.voice || firstSentences(stripMd(parseActs(result.text).clean), 2, 320));
-  if (isCommand && ok) { const urls = [...String(result.text).matchAll(/https?:\/\/[^\s)]+/g)].map((m) => m[0]); if (urls.length) addActs(T, urls.slice(0, 2).map((u) => ({ label: 'open ' + u.replace(/^https?:\/\//, '').slice(0, 28), run: () => openUrl(u) })), { sticky: true }); const local = urls.find((u) => /^https?:\/\/(localhost|127\.0\.0\.1)/.test(u)); if (local && /^\/preview\s/i.test(text)) { const st = addStep(T, 'taking a screenshot of the preview'); T.steps.classList.remove('folded'); sleep(2500).then(() => api.post('/nibbi/shot', { url: local, name: 'preview-' + text.split(/\s+/)[1] })).then((r) => { markStep(st, 'done'); finishSteps(T, true); const w = document.createElement('div'); w.className = 'shots'; const a = document.createElement('a'); a.href = r.url; a.target = '_blank'; const im = document.createElement('img'); im.src = r.url; im.alt = 'preview'; im.onload = () => scrollFeed(false); a.appendChild(im); w.appendChild(a); T.said.appendChild(w); }).catch((e) => { st.el.querySelector('.l').textContent = 'screenshot failed — ' + (e.message || 'unknown'); markStep(st, 'fail'); finishSteps(T, true); }); } }
+  if (isCommand && ok) { const urls = [...String(result.text).matchAll(/https?:\/\/[^\s)]+/g)].map(m => m[0]); if (urls.length) addActs(T, urls.slice(0, 2).map(u => ({ label: 'open ' + u.replace(/^https?:\/\//, '').slice(0, 28), run: () => openUrl(u) })), { sticky: true }); }
   if (!isCommand) { const pa = parseActs(result.text); if (pa.acts.length) addActs(T, pa.acts.map((a) => ({ label: a, run: () => send(a) }))); else addActs(T, replyActs(result.text)); }
   setLink(S.demo ? 'demo' : 'live');
   refreshStatus();
@@ -880,7 +889,7 @@ async function send(text, images) {
 const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart the brain — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
 function errorActs(text) {
   const acts = [{ label: 'try again', run: () => { const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }];
-  if (/oauth|authenticate|token/i.test(text)) acts.push({ label: 'how to re-login', warn: true, run: () => { toast('in Terminal: claude setup-token → then restart the gateway', 5000); } });
+  if (/oauth|authenticate|token/i.test(text)) acts.push({ label: 'how to re-login', warn: true, run: () => { toast('open Settings → Providers to configure the API key or Codex login', 5000); } });
   if (/gateway (offline|isn)|failed to fetch|networkerror|not reachable/i.test(text)) { acts.push(restartAct()); acts.push({ label: 'use the demo brain', run: () => { S.demo = true; refreshStatus(); const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }); }
   return acts;
 }
@@ -901,9 +910,9 @@ async function pollFixers(T, before) {
       const prev = before.get(f.id);
       if (prev !== f.status) {
         before.set(f.id, f.status);
-        if (prev === undefined && (f.status === 'done' || f.status === 'failed')) continue;
+        if (prev === undefined && (f.status === 'staged' || f.status === 'failed')) continue;
         const st = addStep(T, 'fixer · ' + (f.title || f.issue || f.id).slice(0, 60) + ' → ' + f.status, 'fixer');
-        if (f.status === 'done' || f.status === 'staged' || f.status === 'merged') markStep(st, 'done');
+        if (f.status === 'staged' || f.status === 'staged' || f.status === 'merged') markStep(st, 'done');
         if (f.status === 'failed') markStep(st, 'fail');
         if (T.liveStep === st && (f.status !== 'running' && f.status !== 'queued')) T.liveStep = null;
       }
@@ -917,15 +926,15 @@ const AGENT_INK = [[0.23, 0.29, 0.61], [0.18, 0.50, 0.46], [0.69, 0.47, 0.16], [
 const hashId = (id) => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
 const agentMood = (st) => ({ queued: 'sleep', installing: 'thinking', running: 'working', done: 'happy', merged: 'happy', failed: 'error', superseded: 'sleep', duty: 'sleep' }[st] || 'working');
 const agentEls = new Map();
-const ACTIVE = new Set(['queued', 'installing', 'running']);
+const ACTIVE = new Set(['queued', 'installing', 'running', 'verifying', 'awaiting_input']);
 let tailCache = new Map();
 function demoFixers() {
   const t0 = Date.now();
   return [
     { id: 'demo1', title: 'replay log for multiplayer runs', status: 'running', model: 'sonnet', costUsd: 0.41, startedAt: new Date(t0 - 200000).toISOString(), project: 'shipless' },
-    { id: 'demo2', title: 'supply ruling per issue #9', status: (performance.now() > 25000 ? 'done' : 'running'), game: 'shipless', diffstat: ' rules.md | 14 ++--\n 1 file changed, 9 insertions(+), 5 deletions(-)', model: 'sonnet', costUsd: 0.12, startedAt: new Date(t0 - 60000).toISOString(), endedAt: performance.now() > 25000 ? new Date().toISOString() : undefined, project: 'shipless' },
+    { id: 'demo2', title: 'supply ruling per issue #9', status: (performance.now() > 25000 ? 'staged' : 'running'), game: 'shipless', diffstat: ' rules.md | 14 ++--\n 1 file changed, 9 insertions(+), 5 deletions(-)', model: 'sonnet', costUsd: 0.12, startedAt: new Date(t0 - 60000).toISOString(), endedAt: performance.now() > 25000 ? new Date().toISOString() : undefined, project: 'shipless' },
     { id: 'demo3', title: 'hub font sizing', status: 'queued', model: 'haiku', startedAt: new Date(t0 - 10000).toISOString(), project: 'shipless' },
-    { id: 'demo4', title: 'stale doc cleanup', status: 'done', model: 'haiku', costUsd: 0.22, startedAt: new Date(t0 - 400000).toISOString(), endedAt: new Date(t0 - 20000).toISOString(), project: 'shipless' },
+    { id: 'demo4', title: 'stale doc cleanup', status: 'staged', model: 'haiku', costUsd: 0.22, startedAt: new Date(t0 - 400000).toISOString(), endedAt: new Date(t0 - 20000).toISOString(), project: 'shipless' },
   ];
 }
 const RECENT_MS = 10 * 60000;
@@ -1022,7 +1031,7 @@ function renderProject() {
     auto.appendChild(seg);
     const tune = document.createElement('div'); tune.className = 'ptune';
     const capL = document.createElement('label'); capL.innerHTML = 'cap $<input type="number" min="0" step="1" placeholder="∞">'; const capI = capL.querySelector('input'); capI.value = pa.spendCap ? pa.spendCap : ''; capI.onclick = (e) => e.stopPropagation(); capI.onchange = (e) => { e.stopPropagation(); api.post('/api/auto', { project: p.name, spendCap: Number(capI.value) || 0 }).then(() => { toast(capI.value ? 'cap $' + capI.value + ' on ' + p.name : 'no spend cap on ' + p.name); refreshStatus(); }).catch((er) => toast(er.message)); };
-    const modS = document.createElement('select'); for (const m of ['auto', 'haiku', 'sonnet', 'opus']) { const o = document.createElement('option'); o.value = m; o.textContent = m === 'auto' ? 'model: auto' : m; if ((pa.model || 'auto') === m) o.selected = true; modS.appendChild(o); } modS.onclick = (e) => e.stopPropagation(); modS.onchange = (e) => { e.stopPropagation(); api.post('/api/auto', { project: p.name, model: modS.value }).then(() => { toast('fixers on ' + p.name + ' use ' + modS.value); refreshStatus(); }).catch((er) => toast(er.message)); };
+    const modS = document.createElement('button'); modS.type = 'button'; modS.textContent = 'providers & models'; modS.onclick = e => { e.stopPropagation(); S.project = p.name; LS.set('project', p.name); openPlatform('Providers'); };
     tune.append(capL, modS);
     const stat = document.createElement('div'); stat.className = 'pstat'; const rf = running.filter((f) => (f.game || f.project) === p.name).length; const pg = (S.goals || {})[p.name]; stat.textContent = [pg ? 'goal: ' + pg.text.slice(0, 40) : '', pa.on ? pa.inflight + ' in flight · ' + pa.pending + ' pending · ' + pa.staged + ' staged' : (rf ? rf + ' fixer' + (rf > 1 ? 's' : '') + ' running' : ''), pa.spend ? '$' + pa.spend.toFixed(2) + ' auto spend' : ''].filter(Boolean).join(' · '); if (pa.on && pa.note) { stat.title = pa.note; stat.textContent += '\n' + String(pa.note).slice(0, 90) + (pa.note.length > 90 ? '…' : ''); }
     const acts = document.createElement('div'); acts.className = 'pacts';
@@ -1047,13 +1056,13 @@ function setLink(l) {
 }
 async function refreshStatus() {
   try {
-    const r = await fetch('/nibbi/health', { cache: 'no-store' }); const h = await r.json();
+    const r = await fetch('/api/snapshot', { cache: 'no-store' }); const snap = await r.json(); const h = { brain: !!snap.status, status: snap.status }; S.fixers = snap.fixers || []; S.auto = snap.auto || {}; S.goals = snap.goals || {}; S.snapshotCursor = snap.cursor;
     if (h.brain && h.status) {
       S.status = h.status;
       if (!S.busy) setLink(S.demo ? 'demo' : (h.status.busy ? 'busy' : 'live'));
       $('#st-brain').textContent = 'brain · ' + (h.status.busy ? 'busy' : 'ready') + ' · ' + Math.round((h.status.ctxTokens || 0) / 1000) + 'k ctx · ' + (h.status.turns || 0) + ' turns';
       $('#st-session').textContent = 'session · ' + (h.status.sessionShort || '—') + (h.status.rateLimit && h.status.rateLimit.status !== 'allowed' ? ' · rate-limited' : '');
-      $('#st-model').textContent = 'model · ' + (h.status.modelOverride || 'default') + ' · $' + Number(h.status.costUsdTotal || 0).toFixed(2) + ' lifetime' + (h.status.rateLimit && h.status.rateLimit.status !== 'allowed' ? ' · rate-limited until ' + new Date((h.status.rateLimit.resetsAt || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+      $('#st-model').textContent = 'model · ' + (h.status.modelOverride || 'default') + ' · $' + Number(h.status.costUsdTotal || 0).toFixed(2) + ' known lifetime cost' + (h.status.rateLimit && h.status.rateLimit.status !== 'allowed' ? ' · rate-limited until ' + new Date((h.status.rateLimit.resetsAt || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
       const pt = h.status.playtestGame || null; if (pt !== S.playtest) { S.playtest = pt; body.classList.toggle('playtest', !!pt); ask.placeholder = pt ? 'Playtesting ' + pt + ' — tell nibbi what happened…' : 'Ask nibbi to build something...'; if (pt && document.activeElement === ask) showChips('focus'); }
     } else {
       if (!S.busy) { setLink(S.demo ? 'demo' : 'offline'); if (!S.demo && S.mode === 'idle' && nibbi.mood() === 'idle') nibbi.setMood('sleep'); }
@@ -1061,16 +1070,13 @@ async function refreshStatus() {
       $('#st-session').textContent = 'launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway';
       $('#st-model').textContent = 'model · —';
     }
-    if (!S.busy) { try { const fr = await fetch('/api/fixers'); if (fr.ok) S.fixers = await fr.json(); } catch { /* ignore */ } }
-    try { const ar = await fetch('/api/auto'); if (ar.ok) S.auto = await ar.json(); } catch { /* ignore */ }
-    try { const gr = await fetch('/nibbi/goal'); if (gr.ok) S.goals = await gr.json(); } catch { /* ignore */ }
     renderAgents(S.fixers, S.auto); if (S.demo) fleetEvents(demoFixers()); renderProject(); refreshBadge(); reattachFixerActs();
   } catch {
     if (!S.busy) setLink('offline');
     $('#st-brain').textContent = 'host · not reachable (open via node server.mjs)';
   }
   $('#st-project').textContent = 'project: ' + activeProject() + (projectNames().length > 1 ? ' (click to switch)' : '');
-  $('#st-session').textContent += (S.sessionTurns ? ' · this sitting $' + S.sessionCost.toFixed(2) + ' / ' + S.sessionTurns + ' turn' + (S.sessionTurns > 1 ? 's' : '') : '');
+  $('#st-session').textContent += (S.sessionTurns ? ' · known sitting cost $' + S.sessionCost.toFixed(2) + ' / ' + S.sessionTurns + ' turn' + (S.sessionTurns > 1 ? 's' : '') : '');
   $('#st-voice').textContent = 'voice: ' + (S.voiceOn ? 'on' : 'off');
   $('#st-demo').textContent = S.demo ? 'demo brain: on (click for the real one)' : 'demo brain: off';
 }
@@ -1078,10 +1084,8 @@ $('#st-project').onclick = () => { const names = projectNames(); if (!names.leng
 $('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn); refreshStatus(); toast(S.voiceOn ? NAME + ' will speak replies' : 'voice off'); if (S.voiceOn) speak('Okay. I\'ll talk.'); };
 $('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); };
 $('#st-clear').onclick = () => tidy();
-$('#st-clear').insertAdjacentHTML('beforebegin', '<button class="row act" id="st-restart" type="button">restart the gateway (twice to confirm)</button>');
-{ let armed = 0; $('#st-restart').onclick = () => { if (!armed) { armed = setTimeout(() => { armed = 0; $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 4000); $('#st-restart').textContent = 'restart the brain — sure?'; return; } clearTimeout(armed); armed = 0; $('#st-restart').textContent = 'restarting…'; restartAct().run(); setTimeout(() => { $('#st-restart').textContent = 'restart the gateway (twice to confirm)'; }, 8000); }; }
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
-refreshStatus(); setInterval(refreshStatus, 6000); connectEvents();
+refreshStatus().then(connectEvents); setInterval(() => { if (!evReady) refreshStatus().then(connectEvents); }, 30000);
 function mostActiveProject(list) {
   const names = new Set(list.map((p) => p.name));
   const autoOn = Object.entries(S.auto || {}).filter(([n, a]) => a && a.on && names.has(n)).map(([n]) => n);
@@ -1091,7 +1095,7 @@ function mostActiveProject(list) {
   return best || autoOn[0] || null;
 }
 async function refreshProjects() { try { if (!S.auto) { try { S.auto = await api.get('/api/auto'); } catch { /* offline */ } } if (!S.fixers || !S.fixers.length) { try { S.fixers = await api.get('/api/fixers'); } catch { /* offline */ } } const r = await fetch('/api/projects'); if (!r.ok) return; const list = await r.json(); S.projects = list; const saved = LS.get('project', null); const recent = mostActiveProject(list); const g = (saved && list.find((p) => p.name === saved)) || (recent && list.find((p) => p.name === recent)) || list.find((p) => p.kind === 'game') || list[0]; if (g) S.project = g.name; const pl = []; for (const p of list.filter((x) => x.kind === 'game')) { try { const ps = await fetch('/api/play?project=' + encodeURIComponent(p.name)).then((x) => x.json()); if (ps.playable) pl.push({ name: p.name, running: ps.running, url: ps.url }); } catch { /* skip */ } } S.playable = pl; renderProject(); } catch { /* offline */ } }
-refreshProjects(); setInterval(refreshProjects, 60000);
+refreshProjects(); setInterval(() => { if (!document.hidden) refreshProjects(); }, 120000);
 (async () => { try { const items = await api.get('/api/history?n=12'); const recent = (Array.isArray(items) ? items : []).filter((m) => m.channel === 'app'); S.recent = recent.length > 0 && Date.now() - Date.parse(recent[recent.length - 1].ts) < 12 * 3600000; } catch { S.recent = false; } })();
 if (S.demo) { S.auto = { shipless: { on: true, mode: 'stage', inflight: 2, pending: 17, staged: 3, done: 12, total: 29, spend: 4.2 } }; renderAgents([], {}); renderProject(); }
 
@@ -1100,7 +1104,7 @@ let chipsShown = false;
 function chipSet(when) {
   const out = [];
   const fx = S.fixers || [];
-  const staged = fx.filter((f) => f.status === 'done' && (f.game || f.project) === activeProject() && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length;
+  const staged = fx.filter((f) => f.status === 'staged' && (f.game || f.project) === activeProject() && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length;
   const running = fx.filter((f) => /running|queued/i.test(f.status) && (f.game || f.project) === activeProject()).length;
   const proj = S.project || 'shipless';
   if (staged) out.push(autoOf(activeProject()).mode === 'ship' ? { label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' in the merge queue', text: '/artifacts ' + activeProject() } : { label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' waiting for review', text: '/review ' + activeProject() });
@@ -1135,8 +1139,8 @@ function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c
 
 /* ------------------------------------------------------------------ pill */
 function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; layout(false); }
-ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) hideChips(); else if (document.activeElement === ask) showChips('focus'); activity(); });
-ask.addEventListener('focus', () => { layout(false); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
+ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); activity(); });
+ask.addEventListener('focus', () => { layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
@@ -1144,7 +1148,7 @@ ask.addEventListener('keydown', (e) => {
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else { ask.blur(); if (S.mode === 'talk' && !S.busy) tidy(); } }
 });
-pill.addEventListener('submit', (e) => { e.preventDefault(); if (S.busy) { if (S.abort) { S.abort.abort(); toast('stopped watching'); } return; } send(ask.value, pendingImages.slice()); });
+pill.addEventListener('submit', (e) => { e.preventDefault(); if (S.busy) { if (S.activeRunId) { api.command('turn.stop', { id: S.activeRunId }).then(() => { S.abort?.abort(); toast('turn stopped; work preserved'); }).catch((e) => toast(e.message)); } else if (S.abort) { S.abort.abort(); toast('connection closed; check Activity for queued work'); } return; } send(ask.value, pendingImages.slice()); });
 addEventListener('keyup', (e) => { if (e.code === 'Space' && S.holdStarted && listening === true && performance.now() - (S.holdAt || 0) > 350) { S.holdStarted = false; stopListen(true); } }, { passive: true });
 addEventListener('keydown', (e) => {
   if (e.altKey && e.code === 'Space') { e.preventDefault(); if (e.repeat) return; S.holdAt = performance.now(); if (!listening) { S.holdStarted = true; startListen(); } else { S.holdStarted = false; stopListen(true); } return; }
@@ -1157,7 +1161,7 @@ addEventListener('keydown', (e) => {
 /* images: paste or drop */
 function addImage(file) {
   if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type) || pendingImages.length >= 4) return;
-  const rd = new FileReader(); rd.onload = () => { const data = String(rd.result).split(',')[1]; pendingImages.push({ media_type: file.type, data }); renderAttach(); }; rd.readAsDataURL(file);
+  const rd = new FileReader(); rd.onload = () => { const data = String(rd.result).split(',')[1]; pendingImages.push({ media_type: file.type, data }); renderAttach(); interactions.event('attach'); }; rd.readAsDataURL(file);
 }
 function renderAttach() {
   attachEl.hidden = !pendingImages.length; attachEl.replaceChildren();
@@ -1250,19 +1254,18 @@ async function speak(text) {
 }
 
 /* ------------------------------------------------------------------ boot */
-nibbi.setReducedMotion(reducedMotion.matches); reducedMotion.addEventListener('change', (e) => nibbi.setReducedMotion(e.matches));
-if (location.protocol.startsWith('http')) { try { const es = new EventSource('/nibbi/livereload'); es.onmessage = () => location.reload(); } catch { /* no live reload */ } }
+syncMotionPreference(); interactions.event('greet');
 if ('serviceWorker' in navigator && window.isSecureContext && !Q.get('nosw')) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 if (standalone) body.classList.add('standalone');
 
 if (Q.get('say')) { setTimeout(() => send(Q.get('say')), 300); }
 try { if (window.__TAURI__ && window.__TAURI__.event) { window.__TAURI__.event.listen('toggle-live', () => toggleListen()); } } catch { /* browser */ }
-document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (!a) return; if (window.__TAURI__ && /^https?:/i.test(a.href)) { e.preventDefault(); fetch('/api/open?url=' + encodeURIComponent(a.href)).catch(() => window.open(a.href, '_blank')); } });
+document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (!a) return; if (window.__TAURI__ && /^https?:/i.test(a.href)) { e.preventDefault(); api.post('/api/open', { url: a.href }).catch(() => window.open(a.href, '_blank')); } });
 /* live state report: the running app tells the host what it is showing (loopback-readable at /nibbi/state) */
 let stateTimer = 0;
 function snapshot() {
-  return { v: '0.6.1', client: window.__TAURI__ ? 'app' : 'browser', mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
+  return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
     turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => s.textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
     chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), toast: $('#toast').hidden ? null : $('#toast').textContent };
 }
@@ -1283,7 +1286,7 @@ function restoreTranscript() {
   }
   S.stick = true; scrollFeed(true); body.classList.add('rest');
 }
-function reattachFixerActs() { for (const T of S.turns) { if (!T.fixerId || T.body.querySelector('.acts')) continue; const f = fixerById(T.fixerId); if (f && (f.status === 'done' || ACTIVE.has(f.status))) addActs(T, fixerActs(f), { sticky: true }); } }
+function reattachFixerActs() { for (const T of S.turns) { if (!T.fixerId || T.body.querySelector('.acts')) continue; const f = fixerById(T.fixerId); if (f && (f.status === 'staged' || ACTIVE.has(f.status))) addActs(T, fixerActs(f), { sticky: true }); } }
 function reportState() { persistTranscript(); clearTimeout(stateTimer); stateTimer = setTimeout(() => { try { fetch('/nibbi/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(snapshot()), keepalive: true }).catch(() => {}); } catch { /* offline */ } }, 400); }
 new MutationObserver(reportState).observe(feed, { childList: true, subtree: true, characterData: true });
 new MutationObserver(reportState).observe(chipsEl, { childList: true });
@@ -1295,5 +1298,5 @@ const _toast = toast; window.__toastLog = true;
 
 addEventListener('pagehide', () => LS.set('lastSeen', Date.now()));
 document.addEventListener('visibilitychange', () => { if (document.hidden) LS.set('lastSeen', Date.now()); });
-window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout };
+window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout, interactions };
 })();

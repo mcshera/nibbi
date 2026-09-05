@@ -3,16 +3,17 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.nibbi.kokoro</string>
   <key>ProgramArguments</key><array>
-    <string>__HOME__/.nibbi/venv/bin/python</string>
-    <string>__HOME__/.nibbi/bin/kokoro-server.py</string>
+    <string>__STATE__/venv/bin/python</string>
+    <string>__STATE__/bin/kokoro-server.py</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>__HOME__/.nibbi/logs/kokoro-server.log</string>
-  <key>StandardErrorPath</key><string>__HOME__/.nibbi/logs/kokoro-server.log</string>
+  <key>StandardOutPath</key><string>__STATE__/logs/kokoro-server.log</string>
+  <key>StandardErrorPath</key><string>__STATE__/logs/kokoro-server.log</string>
   <key>EnvironmentVariables</key><dict>
-    <key>VIRTUAL_ENV</key><string>__HOME__/.nibbi/venv</string>
-    <key>PATH</key><string>__HOME__/.nibbi/venv/bin:__HOME__/.nibbi/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>VIRTUAL_ENV</key><string>__STATE__/venv</string>
+    <key>PATH</key><string>__STATE__/venv/bin:__STATE__/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>NIBBI_STATE_DIR</key><string>__STATE__</string>
     <key>HOME</key><string>__HOME__</string>
   </dict>
 </dict></plist>

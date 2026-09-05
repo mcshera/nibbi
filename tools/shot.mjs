@@ -27,6 +27,7 @@ try {
     const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }; };
     return { nibbi: n, mode: document.body.dataset.mode, link: document.body.dataset.link, busy: S && S.busy, turns: S && S.turns.length, pill: r('#pill'), feed: r('#feed'), firstTurn: r('.turn'), said: (document.querySelector('.said') || {}).textContent, steps: [...document.querySelectorAll('.step')].map((e) => e.className.replace('step', '').trim() + ' ' + e.textContent.trim()), chips: [...document.querySelectorAll('.chip')].map((c) => c.textContent) };
   });
-  console.log(JSON.stringify({ ok: true, errors: errs, ...(probe ? info : { mode: info.mode, link: info.link, fps: info.nibbi && info.nibbi.fps, gl: info.nibbi && info.nibbi.gl }) }, null, 0));
-} catch (e) { console.log('ERR ' + e.message.slice(0, 400)); }
+  console.log(JSON.stringify({ ok: !errs.length, errors: errs, ...(probe ? info : { mode: info.mode, link: info.link, fps: info.nibbi && info.nibbi.fps, gl: info.nibbi && info.nibbi.gl }) }, null, 0));
+  if (errs.length) process.exitCode = 1;
+} catch (e) { console.log('ERR ' + e.message.slice(0, 400)); process.exitCode = 1; }
 finally { if (b) await b.close(); }

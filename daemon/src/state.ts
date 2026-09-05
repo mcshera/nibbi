@@ -1,13 +1,5 @@
-// state.ts — gateway runtime state (~/.nibbi/state.json)
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-
-/** Crash-safe write: temp file + atomic rename (never leaves a half/empty file). */
-export function writeJsonAtomic(p: string, data: string): void { const tmp = p + ".tmp"; writeFileSync(tmp, data); renameSync(tmp, p); }
-
-export const ORACLE_HOME = join(homedir(), ".nibbi");
-const STATE = join(ORACLE_HOME, "state.json");
+// Compatibility read model; runtime state is persisted in SQLite.
+import { runtime } from './store.js';
 
 export interface GatewayState {
   sessionId?: string;
@@ -21,12 +13,9 @@ export interface GatewayState {
 }
 
 export function loadState(): GatewayState {
-  if (!existsSync(STATE)) return { turns: 0, costUsdTotal: 0 };
-  try { return JSON.parse(readFileSync(STATE, "utf8")) as GatewayState; }
-  catch { return { turns: 0, costUsdTotal: 0 }; }
+  return runtime().get<GatewayState>('config', 'state') ?? runtime().get<GatewayState>('legacy', 'state.json') ?? { turns: 0, costUsdTotal: 0 };
 }
 
 export function saveState(s: GatewayState): void {
-  mkdirSync(ORACLE_HOME, { recursive: true });
-  writeJsonAtomic(STATE, JSON.stringify(s, null, 2));
+  runtime().put('config', 'state', s);
 }

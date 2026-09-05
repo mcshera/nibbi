@@ -1,68 +1,72 @@
-// policy.ts — permission tiers, enforced in code from day one.
-// T0 free: read/search/web. T0v: writes INSIDE the vault (except protected files).
-// Bash: safe-prefix allowlist. Everything else: deny with a friendly reason (P2 adds approval taps).
-import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
-import { resolve } from "node:path";
-import { VAULT, PROTECTED } from "./vault.js";
+import type { CanUseTool, HookCallback } from '@anthropic-ai/claude-agent-sdk';
+import { resolve, basename } from 'node:path';
+import { within, controlPath, canonicalPath } from './paths.js';
 
-const READ_TOOLS = new Set([
-  "Read", "Grep", "Glob", "WebSearch", "WebFetch", "TodoWrite", "Task", "NotebookRead", "ListMcpResources",
-]);
-const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
-const BASH_SAFE_PREFIXES = [
-  "git ", "ls", "cat ", "grep ", "rg ", "find ", "head ", "tail ", "wc ", "date",
-  "mkdir -p", "echo ", "diff ", "tree", "pwd", "gh ",
-];
-const GH_DESTRUCTIVE = /gh\s+(repo\s+delete|auth\b|secret|api\s+.*(-X|--method)\s*(POST|PUT|PATCH|DELETE)|pr\s+merge|release\s+delete)/i;
-
-const insideVault = (p: string): boolean => resolve(String(p)).startsWith(VAULT);
-const isProtected = (p: string): boolean => PROTECTED.some((f) => resolve(String(p)) === resolve(VAULT, f));
-
-/* game repos are oracle's workshop: probe scripts in /tmp, screenshots in <repo>/.oracle-shots/ */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-function gameRepos(): string[] {
-  try {
-    const g = JSON.parse(readFileSync(join(homedir(), ".nibbi", "games.json"), "utf8")) as Record<string, { repo?: string }>;
-    return Object.values(g).map((x) => x.repo || "").filter(Boolean);
-  } catch { return []; }
+export interface ToolScope {
+  role: 'lead' | 'fixer';
+  cwd: string;
+  readableRoots: string[];
+  writableRoots: string[];
+  tools?: string[];
+  skillNames?: string[];
 }
-const inShotsDir = (p: string): boolean => {
-  const abs = resolve(String(p));
-  return gameRepos().some((r) => abs.startsWith(join(r, ".oracle-shots") + "/")) || abs.startsWith("/tmp/");
-};
-const NODE_PROBE = /^(node|npx)\s+[^;&|><`$()]*$/;
+export interface PolicyDecision { allowed: boolean; reason?: string }
+const READ = new Set(['Read', 'Grep', 'Glob', 'NotebookRead']);
+const WRITE = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const deny = (reason: string): PolicyDecision => ({ allowed: false, reason });
+export function sensitivePath(path: string): boolean {
+  return path.split(/[\\/]/).some(part => part === '.env' || part.startsWith('.env.') || ['.ssh', '.aws', '.gnupg', '.npmrc', '.netrc'].includes(part));
+}
 
-export const canUseTool: CanUseTool = async (tool, input) => {
-  if (READ_TOOLS.has(tool)) return { behavior: "allow", updatedInput: input };
-
-  if (WRITE_TOOLS.has(tool)) {
-    const target = String(input["file_path"] ?? input["notebook_path"] ?? "");
-    if (isProtected(target))
-      return { behavior: "deny", message: `${target} is PROTECTED. Propose the change as a diff in chat; Matty approves.` };
-    if (insideVault(target)) return { behavior: "allow", updatedInput: input };
-    if (inShotsDir(target)) return { behavior: "allow", updatedInput: input };
-    return { behavior: "deny", message: `P0 policy: writes only inside the vault (${VAULT}) or a game repo's .oracle-shots/. Game-repo source edits go through /fix.` };
+export function decideTool(scope: ToolScope, tool: string, input: Record<string, unknown>): PolicyDecision {
+  if (READ.has(tool)) {
+    const target = String(input.file_path ?? input.path ?? input.notebook_path ?? scope.cwd);
+    const abs = resolve(scope.cwd, target);
+    if (sensitivePath(abs) || sensitivePath(canonicalPath(abs))) return deny('Credential files are not available to agents');
+    return scope.readableRoots.some(root => within(root, abs, true))
+      ? { allowed: true } : deny('Read is outside this run’s scope');
   }
-
-  if (tool === "Bash") {
-    const cmd = String(input["command"] ?? "").trim();
-    const safe = BASH_SAFE_PREFIXES.some((p) => cmd === p.trim() || cmd.startsWith(p));
-    const noChaining = !/[;&|><`$()]/.test(cmd.replace(/"[^"]*"|'[^']*'/g, ""));
-    if (GH_DESTRUCTIVE.test(cmd)) return { behavior: "deny", message: "gh act-gate: destructive gh commands need Matty." };
-    if (safe && noChaining) return { behavior: "allow", updatedInput: input };
-    if (NODE_PROBE.test(cmd)) return { behavior: "allow", updatedInput: input }; // node/npx probes & preview servers (no chaining)
-    return { behavior: "deny", message: "P0 policy: bash limited to read-only/git prefixes without chaining. Ask Matty if you need more." };
+  if (WRITE.has(tool)) {
+    const target = String(input.file_path ?? input.notebook_path ?? '');
+    if (!target) return deny('A file path is required');
+    const abs = resolve(scope.cwd, target);
+    try { if (scope.writableRoots.some(root => controlPath(root, abs) || controlPath(root, canonicalPath(abs)))) return deny('Agent configuration and Git metadata are backend-owned'); }
+    catch { return deny('Invalid path'); }
+    if (scope.role === 'lead') {
+      let base: string;
+      try { base = basename(canonicalPath(abs)); } catch { return deny('Invalid path'); }
+      if (['SOUL.md', 'AGENTS.md'].includes(base)) return deny('Protected file: submit a proposal');
+    }
+    return scope.writableRoots.some(root => within(root, abs)) ? { allowed: true } : deny('Write is outside this run’s scope');
   }
-
-  if (tool.startsWith("mcp__github__")) {
-    const op = tool.replace("mcp__github__", "");
-    if (/^(delete_|merge_|push_|update_.*branch|create_or_update_file|fork_)/.test(op))
-      return { behavior: "deny", message: `github act-gate: '${op}' is blocked — ask Matty or use the /fix flow.` };
-    return { behavior: "allow", updatedInput: input };
+  if (tool === 'Bash') {
+    if (scope.role !== 'fixer' || !scope.writableRoots.length) return deny('Use file tools to read and governed Nibbi tools for actions');
+    if (input.dangerouslyDisableSandbox) return deny('The sandbox is required');
+    // This is defense in depth. The provider's OS sandbox confines shell writes.
+    const cmd = String(input.command ?? '');
+    if (/\b(sudo|launchctl|security|osascript)\b|\bgit\s+(?:(?:-[^\s]+)\s+)*(?:push|commit|merge|rebase|reset|clean|checkout|switch|worktree|config|add|tag|branch)\b|\bgh\b|[\r\n]/i.test(cmd))
+      return deny('System changes, Git writes and publishing are backend-owned');
+    return { allowed: true };
   }
-  if (tool.startsWith("mcp__")) return { behavior: "allow", updatedInput: input }; // future registry servers: reads
+  if (tool === 'Skill') return (scope.skillNames ?? []).includes(String(input.skill ?? ''))
+    ? { allowed: true } : deny('Skill is not enabled for this run');
+  if (['TodoWrite', 'WebSearch', 'WebFetch'].includes(tool)) return { allowed: true };
+  if ((scope.tools ?? []).includes(tool)) return { allowed: true };
+  return deny("Tool '" + tool + "' is not enabled for this run");
+}
 
-  return { behavior: "deny", message: `P0 policy: tool '${tool}' not yet enabled.` };
-};
+export function policyFor(scope: ToolScope): CanUseTool {
+  return async (tool, input) => {
+    const decision = decideTool(scope, tool, input);
+    return decision.allowed ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: decision.reason! };
+  };
+}
+
+/** Mandatory policy runs before permission rules can pre-approve a call. */
+export function policyHook(scope: ToolScope): HookCallback {
+  return async input => {
+    if (input.hook_event_name !== 'PreToolUse') return {};
+    const decision = decideTool(scope, input.tool_name, input.tool_input as Record<string, unknown>);
+    return decision.allowed ? {} : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.reason } };
+  };
+}

@@ -66,6 +66,12 @@ uniform float u_wet;      // feather breathing 0..1
 uniform vec3  u_tint;     // agent ink colour
 uniform float u_tintAmt;  // 0 = black ink, 1 = tinted
 uniform sampler2D u_grain;
+// Pocket spring opt-in; the legacy controller leaves u_pocket at zero.
+uniform float u_pocket;
+uniform vec2 u_scale;
+uniform vec2 u_rotation;
+uniform vec2 u_shift;
+uniform vec3 u_shape;
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
@@ -81,15 +87,24 @@ float tuft(vec2 p){ float t = 1.0 - smoothstep(0.0, 1.05, voro(p)); return t * t
 
 void main(){
   vec2 p = gl_FragCoord.xy / u_dpr - u_center;
-  if (dot(p, p) > 7.3 * u_R * u_R) { gl_FragColor = vec4(0.0); return; }   // far field: nothing to draw
+  if (u_pocket < 0.5 && dot(p, p) > 7.3 * u_R * u_R) { gl_FragColor = vec4(0.0); return; }
   float R = u_R * u_breath;
-
-  vec2 q = p;
-  q.y -= u_lift;
   float yb = -0.66 * u_R;
-  q.y = yb + (q.y - yb) / u_sq;
-  q.x = q.x * (u_sq * 0.55 + 0.45);
-  q.x -= u_lean * clamp((q.y - yb) / (1.6 * u_R), 0.0, 1.2);   // crown leans, skirt stays planted
+  vec2 q = p;
+  if (u_pocket > 0.5) {
+    // Inverse of pocketMap(): identical foot, crown bend, scale and rotation for ink and eyes.
+    vec2 v = vec2(p.x,-p.y)/u_R-vec2(u_shift.x,0.66-u_shift.y);
+    q = vec2(u_rotation.x*v.x+u_rotation.y*v.y,-u_rotation.y*v.x+u_rotation.x*v.y)/u_scale;
+    q.y += 0.66;
+    q.x -= (u_lean/u_R)*clamp((0.66-q.y)/1.6,0.0,1.2);
+    if (dot(q,q)>8.0) { gl_FragColor=vec4(0.0); return; }
+    q *= vec2(u_R,-u_R);
+  } else {
+    q.y -= u_lift;
+    q.y = yb + (q.y - yb) / u_sq;
+    q.x = q.x * (u_sq * 0.55 + 0.45);
+    q.x -= u_lean * clamp((q.y - yb) / (1.6 * u_R), 0.0, 1.2);
+  }
 
   float an = atan(q.y, q.x);
   float rr = 1.0 + u_hAmp * (u_h.x * cos(2.0*an + u_hp.x) + u_h.y * cos(3.0*an + u_hp.y) + u_h.z * cos(5.0*an + u_hp.z) + u_h.w * cos(7.0*an + u_hp.w));
@@ -103,6 +118,19 @@ void main(){
   float ysc = mix(0.98, 1.10, smoothstep(-0.3 * R, 0.4 * R, q.y));
   float d0 = length(q * vec2(1.0, ysc)) - R * rr * 0.95;
   d0 = smax(d0, -(q.y - yb) - 0.05 * R, 0.15 * R);
+  if (u_pocket > 0.5) {
+    vec2 n = q/R;
+    float roundD = length(n-vec2(0.0,0.20))-0.86;
+    vec2 sp = n-vec2(0.0,0.22);
+    float sa = atan(sp.y,sp.x);
+    float starD = (length(sp)-(0.875+0.285*cos(5.0*(sa-1.570796327))))*0.72;
+    float taper = mix(1.03,0.20,smoothstep(-0.48,1.36,n.y));
+    float dropD = (length(vec2(n.x/taper,(n.y-0.35)/1.01))-1.0)*0.70;
+    float total = u_shape.x+u_shape.y+u_shape.z;
+    vec3 w = u_shape/max(1.0,total);
+    d0 = d0*(1.0-min(1.0,total))+R*(roundD*w.x+starD*w.y+dropD*w.z);
+    if (d0>0.40*R) { gl_FragColor=vec4(0.0); return; }
+  }
 
   float edge = smoothstep(-0.30 * R, 0.03 * R, d0);
   float pf = 1.0 + 0.8 * u_poof + 0.22 * u_wet;
@@ -113,7 +141,8 @@ void main(){
   float j  = fbm(nq * 3.2 + u_noff) - 0.5;
   float fall = 1.0 - smoothstep(0.03 * R, 0.13 * R, d0);
   float d = d0 - (t1 * 0.16 + t2 * 0.13 + t3 * edge * 0.07) * R * pf * (0.35 + 0.65 * edge) * fall + j * 0.035 * R;
-  d = smax(d, -(q.y - yb) - 0.13 * R, 0.10 * R);
+  float skirt = u_pocket>0.5 ? 1.0-min(1.0,u_shape.x+u_shape.y+u_shape.z) : 1.0;
+  d = mix(d,smax(d, -(q.y - yb) - 0.13 * R, 0.10 * R),skirt);
 
   float aIn = 1.0 - smoothstep(-0.015 * R, 0.008 * R, d);
   float aBl = (1.0 - smoothstep(-0.01 * R, 0.14 * R * pf, d)) * 0.33;
@@ -155,7 +184,7 @@ const MOODS = {
   sleep:     { lidTop: 0.62, lidBot: 0.00, wide: 0.98, pupil: 1.00, boil: 5,  breathAmp: 0.026, breathHz: 1 / 6.5, gazeBias: [0, 0.6],       puffIdle: 0, lumpy: 0.8, drip: [40000, 30000], blinkGap: [6000, 6000] },
 };
 
-function createNibbi(opts) {
+function createLegacyNibbi(opts) {
   const inkCv = opts.ink, fxCv = opts.fx;
   const fx = fxCv.getContext('2d'); const FX = fx;
   let DPR = Math.min(2, window.devicePixelRatio || 1);
@@ -585,6 +614,336 @@ function createNibbi(opts) {
     hitTest(x, y) { const dx = x - pose.x, dy = y - pose.y; return dx * dx + dy * dy < (1.35 * pose.r) * (1.35 * pose.r); },
   };
   return api;
+}
+
+
+/* Pocket spring controller. The production shader above and original pip design
+   stay shared with the opt-in legacy engine; this rig has one simulation clock. */
+const P_TAU = Math.PI * 2;
+const pFinite = (v, fallback = 0) => Number.isFinite(v) ? v : fallback;
+const pMix = (a,b,t) => a+(b-a)*t;
+const pSmooth = (a,b,v) => { const t=clamp((v-a)/(b-a),0,1); return t*t*(3-2*t); };
+const pSmax = (a,b,k) => { const h=clamp(.5+.5*(b-a)/k,0,1); return pMix(a,b,h)+k*h*(1-h); };
+const P_NEUTRAL = Object.freeze({x:0,lift:0,sx:1,sy:1,rotate:0,lean:0,round:0,star:0,drop:0,satellite:0,trail:0,impact:0,eyeX:0,eyeY:0,blink:0,wide:1,happy:0,phase:'rest'});
+const P_SPAT = [[118,-95,4.2],[148,-39,3],[129,-13,2],[159,93,3.6],[-184,63,2.2],[-172,82,3.1],[-151,78,2],[-137,89,2.6],[-159,95,1.6]];
+function pocketPose(value, amount=1) {
+  const p={...P_NEUTRAL};
+  for (const k of Object.keys(p)) if (k!=='phase') p[k]=pFinite(value?.[k],p[k]);
+  p.phase=typeof value?.phase==='string' ? value.phase : 'rest';
+  for (const k of ['x','lift','rotate','lean','round','star','drop','impact','eyeX','eyeY']) p[k]*=amount;
+  p.x=clamp(p.x,-.3,.3); p.lift=clamp(p.lift,0,1.1); p.rotate=clamp(p.rotate,-.35,.35); p.lean=clamp(p.lean,-.35,.35);
+  p.sy=Math.exp(clamp(Math.log(Math.max(.001,p.sy))*amount,-Math.log(1.5),Math.log(1.5))); p.sx=1/p.sy;
+  for (const k of ['round','star','drop','impact','blink','happy']) p[k]=clamp(p[k],0,1);
+  p.eyeX=clamp(p.eyeX,-.13,.13); p.eyeY=clamp(p.eyeY,-.11,.11); p.wide=clamp(p.wide,.65,1.14);
+  p.satellite=p.trail=0;
+  return p;
+}
+function pocketMap(x,y,p,cx,cy,R) {
+  x=(x+p.lean*clamp((.66-y)/1.6,0,1.2))*p.sx; y=(y-.66)*p.sy;
+  const c=Math.cos(p.rotate),s=Math.sin(p.rotate);
+  return [cx+R*(x*c-y*s+p.x),cy+R*(.66+x*s+y*c-p.lift)];
+}
+function pocketInverse(x,y,p,cx,cy,R) {
+  x=(x-cx)/R-p.x; y=(y-cy)/R-.66+p.lift;
+  const c=Math.cos(p.rotate),s=Math.sin(p.rotate),lx=(c*x+s*y)/p.sx,ly=(-s*x+c*y)/p.sy+.66;
+  return [lx-p.lean*clamp((.66-ly)/1.6,0,1.2),ly];
+}
+function pocketDistance(x,y,p) {
+  y=-y; const a=Math.atan2(y,x);
+  let rr=1+.054*Math.cos(2*a+1.1)+.048*Math.cos(3*a+2.6)+.028*Math.cos(5*a+4.7)+.016*Math.cos(7*a+1.7);
+  rr+=.06*clamp(-Math.sin(a),0,1)-.02*clamp(Math.sin(a),0,1)+.085*Math.exp((Math.cos(a-3.3)-1)*6)+.05*Math.exp((Math.cos(a+.15)-1)*6);
+  const blot=pSmax(Math.hypot(x,y*pMix(.98,1.1,pSmooth(-.3,.4,y)))-rr*.95,-(y+.66)-.05,.15);
+  const round=Math.hypot(x,y-.2)-.86;
+  const star=(Math.hypot(x,y-.22)-(.875+.285*Math.cos(5*(Math.atan2(y-.22,x)-Math.PI/2))))*.72;
+  const taper=pMix(1.03,.2,pSmooth(-.48,1.36,y));
+  const drop=(Math.hypot(x/taper,(y-.35)/1.01)-1)*.7;
+  const sum=p.round+p.star+p.drop;
+  return blot*(1-Math.min(1,sum))+(round*p.round+star*p.star+drop*p.drop)/Math.max(1,sum);
+}
+function pocketContour(p,pad=.24,n=80) {
+  const out=[];
+  for(let i=0;i<n;i++) {
+    const a=i/n*P_TAU,dx=Math.cos(a),dy=Math.sin(a); let lo=0,hi=2.6;
+    for(let j=0;j<12;j++) { const r=(lo+hi)/2; if(pocketDistance(dx*r,-.12+dy*r,p)<pad)lo=r;else hi=r; }
+    out.push([dx*(lo+hi)/2,-.12+dy*(lo+hi)/2]);
+  }
+  return out;
+}
+function pocketRing(x,y,rx,ry,n=48) { return Array.from({length:n},(_,i)=>[x+Math.cos(i/n*P_TAU)*rx,y+Math.sin(i/n*P_TAU)*ry]); }
+function pocketPath(ctx,points) { ctx.beginPath(); points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath(); }
+function pocketBox(points) {
+  let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
+  for(const [x,y] of points){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}
+  return {left,top,right,bottom,width:right-left,height:bottom-top};
+}
+function pocketGeometry(p,cx,cy,R,wide) {
+  const map=(x,y)=>pocketMap(x,y,p,cx,cy,R),boundary=pocketContour(p);
+  const eyeOutlines=LOOK.eyes.map(e=>pocketRing(e.x/R0+p.eyeX,e.y/R0+p.eyeY,e.rx/R0*wide,e.ry/R0*wide,64));
+  const eyePoints=eyeOutlines.flat(),bodyPoints=boundary.map(([x,y])=>map(x,y));
+  const spats=P_SPAT.flatMap(([x,y,r])=>pocketRing(x/R0,y/R0,r/R0,r/R0,8)).map(([x,y])=>map(x,y));
+  const faceMargins=eyeOutlines.map(points=>Math.min(...points.map(([x,y])=>-pocketDistance(x,y,p))));
+  const eyeCenters=LOOK.eyes.map(e=>{const [x,y]=map(e.x/R0+p.eyeX,e.y/R0+p.eyeY);return {x,y};});
+  return {bounds:pocketBox([...bodyPoints,...spats]),bodyBounds:pocketBox(bodyPoints),eyeBounds:pocketBox(eyePoints.map(([x,y])=>map(x,y))),
+    eyeCenters,faceContained:Math.min(...faceMargins)>=0,minFaceMargin:Math.min(...faceMargins),faceMargins,
+    faceMarginUnit:'R; untextured local body field (approximate signed distance)',
+    eyeGap:(70-(29+29.9)*wide)/R0*R*Math.min(p.sx,p.sy),wide,
+    baseFoot:{x:cx,y:cy+.66*R},foot:{x:cx+p.x*R,y:cy+(.66-p.lift)*R},
+    map:{anchor:[0,.66],scale:[p.sx,p.sy],rotate:p.rotate,lean:p.lean,x:p.x,lift:p.lift,center:[cx,cy],radius:R},
+    _boundary:boundary};
+}
+
+function createPocketNibbi(opts) {
+  const inkCv=opts.ink,fxCv=opts.fx,fx=fxCv.getContext('2d');
+  if(!fx)throw new Error('Nibbi needs a 2D effects canvas.');
+  const lib=globalThis.NibbiPocketMotion,director=lib.createDirector({seed:pFinite(opts.seed,7)});
+  const manual=!!opts.manual,mirrors=new Set(),agents=new Map(),particles=[];
+  let gl=null,U={},glOK=false,backendReason=opts.force2D?'forced by force2D':null,maxDimension=8192;
+  let resources={program:null,buffer:null,texture:null,shaders:[]};
+  let W=1,H=1,DPR=1,dead=false,raf=0,lastWall=null,clock=0,dirty=true,frameCount=0,fps=0;
+  let reduced=!!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  let energy=1,texture='flow',mood='idle',fade=1,fadeTarget=1,speech=0;
+  let current={...P_NEUTRAL},geometry=null,mirrorCrop=null,poseSnap=true;
+  const pose={x:innerWidth/2,y:innerHeight*.44,r:120,vx:0,vy:0,vr:0};
+  const target={x:pose.x,y:pose.y,r:pose.r};
+  const expression={lidTop:0,lidBot:0,wide:1,pupil:.88};
+  let gazeX=-.25,gazeY=.1,gazeTX=-.25,gazeTY=.1,lookX=null,lookY=null,ptrX=-1e6,ptrY=-1e6,ptrAt=-1e6;
+  let nextWander=2.5,nextBlink=2.6,blinkAt=-100,forcedBlinkAt=-100,seed=(pFinite(opts.seed,7)|0)>>>0;
+  const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+  const sm=(a,b,dt,k)=>a+(b-a)*(1-Math.exp(-k*dt));
+
+  function releaseGL(lose=false) {
+    if(gl) {
+      if(resources.texture)gl.deleteTexture(resources.texture);
+      if(resources.buffer)gl.deleteBuffer(resources.buffer);
+      if(resources.program)gl.deleteProgram(resources.program);
+      for(const shader of resources.shaders)gl.deleteShader(shader);
+      if(lose)gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+    resources={program:null,buffer:null,texture:null,shaders:[]};gl=null;glOK=false;
+  }
+  function initGL() {
+    if(opts.force2D)return;
+    try {
+      gl=inkCv.getContext('webgl',{alpha:true,premultipliedAlpha:true,antialias:false,depth:false,stencil:false});
+      if(!gl)throw new Error('WebGL unavailable');
+      const limits=gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+      maxDimension=Math.min(8192,gl.getParameter(gl.MAX_TEXTURE_SIZE),gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),limits[0],limits[1]);
+      const shader=(type,src)=>{const sh=gl.createShader(type);resources.shaders.push(sh);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh)||'shader compile');return sh;};
+      const prog=gl.createProgram();resources.program=prog;
+      const highp=gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT)?.precision>0;
+      gl.attachShader(prog,shader(gl.VERTEX_SHADER,VS));gl.attachShader(prog,shader(gl.FRAGMENT_SHADER,highp?FS:FS.replace('precision highp float','precision mediump float')));gl.linkProgram(prog);
+      if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(prog)||'shader link');
+      gl.useProgram(prog);
+      const buf=gl.createBuffer();resources.buffer=buf;gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+      const loc=gl.getAttribLocation(prog,'a_p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+      const tex=gl.createTexture();resources.texture=tex;gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.LUMINANCE,GRAIN,GRAIN,0,gl.LUMINANCE,gl.UNSIGNED_BYTE,grainBytes);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+      U={};for(const n of ['dpr','center','R','breath','h','hp','noff','puff','lift','sq','lean','poof','fade','hAmp','flow','wet','tint','tintAmt','grain','pocket','scale','rotation','shift','shape'])U[n]=gl.getUniformLocation(prog,'u_'+n);
+      gl.uniform1i(U.grain,0);gl.disable(gl.BLEND);gl.disable(gl.DEPTH_TEST);gl.clearColor(0,0,0,0);glOK=true;backendReason=null;
+    }catch(error){backendReason=String(error.message||error);releaseGL();}
+  }
+  function resize() {
+    if(dead)return;
+    W=Math.max(1,pFinite(innerWidth,1));H=Math.max(1,pFinite(innerHeight,1));
+    DPR=Math.min(2,Math.max(.5,pFinite(devicePixelRatio,1)),maxDimension/W,maxDimension/H);
+    const w=Math.max(1,Math.floor(W*DPR)),h=Math.max(1,Math.floor(H*DPR));
+    for(const cv of [inkCv,fxCv]){if(cv.width!==w)cv.width=w;if(cv.height!==h)cv.height=h;}
+    fx.setTransform(DPR,0,0,DPR,0,0);if(glOK)gl.viewport(0,0,w,h);
+    dirty=true;if(reduced)renderFrame(0);
+  }
+  function spring(key,vkey,dt) {
+    const d=pose[key]-target[key],v=pose[vkey],w=Math.sqrt(70),z=.82,wd=w*Math.sqrt(1-z*z),decay=Math.exp(-z*w*dt),c=Math.cos(wd*dt),s=Math.sin(wd*dt);
+    pose[key]=target[key]+decay*(d*c+(v+z*w*d)/wd*s);
+    pose[vkey]=decay*(v*c-(z*w*v+w*w*d)/wd*s);
+    if(Math.abs(pose[key]-target[key])+Math.abs(pose[vkey])<.0001){pose[key]=target[key];pose[vkey]=0;}
+  }
+  function roomFor(cx,cy,R) {
+    const top=(cy-1.18*R-6)/R,side=(Math.min(cx,W-cx)-1.46*R-6)/R,bottom=(H-cy-1.02*R-6)/R;
+    const room=clamp(Math.min(top/1.85,side/1.05,bottom/.70),0,1);
+    return {amount:room*(.70+.30*pSmooth(32,100,R)),compact:R<55||room<.48};
+  }
+  function texAt(t,phase=0) {
+    if(reduced)return {offset:[0,0],flow:[0,0],wet:0};
+    if(texture==='boil') {
+      const n=Math.floor(t*9),fr=[[0,0],[.43,-.31],[-.29,.53]][((n%3)+3)%3];
+      return {offset:[fr[0]+phase,fr[1]-phase*.7],flow:[.35*Math.sin(n/9*.13+phase),.28*Math.sin(n/9*.11)],wet:.35};
+    }
+    return {offset:[.44*Math.sin(t*.19+phase),.38*Math.sin(t*.16-phase)],flow:[.35*Math.sin(t*.13+phase),.28*Math.sin(t*.11-phase)],wet:.30+.15*Math.sin(t*.9+phase)};
+  }
+  function uniforms(cx,cy,R,p,tx,alpha=1,color=null) {
+    gl.useProgram(resources.program);gl.uniform1f(U.dpr,DPR);gl.uniform2f(U.center,cx,H-cy);gl.uniform1f(U.R,R);
+    gl.uniform1f(U.pocket,1);gl.uniform2f(U.scale,p.sx,p.sy);gl.uniform2f(U.rotation,Math.cos(p.rotate),Math.sin(p.rotate));gl.uniform2f(U.shift,p.x,p.lift);gl.uniform3f(U.shape,p.round,p.star,p.drop);
+    gl.uniform1f(U.breath,1);gl.uniform4f(U.h,...LOOK.h);gl.uniform4f(U.hp,...LOOK.hp);gl.uniform2f(U.noff,...tx.offset);gl.uniform2f(U.flow,...tx.flow);
+    gl.uniform3f(U.puff,1,0,0);gl.uniform1f(U.lift,0);gl.uniform1f(U.sq,1);gl.uniform1f(U.lean,p.lean*R);gl.uniform1f(U.poof,0);gl.uniform1f(U.fade,alpha);gl.uniform1f(U.hAmp,1);gl.uniform1f(U.wet,tx.wet);
+    gl.uniform3f(U.tint,...(color||[0,0,0]));gl.uniform1f(U.tintAmt,color?1:0);
+  }
+  function scissor(b) {
+    const left=clamp(Math.floor((b.left-2)*DPR),0,inkCv.width),right=clamp(Math.ceil((b.right+2)*DPR),0,inkCv.width);
+    const top=clamp(Math.floor((b.top-2)*DPR),0,inkCv.height),bottom=clamp(Math.ceil((b.bottom+2)*DPR),0,inkCv.height);
+    gl.enable(gl.SCISSOR_TEST);gl.scissor(left,inkCv.height-bottom,Math.max(0,right-left),Math.max(0,bottom-top));
+  }
+  function drawBody2D(ctx,p,cx,cy,R,tx,color=null) {
+    const map=(x,y)=>pocketMap(x,y,p,cx,cy,R),phase=tx.offset[0]*7.7+tx.offset[1]*4.6;
+    const base=pocketContour(p,0,112),ragged=base.map(([x,y],i)=>{const a=i/base.length*P_TAU,d=.011*Math.sin(i*2.13+phase)+.008*Math.sin(i*4.79-phase*.8);return [x+Math.cos(a)*d,y+Math.sin(a)*d];});
+    const ink=color?'rgb('+color.map(c=>Math.round(c*105)).join(',')+')':'#131212';
+    ctx.fillStyle=ink;ctx.save();ctx.globalAlpha*=.09;
+    for(let i=0;i<ragged.length;i++){const [x,y]=ragged[i],r=.019+.020*(.5+.5*Math.sin(i*7.31+phase));pocketPath(ctx,pocketRing(x,y,r,r*.82,10).map(([xx,yy])=>map(xx,yy)));ctx.fill();}ctx.restore();
+    pocketPath(ctx,ragged.map(([x,y])=>map(x,y)));ctx.fillStyle=ink;ctx.fill();
+    ctx.save();ctx.clip();
+    for(let i=0;i<125;i++){
+      const a=i*2.39996323,r=Math.sqrt((i+.5)/125)*1.46,x=Math.cos(a)*r+.016*tx.flow[0],y=Math.sin(a)*r-.16+.016*tx.flow[1],sz=.006+.014*(.5+.5*Math.sin(i*4.17));
+      ctx.fillStyle='rgba(193,187,174,'+(.025+.020*(.5+.5*Math.sin(i*1.7+phase)))+')';pocketPath(ctx,pocketRing(x,y,sz*1.6,sz*.6,8).map(([xx,yy])=>map(xx,yy)));ctx.fill();
+    }ctx.restore();
+  }
+  function drawEyes(ctx,p,cx,cy,R,E,gx,gy,blink) {
+    const map=(x,y)=>pocketMap(x,y,p,cx,cy,R),wide=clamp(E.wide*p.wide,.65,1.14);
+    const ellipse=(x,y,rx,ry,fill)=>{pocketPath(ctx,pocketRing(x,y,rx,ry,64).map(([xx,yy])=>map(xx,yy)));ctx.fillStyle=fill;ctx.fill();};
+    for(const eye of LOOK.eyes) {
+      const x=eye.x/R0+p.eyeX,y=eye.y/R0+p.eyeY,rx=eye.rx/R0*wide,ry=eye.ry/R0*wide;
+      const pupil=clamp(E.pupil*(1-.09*p.happy),.5,1.12),prx=eye.prx/R0*pupil,pry=eye.pry/R0*pupil;
+      const px=x+clamp((eye.pox+gx*LOOK.gaze[0])/R0,-rx+prx+.009,rx-prx-.009),py=y+clamp((eye.poy+gy*LOOK.gaze[1])/R0,-ry+pry+.009,ry-pry-.009);
+      ellipse(x,y,rx,ry,'#fbfaf5');ctx.save();pocketPath(ctx,pocketRing(x,y,rx,ry,64).map(([xx,yy])=>map(xx,yy)));ctx.clip();
+      ellipse(px,py,prx,pry,'#131211');ellipse(px-prx*.34,py-pry*.42,prx*.29,pry*.23,'rgba(251,250,245,.96)');ellipse(px+prx*.32,py+pry*.29,prx*.12,prx*.12,'rgba(251,250,245,.58)');
+      const top=clamp(E.lidTop+Math.max(blink,p.blink)*(1-E.lidTop),0,1),bot=clamp(E.lidBot+p.happy*.32,0,.55);
+      if(top>.001)ellipse(x,y-ry-2.1*ry+top*2*ry,rx*2.2,ry*2.1,'#141312');
+      if(bot>.001)ellipse(x,y+ry+1.9*ry-bot*2*ry,rx*1.9,ry*1.9,'#141312');ctx.restore();
+    }
+  }
+  function drawSpats(ctx,p,cx,cy,R) {
+    ctx.fillStyle='#191817';
+    for(const [x,y,r] of P_SPAT){pocketPath(ctx,pocketRing(x/R0,y/R0,r/R0,r/R0*.88,12).map(([xx,yy])=>pocketMap(xx,yy,p,cx,cy,R)));ctx.fill();}
+  }
+  function drawImpact(ctx,p,cx,cy,R) {
+    if(p.impact<=.001)return;
+    ctx.save();ctx.globalAlpha*=.35*p.impact;ctx.fillStyle='#191817';
+    for(let i=0;i<6;i++){const side=i%2?1:-1,n=Math.floor(i/2);ctx.beginPath();ctx.ellipse(cx+(p.x+side*(.76+n*.18))*R,cy+(.68+Math.sin(i*3.7)*.025)*R,(.038-n*.006)*R*p.impact,.011*R*p.impact,side*.15,0,P_TAU);ctx.fill();}
+    ctx.restore();
+  }
+  function surface(cv) {
+    const rect=cv.getBoundingClientRect();if(!rect.width||!rect.height)return null;
+    const w=Math.max(1,Math.min(4096,Math.round(rect.width*DPR))),h=Math.max(1,Math.min(4096,Math.round(rect.height*DPR)));
+    if(cv.width!==w)cv.width=w;if(cv.height!==h)cv.height=h;
+    const ctx=cv.getContext('2d');if(!ctx)return null;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,w,h);ctx.imageSmoothingQuality='high';return {ctx,w,h};
+  }
+  function drawCompanions(dt) {
+    const sw=Math.min(W,280),sh=Math.min(H,280),R=Math.max(4,Math.min(58,sw/4.6,sh/4.6)),cx=sw/2,cy=sh*.61;
+    for(const [id,ag] of agents) {
+      if(!ag.canvas.isConnected){agents.delete(id);continue;}
+      const surf=surface(ag.canvas);if(!surf)continue;
+      const p=pocketPose(ag.director.update(dt,{energy:.55,reduced,compact:true,speech:0,hidden:document.hidden}),.75);
+      const tx=texAt(clock,ag.seed),md=MOODS[ag.mood]||MOODS.working,E={...md,wide:Math.min(1.14,md.wide)};
+      const bounds=pocketGeometry(p,cx,cy,R,clamp(E.wide*p.wide,.65,1.14)).bounds;
+      const k=Math.min(surf.w/sw,surf.h/sh),dx=(surf.w-sw*k)/2,dy=surf.h-sh*k,g=surf.ctx;
+      if(glOK){scissor({left:0,top:0,right:sw,bottom:sh});gl.clear(gl.COLOR_BUFFER_BIT);uniforms(cx,cy,R,p,tx,1,ag.color);scissor(bounds);gl.drawArrays(gl.TRIANGLES,0,3);g.drawImage(inkCv,0,0,Math.round(sw*DPR),Math.round(sh*DPR),dx,dy,sw*k,sh*k);}
+      g.save();g.translate(dx,dy);g.scale(k,k);
+      if(!glOK)drawBody2D(g,p,cx,cy,R,tx,ag.color);
+      const gx=reduced?md.gazeBias[0]:md.gazeBias[0]+.18*Math.sin(clock*.7+ag.seed),gy=reduced?md.gazeBias[1]:md.gazeBias[1]+.14*Math.cos(clock*.5+ag.seed);
+      drawEyes(g,p,cx,cy,R,E,gx,gy,0);g.restore();
+      ag.bounds=bounds;
+    }
+  }
+  function drawMirrors(room) {
+    const R=pose.r,cx=pose.x,cy=pose.y,a=room.amount;
+    const desired={left:cx-(1.48+1.10*a)*R,right:cx+(1.48+1.10*a)*R,top:cy-(1.23+2.05*a)*R,bottom:cy+(1.03+.75*a)*R};
+    mirrorCrop={left:Math.max(0,desired.left),top:Math.max(0,desired.top),right:Math.min(W,desired.right),bottom:Math.min(H,desired.bottom)};
+    mirrorCrop.width=Math.max(1,mirrorCrop.right-mirrorCrop.left);mirrorCrop.height=Math.max(1,mirrorCrop.bottom-mirrorCrop.top);
+    for(const m of mirrors) {
+      if(!m.isConnected){mirrors.delete(m);continue;}const surf=surface(m);if(!surf)continue;
+      const b=mirrorCrop,k=Math.min(surf.w/b.width,surf.h/b.height),dw=b.width*k,dh=b.height*k,dx=(surf.w-dw)/2,dy=surf.h-dh;
+      if(glOK)surf.ctx.drawImage(inkCv,b.left*DPR,b.top*DPR,b.width*DPR,b.height*DPR,dx,dy,dw,dh);
+      surf.ctx.drawImage(fxCv,b.left*DPR,b.top*DPR,b.width*DPR,b.height*DPR,dx,dy,dw,dh);
+    }
+  }
+  function renderFrame(dt) {
+    if(dead)return;
+    dt=document.hidden?0:Math.max(0,pFinite(dt));
+    if(reduced&&!dirty)return;
+    clock+=dt;frameCount++;if(dt>0)fps=Math.round(1/dt);
+    if(poseSnap||reduced){Object.assign(pose,target,{vx:0,vy:0,vr:0});poseSnap=false;}else{spring('x','vx',dt);spring('y','vy',dt);spring('r','vr',dt);}
+    pose.r=Math.max(4,pose.r);
+    const md=MOODS[mood]||MOODS.idle;
+    for(const k of ['lidTop','lidBot','wide','pupil'])expression[k]=reduced?md[k]:sm(expression[k],md[k],dt,k==='wide'?6:8);
+    fade=reduced?fadeTarget:sm(fade,fadeTarget,dt,4);speech=reduced?0:speech*Math.exp(-3.6*dt);
+    const room=roomFor(pose.x,pose.y,pose.r);
+    const sampled=director.update(dt,{energy,reduced,compact:room.compact,speech,hidden:document.hidden});
+    current=pocketPose(sampled,room.amount);
+    if(reduced)current={...P_NEUTRAL,happy:current.happy,wide:current.wide,phase:sampled.phase||'reduced'};
+    const pdx=ptrX-pose.x,pdy=ptrY-pose.y,pd=Math.hypot(pdx,pdy);
+    if(reduced){gazeX=md.gazeBias[0];gazeY=md.gazeBias[1];}
+    else {
+      if(lookX!==null){const dx=lookX-pose.x,dy=lookY-pose.y,d=Math.hypot(dx,dy)||1;gazeTX=dx/d*Math.min(1,d/(1.4*pose.r));gazeTY=dy/d*Math.min(1,d/(1.4*pose.r));}
+      else if(clock-ptrAt<6&&pd<2.6*pose.r){gazeTX=clamp(pdx/(1.5*pose.r),-1,1);gazeTY=clamp(pdy/(1.5*pose.r),-1,1);}
+      else if(clock>=nextWander){gazeTX=(rnd()-.5)*1.4;gazeTY=(rnd()-.5);nextWander=clock+2.5+rnd()*2.5;}
+      gazeX=sm(gazeX,clamp(gazeTX+md.gazeBias[0],-1,1),dt,11);gazeY=sm(gazeY,clamp(gazeTY+md.gazeBias[1],-1,1),dt,11);
+      if(clock>=nextBlink){blinkAt=clock;nextBlink=clock+(md.blinkGap[0]+rnd()*md.blinkGap[1])/1000;}
+    }
+    const blinkWave=at=>{const t=clock-at;return t<0||t>=.24?0:t<.11?pSmooth(0,.11,t):1-pSmooth(.11,.24,t);};
+    const blink=reduced?0:Math.max(blinkWave(blinkAt),blinkWave(forcedBlinkAt));
+    const wide=clamp(expression.wide*current.wide,.65,1.14);
+    geometry=pocketGeometry(current,pose.x,pose.y,pose.r,wide);geometry.room=room;geometry.inBounds=geometry.bounds.left>=0&&geometry.bounds.top>=0&&geometry.bounds.right<=W&&geometry.bounds.bottom<=H;
+    if(glOK&&gl.isContextLost()){backendReason='WebGL context lost';releaseGL();}
+    drawCompanions(dt);
+    if(glOK){gl.disable(gl.SCISSOR_TEST);gl.clear(gl.COLOR_BUFFER_BIT);uniforms(pose.x,pose.y,pose.r,current,texAt(clock),fade);scissor(geometry.bodyBounds);gl.drawArrays(gl.TRIANGLES,0,3);}
+    fx.setTransform(1,0,0,1,0,0);fx.clearRect(0,0,fxCv.width,fxCv.height);fx.setTransform(DPR,0,0,DPR,0,0);fx.globalAlpha=fade;
+    if(!glOK)drawBody2D(fx,current,pose.x,pose.y,pose.r,texAt(clock));
+    drawSpats(fx,current,pose.x,pose.y,pose.r);drawImpact(fx,current,pose.x,pose.y,pose.r);
+    for(let i=particles.length-1;i>=0;i--){const sp=particles[i],age=clock-sp.at;if(age>=sp.life){particles.splice(i,1);continue;}if(age<0)continue;const life=age/sp.life;fx.globalAlpha=fade*(1-pSmooth(.4,1,life));fx.fillStyle=sp.color?'rgb('+sp.color.map(c=>Math.round(c*255)).join(',')+')':'#191817';fx.beginPath();fx.ellipse(sp.x+sp.vx*age,sp.y+sp.vy*age+sp.gravity*age*age,sp.r*(1-.4*life),sp.r*.8*(1-.4*life),.4,0,P_TAU);fx.fill();}
+    fx.globalAlpha=fade;drawEyes(fx,current,pose.x,pose.y,pose.r,expression,gazeX,gazeY,blink);fx.globalAlpha=1;
+    drawMirrors(room);dirty=false;
+  }
+  function frame(stamp) {
+    raf=0;if(dead||document.hidden)return;
+    const dt=lastWall===null?0:clamp((stamp-lastWall)/1000,0,.10);lastWall=stamp;
+    renderFrame(dt);if(!dead&&!manual&&!document.hidden)raf=requestAnimationFrame(frame);
+  }
+  function visibility() {
+    if(dead)return;
+    if(raf){cancelAnimationFrame(raf);raf=0;}lastWall=null;
+    if(!document.hidden){dirty=true;renderFrame(0);if(!manual)raf=requestAnimationFrame(frame);}
+  }
+  function lost(event){event.preventDefault();backendReason='WebGL context lost';releaseGL();dirty=true;renderFrame(0);}
+  function restored(){if(dead)return;resources={program:null,buffer:null,texture:null,shaders:[]};initGL();resize();dirty=true;renderFrame(0);}
+  function refresh(){dirty=true;if(reduced||manual)renderFrame(0);}
+  function play(id,options={}) {if(dead||reduced)return false;const admitted=director.play(id,{...options});if(admitted)refresh();return !!admitted;}
+  function spatter(count=1,spread=1,color=null) {
+    if(dead||reduced)return;
+    count=clamp(Math.floor(pFinite(count,1)),0,24);spread=clamp(pFinite(spread,1),.25,1.5);
+    for(let i=0;i<count;i++){if(particles.length>=24)particles.shift();const a=rnd()*P_TAU,R=pose.r,r=(.90+rnd()*.35)*R*spread;
+      particles.push({at:clock,x:pose.x+Math.cos(a)*r,y:pose.y+Math.sin(a)*r*.68,vx:Math.cos(a)*R*.14,vy:Math.sin(a)*R*.09,gravity:R*.05,r:R*(.011+rnd()*.015),life:.65+rnd()*.55,color});}
+    refresh();
+  }
+  function setTarget(t,snap=false){if(dead||!t)return;for(const k of ['x','y','r'])if(Number.isFinite(t[k]))target[k]=k==='r'?Math.max(4,t[k]):t[k];if(snap||reduced)poseSnap=true;refresh();}
+  const api={
+    setTarget(t){setTarget(t);},snapTarget(t){setTarget(t,true);},
+    setMood(value){if(dead||!MOODS[value]||mood===value)return;mood=value;director.setMood(value);refresh();},mood:()=>mood,
+    lookAt(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;lookX=x;lookY=y;refresh();},lookFree(){lookX=lookY=null;refresh();},
+    pointer(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;ptrX=x;ptrY=y;ptrAt=clock;},
+    pulse(value){if(dead||reduced)return;speech=clamp(Math.max(speech,pFinite(value)),0,1);dirty=true;},
+    hop(){return play('hop',{priority:60});},shake(){return play('wiggle',{priority:60});},
+    blink(){if(dead||reduced)return;forcedBlinkAt=clock;refresh();},
+    spatter(k,spread){spatter(k,spread);},splash(color,k){if(dead||reduced)return;play('ta-da',{priority:45});spatter(k||4,.75,Array.isArray(color)?color.map(c=>clamp(pFinite(c),0,1)):null);},drip(){return play('drop',{priority:40});},
+    setFade(v){fadeTarget=clamp(pFinite(v,1),0,1);if(reduced)fade=fadeTarget;refresh();},
+    setReducedMotion(value){reduced=!!value;particles.length=0;speech=0;blinkAt=forcedBlinkAt=-100;nextBlink=clock+2.6;poseSnap=true;director.update(0,{energy,reduced,compact:false,speech:0});dirty=true;renderFrame(0);},
+    animate:play,animations:()=>lib.catalog,stopAnimation(){director.stop();if(reduced)director.update(0,{energy,reduced:true});refresh();},
+    setMotionEnergy(value){energy=clamp(pFinite(value,1),0,1.5);refresh();},setTextureMode(value){if(value!=='flow'&&value!=='boil')return false;texture=value;refresh();return true;},
+    advance(ms){if(dead)return api.state();renderFrame(Math.max(0,pFinite(ms))/1000);return api.state();},paperDataURL,
+    addMirror(canvas){if(!canvas?.getContext||dead)return;mirrors.add(canvas);refresh();},removeMirror(canvas){mirrors.delete(canvas);},
+    setAgents(list){if(dead)return;const keep=new Set();for(const a of Array.isArray(list)?list:[]){if(!a?.canvas?.getContext)continue;keep.add(a.id);let ag=agents.get(a.id);if(!ag){const value=pFinite(a.seed,rnd());ag={canvas:a.canvas,seed:value,mood:a.mood||'working',color:[0,0,0],director:lib.createDirector({seed:Math.round(value*1e6)})};ag.director.setMood(ag.mood);agents.set(a.id,ag);}else if(a.mood&&ag.mood!==a.mood){ag.mood=a.mood;ag.director.setMood(a.mood);}ag.canvas=a.canvas;ag.color=(Array.isArray(a.color)?a.color:[0,0,0]).slice(0,3).map(v=>clamp(pFinite(v),0,1));while(ag.color.length<3)ag.color.push(0);}for(const id of agents.keys())if(!keep.has(id))agents.delete(id);refresh();},
+    removeMirrorByCanvas(canvas){mirrors.delete(canvas);},
+    hitTest(x,y){if(dead||!Number.isFinite(x)||!Number.isFinite(y)||fade<.01)return false;const q=pocketInverse(x,y,current,pose.x,pose.y,pose.r);return pocketDistance(q[0],q[1],current)<.10;},
+    state(){const ds=director.state(),g=geometry?{...geometry}:null;if(g)delete g._boundary;
+      return {x:pose.x,y:pose.y,r:pose.r,mood,fps,gl:glOK,tx:target.x,ty:target.y,tr:target.r,fade,backend:glOK?'webgl':'canvas2d',fallbackReason:backendReason,dpr:DPR,destroyed:dead,
+        motion:{...ds,enabled:true,pose:{...current},energy,texture,reduced},bounds:g?{...g.bounds}:null,geometry:g,eyeCenters:g?.eyeCenters||[],particleCount:particles.length,
+        mirrorCrop:mirrorCrop?{...mirrorCrop}:null,mirrors:mirrors.size,companions:agents.size,clock,manual,frames:frameCount};},
+    destroy(){if(dead)return;dead=true;if(raf)cancelAnimationFrame(raf);raf=0;removeEventListener('resize',resize);document.removeEventListener('visibilitychange',visibility);inkCv.removeEventListener('webglcontextlost',lost);inkCv.removeEventListener('webglcontextrestored',restored);particles.length=0;mirrors.clear();agents.clear();if(glOK){gl.disable(gl.SCISSOR_TEST);gl.clear(gl.COLOR_BUFFER_BIT);}releaseGL(true);fx.setTransform(1,0,0,1,0,0);fx.clearRect(0,0,fxCv.width,fxCv.height);},
+  };
+  initGL();resize();addEventListener('resize',resize);document.addEventListener('visibilitychange',visibility);inkCv.addEventListener('webglcontextlost',lost);inkCv.addEventListener('webglcontextrestored',restored);
+  renderFrame(0);if(!manual&&!document.hidden)raf=requestAnimationFrame(frame);
+  return api;
+}
+function createNibbi(opts) {
+  return opts.motion==='legacy'||!globalThis.NibbiPocketMotion ? createLegacyNibbi(opts) : createPocketNibbi(opts);
 }
 
 window.createNibbi = createNibbi;

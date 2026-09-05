@@ -1,13 +1,21 @@
 name: verify
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  local-platform:
+    runs-on: macos-14
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: node --test tests/*.test.mjs
-      - run: npm i --no-save playwright-core && npx playwright-core install --with-deps chromium
-      - run: node server.mjs & sleep 1
-      - run: CI=1 node tools/verify.mjs "http://127.0.0.1:4527"
+        with: { node-version: 22, cache: npm }
+      - run: command -v rg || brew install ripgrep
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install chromium
+      - run: npm run verify
+        env: { CI: '1' }
+      - run: npm run test:fresh
