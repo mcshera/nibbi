@@ -117,6 +117,38 @@ body[data-mode="talk"] .feed { opacity: 1; pointer-events: auto; }
 .v6c .flip h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
 .v6c .flip .col b { color: var(--ink); } .v6c .flip .col div { padding: 3px 0; }
 
+
+/* ===== 5c scaled up: shared ===== */
+.v5c1 .gm, .v5c2 .gm, .v5c3 .gm { position: fixed; top: 150px; z-index: 6; display: flex; flex-direction: column; gap: 14px; }
+.v5c1 .gm.left, .v5c2 .gm.left, .v5c3 .gm.left { left: 28px; } .v5c1 .gm.right, .v5c2 .gm.right, .v5c3 .gm.right { right: 28px; align-items: flex-end; }
+.v5c1 .g, .v5c2 .g, .v5c3 .g { display: flex; align-items: center; gap: 14px; color: var(--ink-3); font-size: 14.5px; }
+.v5c1 .gm.right .g, .v5c2 .gm.right .g, .v5c3 .gm.right .g { flex-direction: row-reverse; text-align: right; }
+.v5c1 .g .ic, .v5c2 .g .ic, .v5c3 .g .ic { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(21,20,19,.05); border: 1px solid var(--line); color: var(--ink-2); font-size: 17px; font-weight: 700; flex: none; }
+.v5c1 .g .ic svg, .v5c2 .g .ic svg, .v5c3 .g .ic svg { width: 20px; height: 20px; }
+.v5c1 .g .lab b, .v5c2 .g .lab b, .v5c3 .g .lab b { color: var(--ink); font-size: 16px; } .v5c1 .g .lab small, .v5c2 .g .lab small, .v5c3 .g .lab small { display: block; font-size: 13px; color: var(--ink-3); margin-top: 1px; }
+/* 5c1: straight scale-up; active glyph in the project's ink colour; others' labels on hover */
+.v5c1 .g.active .ic { background: #3b4a9c; color: #f5f2ec; border-color: transparent; box-shadow: 0 8px 20px -12px rgba(59,74,156,.6); }
+.v5c1 .g:not(.active) .lab { opacity: 0; transition: opacity .2s; } .v5c1 .gm:hover .g .lab { opacity: 1; }
+.v5c1 .gm.right .g.on .ic { background: var(--ink); color: #f5f2ec; border-color: transparent; }
+/* 5c2: progress rings + always-on labels + settings as toggles */
+.v5c2 .g .ic { position: relative; background: transparent; border: 0; }
+.v5c2 .g .ring { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--ring, var(--ink)) calc(var(--p, 0) * 1%), rgba(21,20,19,.08) 0); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 3px)); mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 3px)); }
+.v5c2 .g .core { position: absolute; inset: 5px; border-radius: 50%; background: rgba(21,20,19,.06); display: grid; place-items: center; color: var(--ink-2); }
+.v5c2 .g.active .core { background: var(--ink); color: #f5f2ec; }
+.v5c2 .g.off .ring { background: repeating-conic-gradient(rgba(21,20,19,.18) 0 6deg, transparent 6deg 12deg); }
+.v5c2 .tog { width: 44px; height: 26px; border-radius: 999px; background: var(--ink); position: relative; flex: none; } .v5c2 .tog::after { content: ""; position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; background: #f5f2ec; } .v5c2 .tog.off { background: rgba(21,20,19,.14); } .v5c2 .tog.off::after { right: auto; left: 3px; }
+/* 5c3: strips + a card for the active project / open settings */
+.v5c3 .strip { display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 999px; background: rgba(250,248,243,.8); border: 1px solid var(--line); box-shadow: 0 10px 30px -18px rgba(21,20,19,.3); }
+.v5c3 .strip .ic { width: 42px; height: 42px; }
+.v5c3 .g.active .ic { background: var(--ink); color: #f5f2ec; border-color: transparent; }
+.v5c3 .gm.left { flex-direction: row; align-items: flex-start; gap: 12px; } .v5c3 .gm.right { flex-direction: row-reverse; align-items: flex-start; gap: 12px; }
+.v5c3 .card5 { width: 250px; padding: 14px 16px; border-radius: 18px; background: var(--pill-bg); border: 1px solid var(--line); box-shadow: 0 10px 30px -14px rgba(21,20,19,.3); backdrop-filter: blur(12px); font-size: 14px; color: var(--ink-2); }
+.v5c3 .card5 b { color: var(--ink); font-size: 16px; } .v5c3 .card5 .m { color: var(--ink-3); font-size: 13px; margin: 2px 0 8px; }
+.v5c3 .card5 .bar { height: 4px; border-radius: 2px; background: rgba(21,20,19,.1); margin: 8px 0 10px; } .v5c3 .card5 .bar i { display: block; width: 41%; height: 100%; background: var(--ink); border-radius: 2px; }
+.v5c3 .card5 .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: rgba(21,20,19,.06); margin-bottom: 10px; } .v5c3 .card5 .seg span { font-size: 12px; padding: 4px 10px; border-radius: 999px; color: var(--ink-3); } .v5c3 .card5 .seg span.on { background: var(--ink); color: #f5f2ec; }
+.v5c3 .card5 .set { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--line); } .v5c3 .card5 .set:first-of-type { border-top: 0; } .v5c3 .card5 .set span:last-child { color: var(--ink-3); }
+.v5c3 .card5 .chip { font-size: 12.5px; }
+
 /* hide the app's current treatment in all variants except the baseline */
 .vx .status, .vx .project { display: none; }
 </style></head>
@@ -169,6 +201,24 @@ html['6b'] = () => '<div class="strip"><span class="pch active"><span class="d" 
 html['6c'] = () => '<div class="handle"><span class="d"></span><b>battalion</b><span>ship · 2 in flight · $14 of $40</span><span class="sp"></span><span class="g">' + GEAR + ' voice on · opus</span></div>'
   + '<div class="flip"><div class="col"><h4>projects</h4><div><b>battalion</b> · ship</div><div>shipless · off</div><div>nibbi · off</div><div style="color:var(--ink-4)">+ new</div></div><div class="col"><h4>this project</h4><div>41% of plan</div><div>goal: M12</div><div>cap $40 · $14.20</div><div>plan · play · fix…</div></div><div class="col"><h4>settings</h4><div>voice on · sounds off</div><div>model opus</div><div>notifications on</div><div>restart · demo · tidy</div></div></div>';
 
+
+const MIC = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5"/></svg>';
+const BELL = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 2H3.5L5 14zM8 18h4"/></svg>';
+const SPARK = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2l1.8 5.2L17 9l-5.2 1.8L10 16l-1.8-5.2L3 9l5.2-1.8z"/></svg>';
+const SOUND = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8v4h3l4 3V5L6 8H3zM13.5 7.5a3.5 3.5 0 0 1 0 5"/></svg>';
+html['5c1'] = () => '<div class="gm left"><div class="g active"><span class="ic">b</span><span class="lab"><b>battalion</b><small>ship · 2 in flight · $14 of $40</small></span></div><div class="g"><span class="ic">s</span><span class="lab"><b>shipless</b><small>auto off · main is good</small></span></div><div class="g"><span class="ic">n</span><span class="lab"><b>nibbi</b><small>auto off · 28/29</small></span></div><div class="g"><span class="ic" style="font-weight:400">+</span><span class="lab"><b>new project</b></span></div></div>'
+  + '<div class="gm right"><div class="g on"><span class="ic">' + MIC + '</span><span class="lab"><b>voice</b><small>on · kokoro</small></span></div><div class="g"><span class="ic">' + SOUND + '</span><span class="lab"><b>sounds</b><small>off</small></span></div><div class="g"><span class="ic">' + SPARK + '</span><span class="lab"><b>opus</b><small>model</small></span></div><div class="g on"><span class="ic">' + BELL + '</span><span class="lab"><b>notifications</b><small>on</small></span></div><div class="g"><span class="ic">' + GEAR + '</span><span class="lab"><b>settings</b><small>brain ready · 39k ctx</small></span></div></div>';
+html['5c2'] = () => '<div class="gm left">'
+  + '<div class="g active"><span class="ic" style="--p:41;--ring:var(--ink)"><span class="ring"></span><span class="core">b</span></span><span class="lab"><b>battalion</b><small>ship · 41% of plan · 2 in flight</small></span></div>'
+  + '<div class="g off"><span class="ic" style="--p:100"><span class="ring"></span><span class="core">s</span></span><span class="lab"><b>shipless</b><small>off · plan complete</small></span></div>'
+  + '<div class="g off"><span class="ic" style="--p:97"><span class="ring"></span><span class="core">n</span></span><span class="lab"><b>nibbi</b><small>off · 28 of 29</small></span></div>'
+  + '<div class="g"><span class="ic" style="--p:0"><span class="ring"></span><span class="core" style="font-weight:400">+</span></span><span class="lab"><b>new project</b></span></div></div>'
+  + '<div class="gm right"><div class="g"><span class="tog"></span><span class="lab"><b>voice</b><small>kokoro · af_heart</small></span></div><div class="g"><span class="tog off"></span><span class="lab"><b>sounds</b><small>three quiet plops</small></span></div><div class="g"><span class="tog"></span><span class="lab"><b>notifications</b><small>when a fixer lands</small></span></div><div class="g"><span class="ic"><span class="core">' + SPARK + '</span></span><span class="lab"><b>opus</b><small>brain ready · 39k ctx</small></span></div><div class="g"><span class="ic"><span class="core">' + GEAR + '</span></span><span class="lab"><b>more</b><small>restart · demo · tidy</small></span></div></div>';
+html['5c3'] = () => '<div class="gm left"><div class="strip"><div class="g active"><span class="ic">b</span></div><div class="g"><span class="ic">s</span></div><div class="g"><span class="ic">n</span></div><div class="g"><span class="ic" style="font-weight:400">+</span></div></div>'
+  + '<div class="card5"><b>battalion</b><div class="m">main · goal M12 — 100 cards, live events</div><div class="bar"><i></i></div><span class="seg"><span>off</span><span>suggest</span><span>stage</span><span class="on">ship</span></span><div class="m">2 in flight · 5 pending · $14.20 of $40</div><div class="acts"><span class="chip in">plan</span><span class="chip in">play</span><span class="chip in">fix…</span><span class="chip in">review</span></div></div></div>'
+  + '<div class="gm right"><div class="strip"><div class="g active"><span class="ic">' + GEAR + '</span></div><div class="g"><span class="ic">' + MIC + '</span></div><div class="g"><span class="ic">' + SPARK + '</span></div><div class="g"><span class="ic">' + BELL + '</span></div></div>'
+  + '<div class="card5"><b>settings</b><div class="m">this Mac · nibbi 0.7.0</div><div class="set"><span>voice</span><span>on</span></div><div class="set"><span>sounds</span><span>off</span></div><div class="set"><span>model</span><span>opus</span></div><div class="set"><span>notifications</span><span>on</span></div><div class="set"><span>brain</span><span>ready · 39k ctx</span></div><div class="set"><span>demo brain</span><span>off</span></div><div class="acts" style="margin-top:10px"><span class="chip in">restart the gateway</span><span class="chip in">tidy</span></div></div></div>';
+
 const el = document.getElementById('variant'); el.className = 'v' + V; document.body.classList.add(V !== '0' ? 'vx' : 'v0', 'v' + V);
 el.innerHTML = (html[V] || (() => ''))();
 if (V === '6' || V === '6a') {
@@ -182,7 +232,7 @@ if (V === '6' || V === '6a') {
   document.body.appendChild(up);
   const mic6 = document.querySelector('.pill .ico.mic'); if (mic6) mic6.style.display = 'none';
 }
-document.getElementById('mocklabel').textContent = ({ '0': '0 · current: label top-left + dot top-right', '1': '1 · folder tabs on the left edge', '2': '2 · ink stamps', '3': '3 · dock under the pill', '4': '4 · title line + sheet', '5': '5 · marginalia', '6': '6 · inside the text entry box', '5a': '5a · handwritten annotations', '5b': '5b · spines (vertical labels on both edges)', '5c': '5c · glyph margins that unfold on hover', '6a': '6a · tag + gear in the pill; sheet opens upward', '6b': '6b · split pill: project segment · input · settings segment; strip above', '6c': '6c · a handle on the pill — fixers perch on it; it flips open' })[V] || '';
+document.getElementById('mocklabel').textContent = ({ '0': '0 · current: label top-left + dot top-right', '1': '1 · folder tabs on the left edge', '2': '2 · ink stamps', '3': '3 · dock under the pill', '4': '4 · title line + sheet', '5': '5 · marginalia', '6': '6 · inside the text entry box', '5a': '5a · handwritten annotations', '5b': '5b · spines (vertical labels on both edges)', '5c': '5c · glyph margins that unfold on hover', '6a': '6a · tag + gear in the pill; sheet opens upward', '6b': '6b · split pill: project segment · input · settings segment; strip above', '6c': '6c · a handle on the pill — fixers perch on it; it flips open', '5c1': '5c1 · big glyphs, active project in its ink colour, labels on hover', '5c2': '5c2 · progress rings + labels always on + toggles', '5c3': '5c3 · glyph strips with an expanding card' })[V] || '';
 /* the character, mirrors and two fixer agents, like the app */
 const n = createNibbi({ ink: document.getElementById('ink'), fx: document.getElementById('fx') });
 document.body.style.backgroundImage = 'url(' + n.paperDataURL() + ')';
