@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Nibbi — projects & settings treatments</title>
+<link rel="stylesheet" href="../../public/styles.css">
+<style>
+/* shared mock scaffolding */
+body[data-mode="talk"] .feed { opacity: 1; pointer-events: auto; }
+.mocklabel { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); font: 11px/1 "Geist Mono", monospace; color: var(--ink-4); letter-spacing: .06em; z-index: 9; }
+.pill .ico { opacity: 1; transform: none; }
+/* ===== V1 folder tabs on the left edge ===== */
+.v1 .tabs { position: fixed; left: 0; top: 96px; z-index: 6; display: flex; flex-direction: column; gap: 6px; }
+.v1 .tab { display: flex; align-items: center; gap: 8px; padding: 9px 12px 9px 14px; border-radius: 0 14px 14px 0; background: rgba(255,255,255,.55); border: 1px solid var(--line); border-left: 0; font-size: 12.5px; color: var(--ink-3); transform: translateX(-6px); transition: transform .2s; cursor: pointer; }
+.v1 .tab.active { transform: none; color: var(--ink); background: rgba(250,248,243,.92); box-shadow: 0 8px 24px -16px rgba(21,20,19,.35); font-weight: 600; }
+.v1 .tab .d { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); } .v1 .tab .d.off { background: transparent; box-shadow: inset 0 0 0 1.5px #cfcac1; } .v1 .tab .d.stage { background: var(--ink-3); }
+.v1 .tab.gear { margin-top: 14px; color: var(--ink-4); } .v1 .tab.gear svg { width: 14px; height: 14px; }
+.v1 .drawer { position: fixed; left: 118px; top: 96px; z-index: 6; width: 300px; padding: 12px 14px; border-radius: 16px; background: var(--pill-bg); border: 1px solid var(--line); box-shadow: 0 10px 30px -12px rgba(21,20,19,.25); backdrop-filter: blur(14px); font-size: 12.5px; color: var(--ink-2); }
+.v1 .drawer::before { content: ""; position: absolute; left: -7px; top: 22px; width: 12px; height: 12px; background: #faf8f4; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: rotate(45deg); }
+/* ===== V2 ink stamps ===== */
+.v2 .stamp { position: fixed; top: 14px; z-index: 6; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font: 700 15px Geist, sans-serif; color: #f5f2ec; letter-spacing: -.02em; box-shadow: 0 1px 0 rgba(255,255,255,.4) inset; cursor: pointer; }
+.v2 .stamp.proj { left: 20px; background: #7a3f78; } .v2 .stamp.proj::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 11px; height: 11px; border-radius: 50%; background: var(--ink); border: 2px solid var(--paper); }
+.v2 .stamp.gear { right: 20px; background: rgba(21,20,19,.08); color: var(--ink-3); font-weight: 500; }
+.v2 .impression { position: fixed; left: 20px; top: 60px; z-index: 6; width: 320px; padding: 14px 16px 12px; border-radius: 18px; background: rgba(122,63,120,.08); border: 1px dashed rgba(122,63,120,.45); font-size: 12.5px; color: var(--ink-2); }
+.v2 .impression b { color: #4b2a4a; }
+/* ===== V3 dock under the pill ===== */
+.v3 .dock { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 6; display: flex; gap: 6px; align-items: center; }
+.v3 .dchip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; font-size: 12.5px; color: var(--ink-3); border: 1px solid transparent; }
+.v3 .dchip.active { color: var(--ink); background: rgba(21,20,19,.06); border-color: var(--line); font-weight: 600; }
+.v3 .dchip .d { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); } .v3 .dchip .d.off { background: transparent; box-shadow: inset 0 0 0 1.5px #cfcac1; }
+.v3 .dchip.plus, .v3 .dchip.gear { color: var(--ink-4); padding: 6px 10px; }
+.v3 .dsep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+/* ===== V4 title line + sheet ===== */
+.v4 .title { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-3); padding: 6px 12px; border-radius: 999px; }
+.v4 .title b { color: var(--ink); font-weight: 600; } .v4 .title .d { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); } .v4 .title .caret { color: var(--ink-4); }
+.v4 .sheet { position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 6; width: 640px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 0; border-radius: 20px; background: var(--pill-bg); border: 1px solid var(--line); box-shadow: 0 16px 40px -18px rgba(21,20,19,.35); backdrop-filter: blur(14px); overflow: hidden; font-size: 12.5px; color: var(--ink-2); }
+.v4 .sheet > div { padding: 14px 16px; } .v4 .sheet > div + div { border-left: 1px solid var(--line); }
+.v4 .sheet h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
+.v4 .row { display: flex; justify-content: space-between; align-items: center; padding: 7px 8px; border-radius: 10px; } .v4 .row.active { background: rgba(21,20,19,.05); } .v4 .row b { font-weight: 600; color: var(--ink); } .v4 .row .m { color: var(--ink-3); font-size: 11.5px; }
+.v4 .set { display: flex; justify-content: space-between; align-items: center; padding: 7px 8px; } .v4 .set span:last-child { color: var(--ink-3); }
+.v4 .tog { width: 30px; height: 18px; border-radius: 999px; background: var(--ink); position: relative; } .v4 .tog::after { content: ""; position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: #f5f2ec; } .v4 .tog.off { background: rgba(21,20,19,.15); } .v4 .tog.off::after { right: auto; left: 2px; }
+/* ===== V5 marginalia ===== */
+.v5 .marg { position: fixed; top: 180px; z-index: 6; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+.v5 .marg.left { left: 22px; width: 130px; } .v5 .marg.right { right: 22px; width: 130px; text-align: right; }
+.v5 .marg b { color: var(--ink); font-weight: 600; } .v5 .marg .d { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink); vertical-align: middle; margin-right: 6px; } .v5 .marg .d.off { background: transparent; box-shadow: inset 0 0 0 1.5px #cfcac1; }
+.v5 .marg .dim { color: var(--ink-4); } .v5 .marg .rule { width: 32px; height: 1px; background: var(--line); margin: 10px 0; } .v5 .marg.right .rule { margin-left: auto; }
+.v5 .marg u { text-decoration-color: var(--ink-4); text-underline-offset: 3px; }
+/* ===== V6 inside the pill ===== */
+.v6 .pill { padding-left: 8px; }
+.v6 .ptag { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 999px; background: rgba(21,20,19,.06); color: var(--ink); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.v6 .ptag .d { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); } .v6 .ptag .caret { color: var(--ink-4); font-weight: 400; }
+.v6 .pill textarea { padding-left: 10px; }
+.v6 .gear { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; color: var(--ink-3); display: grid; place-items: center; cursor: pointer; }
+.v6 .up { position: fixed; left: 50%; transform: translateX(-50%); bottom: 140px; z-index: 6; width: min(720px, calc(100vw - 56px)); display: grid; grid-template-columns: 1.2fr 1fr; border-radius: 20px; background: var(--pill-bg); border: 1px solid var(--line); box-shadow: 0 -8px 34px -18px rgba(21,20,19,.28), 0 12px 34px -18px rgba(21,20,19,.28); backdrop-filter: blur(14px); overflow: hidden; font-size: 12.5px; color: var(--ink-2); }
+.v6 .up > div { padding: 12px 14px; } .v6 .up > div + div { border-left: 1px solid var(--line); }
+.v6 .up h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-4); }
+.v6 .prow { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 7px 8px; border-radius: 10px; } .v6 .prow.active { background: rgba(21,20,19,.05); } .v6 .prow b { color: var(--ink); } .v6 .prow .m { color: var(--ink-3); font-size: 11.5px; grid-column: 1 / -1; }
+.v6 .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: rgba(21,20,19,.06); } .v6 .seg span { font-size: 11px; padding: 3px 8px; border-radius: 999px; color: var(--ink-3); } .v6 .seg span.on { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(21,20,19,.12); } .v6 .seg span.ship.on { background: var(--ink); color: #f5f2ec; }
+.v6 .set { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; } .v6 .set span:last-child { color: var(--ink-3); }
+.v6 .status { display: none; } .v6 .project { display: none; }
+.v6 .up::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 12px; height: 12px; background: #faf8f4; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+/* hide the app's current treatment in all variants except the baseline */
+.vx .status, .vx .project { display: none; }
+</style></head>
+<body data-mode="talk" data-link="live">
+<canvas id="ink" aria-hidden="true"></canvas><canvas id="fx" aria-hidden="true"></canvas>
+<div id="status" class="status"><span class="dot"></span><span class="label"></span></div>
+<div id="project" class="project"><button class="plabel" type="button"><span class="pname">battalion</span><span class="pdot" data-mode="ship"></span></button></div>
+<section id="feed" class="feed" style="--feed-top:150px">
+  <article class="turn"><div class="you">what's happening with battalion</div><div class="nib"><canvas class="ava"></canvas><div class="nibbody"><div class="bubble"><div class="said"><p><b>M12</b> is moving — <code>event deck split</code> merged an hour ago, <code>reveal hook</code> is running now. Two of seven done; the rarity dial is next.</p></div></div><div class="meta" style="opacity:.55">2 min ago · quote · copy</div></div></div></article>
+  <article class="turn"><div class="you">how much has it cost today</div><div class="nib"><canvas class="ava"></canvas><div class="nibbody"><div class="bubble"><div class="said"><p>$14.20 so far today, all on battalion. The cap is $40.</p></div></div><div class="meta" style="opacity:.55">just now · quote · copy</div></div></div></article>
+</section>
+<div id="agents" class="agents"><button class="agent" data-status="running"><canvas class="ava"></canvas></button><button class="agent" data-status="running"><canvas class="ava"></canvas></button></div>
+<form id="pill" class="pill" onsubmit="return false">
+  <button class="ico mic" type="button"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5"/></svg></button>
+  <textarea id="ask" rows="1" placeholder="Ask nibbi to build something..."></textarea>
+  <button class="send" type="button"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 14.5V3.5M9 3.5L4 8.5M9 3.5L14 8.5" stroke="#f5f2ea" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+</form>
+<div id="variant"></div>
+<div class="mocklabel" id="mocklabel"></div>
+<script src="../../public/nibbi.js"></script>
+<script>
+const V = Number(new URLSearchParams(location.search).get('v') || 0);
+const GEAR = '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></svg>';
+const PROJECTS = [['battalion','ship','2 in flight · 5 pending · $14.20',true],['shipless','off','main is good · nothing pending',false],['nibbi','off','28/29 · staged 0',false]];
+const SETTINGS = [['voice','on'],['sounds','off'],['model','opus'],['notifications','on'],['demo brain','off'],['brain','ready · 39k ctx'],['restart the gateway','']];
+const dot = (m) => '<span class="d ' + (m === 'off' ? 'off' : m === 'stage' ? 'stage' : '') + '"></span>';
+const html = {
+  1: () => '<div class="tabs">' + PROJECTS.map(([n, m, , a]) => '<div class="tab' + (a ? ' active' : '') + '">' + dot(m) + n + '</div>').join('') + '<div class="tab gear">' + GEAR + ' settings</div></div>'
+       + '<div class="drawer"><b style="color:var(--ink)">battalion</b> · main<div style="margin:6px 0 8px;height:3px;border-radius:2px;background:rgba(21,20,19,.1)"><i style="display:block;width:41%;height:100%;background:var(--ink);border-radius:2px"></i></div>auto <b>ship</b> · 2 in flight · 5 pending · cap $40<br><span style="color:var(--ink-3)">goal: M12 — 100 cards, live events</span><div class="acts" style="margin-top:8px"><span class="chip in">plan</span><span class="chip in">play</span><span class="chip in">fix…</span></div></div>',
+  2: () => '<div class="stamp proj">b</div><div class="stamp gear">' + GEAR + '</div>'
+       + '<div class="impression"><b>battalion</b> — main · auto <b>ship</b><br>2 in flight · 5 pending · $14.20 of $40<br><span style="color:var(--ink-3)">other stamps:</span> <span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:#2f7f76;vertical-align:middle;margin-left:6px"></span> <span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:#b0782a;vertical-align:middle"></span> <span style="color:var(--ink-4)"> + new</span></div>',
+  3: () => '<div class="dock">' + PROJECTS.map(([n, m, , a]) => '<span class="dchip' + (a ? ' active' : '') + '">' + dot(m) + n + '</span>').join('') + '<span class="dchip plus">+</span><span class="dsep"></span><span class="dchip gear">' + GEAR + '</span></div>',
+  4: () => '<div class="title"><span class="d"></span><b>battalion</b> · ship · 2 in flight <span class="caret">▾</span></div>'
+       + '<div class="sheet"><div><h4>projects</h4>' + PROJECTS.map(([n, m, s, a]) => '<div class="row' + (a ? ' active' : '') + '"><span>' + dot(m) + ' <b>' + n + '</b></span><span class="m">' + s + '</span></div>').join('') + '<div class="row"><span style="color:var(--ink-4)">+ new project</span></div></div>'
+       + '<div><h4>settings</h4>' + SETTINGS.map(([k, v]) => '<div class="set"><span>' + k + '</span>' + (v === 'on' || v === 'off' ? '<span class="tog ' + v + '"></span>' : '<span>' + v + '</span>') + '</div>').join('') + '</div></div>',
+  5: () => '<div class="marg left"><span class="d"></span><b>battalion</b><br><span class="dim">ship · 2 in flight</span><div class="rule"></div><span class="d off"></span>shipless<br><span class="d off"></span>nibbi<br><span class="dim"><u>+ new</u></span></div>'
+       + '<div class="marg right"><b>voice</b> on<br><span class="dim">sounds off</span><br><span class="dim">opus</span><div class="rule"></div><span class="dim">brain ready</span><br><span class="dim">39k ctx · $14.20</span><div class="rule"></div><span class="dim"><u>restart</u> · <u>tidy</u></span></div>',
+  6: () => '',
+};
+const el = document.getElementById('variant'); el.className = 'v' + V; document.body.classList.add(V ? 'vx' : 'v0', 'v' + V);
+el.innerHTML = (html[V] || (() => ''))();
+if (V === 6) {
+  const pill = document.getElementById('pill'); const ta = document.getElementById('ask');
+  const tag = document.createElement('div'); tag.className = 'ptag'; tag.innerHTML = '<span class="d"></span>battalion <span class="caret">▾</span>'; pill.insertBefore(tag, ta);
+  ta.placeholder = 'Ask nibbi to build something in battalion…';
+  const gear = document.createElement('button'); gear.type = 'button'; gear.className = 'gear'; gear.innerHTML = GEAR; pill.insertBefore(gear, pill.querySelector('.send'));
+  const up = document.createElement('div'); up.className = 'up';
+  up.innerHTML = '<div><h4>project</h4>' + PROJECTS.map(([n, m, s, a]) => '<div class="prow' + (a ? ' active' : '') + '"><span>' + dot(m) + ' <b>' + n + '</b></span><span class="seg"><span class="' + (m === 'off' ? 'on' : '') + '">off</span><span>suggest</span><span class="' + (m === 'stage' ? 'on' : '') + '">stage</span><span class="ship ' + (m === 'ship' ? 'on' : '') + '">ship</span></span><span class="m">' + s + '</span></div>').join('') + '<div class="prow"><span style="color:var(--ink-4)">+ new project</span></div></div>'
+    + '<div><h4>settings</h4>' + SETTINGS.map(([k, v]) => '<div class="set"><span>' + k + '</span><span>' + (v || '↻') + '</span></div>').join('') + '</div>';
+  document.body.appendChild(up);
+  document.querySelector('.v6 .pill .ico.mic').style.display = 'none';
+}
+document.getElementById('mocklabel').textContent = ['0 · current: label top-left + dot top-right', '1 · folder tabs on the left edge', '2 · ink stamps', '3 · dock under the pill', '4 · title line + sheet', '5 · marginalia', '6 · inside the text entry box'][V] || '';
+/* the character, mirrors and two fixer agents, like the app */
+const n = createNibbi({ ink: document.getElementById('ink'), fx: document.getElementById('fx') });
+document.body.style.backgroundImage = 'url(' + n.paperDataURL() + ')';
+const r0 = Math.max(56, Math.min(150, Math.min(innerWidth, innerHeight) * 0.16)); const r = Math.max(34, Math.min(52, r0 * 0.34, innerHeight * 0.06));
+n.snapTarget({ x: innerWidth / 2, y: 30 + r * 1.15, r });
+document.querySelectorAll('.nib .ava').forEach((c) => n.addMirror(c));
+const ag = [...document.querySelectorAll('.agent .ava')];
+n.setAgents([{ id: 'a', canvas: ag[0], color: [0.23, 0.29, 0.61], mood: 'working', seed: 0.2 }, { id: 'b', canvas: ag[1], color: [0.18, 0.5, 0.46], mood: 'working', seed: 0.7 }]);
+document.documentElement.style.setProperty('--feed-bottom', (innerHeight - document.getElementById('pill').getBoundingClientRect().top + 18 + 52) + 'px');
+document.documentElement.style.setProperty('--agents-bottom', (innerHeight - document.getElementById('pill').getBoundingClientRect().top - 3) + 'px');
+if (V === 3) { document.querySelector('.agents').style.display = 'none'; }   // the dock takes that space; fixers would perch on the pill's top edge instead
+</script></body></html>
