@@ -61,7 +61,8 @@ if [ "$VOICE" = 1 ]; then
   PY="$(command -v python3.12 || command -v python3.11 || command -v python3 || true)"; [ -n "$PY" ] || die "python3 (3.10+) is required for voice"
   [ -d "$STATE/venv" ] || "$PY" -m venv "$STATE/venv"
   "$STATE/venv/bin/pip" install -q --upgrade pip >/dev/null; "$STATE/venv/bin/pip" install -q -r "$REPO/daemon/requirements-voice.txt" && ok "voice packages installed"
-  FF="$(ls "$STATE"/venv/lib/python*/site-packages/imageio_ffmpeg/binaries/ffmpeg-* 2>/dev/null | head -1)"; [ -n "$FF" ] && ln -sfn "$FF" "$STATE/bin/ffmpeg" && ok "ffmpeg linked"
+  # resolve ffmpeg via imageio_ffmpeg's own API — a colorized `ls` can bake ANSI codes into the path (dangling symlink); also ensure +x
+  FF="$("$STATE/venv/bin/python" -c 'import imageio_ffmpeg,sys; sys.stdout.write(imageio_ffmpeg.get_ffmpeg_exe())' 2>/dev/null)"; [ -n "$FF" ] && [ -e "$FF" ] && { chmod +x "$FF" 2>/dev/null || true; ln -sfn "$FF" "$STATE/bin/ffmpeg"; ok "ffmpeg linked"; }
   warn "models download on first start (~2 GB): whisper-large-v3-turbo, whisper-small, Kokoro-82M"
 else say "4 · voice — skipped (add --voice later; the app works without it)"; fi
 
