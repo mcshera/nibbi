@@ -1,0 +1,31 @@
+#!/bin/bash
+# vault-backup — simple LOCAL snapshot of the Nibbi vault.
+# No server or keychain needed. Nibbi runs this nightly (03:30) + on demand;
+# it must exit 0 and print a one-line status. Replaces the offsite .example.
+set -euo pipefail
+VAULT="$HOME/NibbiVault"
+DEST="$HOME/.nibbi/vault-backups"
+KEEP=14
+STAMP="$(date +%F-%H%M%S)"
+
+if [ ! -d "$VAULT/.git" ]; then
+  echo "backup skipped: no vault git repo at $VAULT"
+  exit 0
+fi
+mkdir -p "$DEST"
+
+# 1) capture any pending vault edits so the snapshot is current (vault is its own git repo)
+if [ -n "$(git -C "$VAULT" status --porcelain 2>/dev/null)" ]; then
+  git -C "$VAULT" add -A || true
+  git -C "$VAULT" -c user.name="Nibbi" -c user.email="nibbi@local" \
+      commit -q -m "vault snapshot (auto-backup $STAMP)" || true
+fi
+
+# 2) self-contained bundle (restore anywhere with: git clone vault-*.bundle)
+BUNDLE="$DEST/vault-$STAMP.bundle"
+git -C "$VAULT" bundle create "$BUNDLE" --all --quiet
+
+# 3) keep only the most recent $KEEP
+ls -t "$DEST"/vault-*.bundle 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -- 2>/dev/null || true
+
+echo "backup ok: $(basename "$BUNDLE") ($(du -h "$BUNDLE" | cut -f1 | tr -d ' ')) in $DEST"

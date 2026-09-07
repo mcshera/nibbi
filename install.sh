@@ -35,6 +35,8 @@ if [ -f "$HOME/.claude/.credentials.json" ] || security find-generic-password -s
 say "2 · home for Nibbi"
 mkdir -p "$STATE/logs" "$STATE/tmp" "$STATE/bin" "$WORK" "$PROJECTS"
 cp "$REPO"/daemon/state-bin/{transcribe,tts-kokoro,kokoro-server.py,whisper-server.py,nibbi-doctor} "$STATE/bin/" 2>/dev/null || true
+# vault-backup: install a simple local-snapshot default unless the user set up their own (e.g. the offsite .example)
+[ -e "$STATE/bin/vault-backup" ] || cp "$REPO/daemon/state-bin/vault-backup" "$STATE/bin/" 2>/dev/null || true
 chmod +x "$STATE"/bin/* 2>/dev/null || true
 [ -f "$STATE/games.json" ] || echo '{}' > "$STATE/games.json"
 [ -f "$STATE/auto.json" ] || echo '{}' > "$STATE/auto.json"
