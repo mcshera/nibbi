@@ -806,6 +806,7 @@ function launchActsFor(text) {
 /* ------------------------------------------------------------------ the turn choreography */
 let pendingImages = [];
 async function send(text, images) {
+  try { if (window.Wardrobe) window.Wardrobe.onSend(text); } catch (e) {}
   text = (text || '').trim(); images = images || [];
   if (!text && !images.length) return;
   if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
@@ -1075,7 +1076,7 @@ async function refreshStatus() {
   $('#st-demo').textContent = S.demo ? 'demo brain: on (click for the real one)' : 'demo brain: off';
 }
 $('#st-project').onclick = () => { const names = projectNames(); if (!names.length) return; const i = names.indexOf(activeProject()); send('/project ' + names[(i + 1) % names.length]); };
-$('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn); refreshStatus(); toast(S.voiceOn ? NAME + ' will speak replies' : 'voice off'); if (S.voiceOn) speak('Okay. I\'ll talk.'); };
+$('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn); if (S.voiceOn) { try { window.Wardrobe && window.Wardrobe.mark('voice'); } catch (e) {} } refreshStatus(); toast(S.voiceOn ? NAME + ' will speak replies' : 'voice off'); if (S.voiceOn) speak('Okay. I\'ll talk.'); };
 $('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); };
 $('#st-clear').onclick = () => tidy();
 $('#st-clear').insertAdjacentHTML('beforebegin', '<button class="row act" id="st-restart" type="button">restart the gateway (twice to confirm)</button>');
@@ -1295,5 +1296,131 @@ const _toast = toast; window.__toastLog = true;
 
 addEventListener('pagehide', () => LS.set('lastSeen', Date.now()));
 document.addEventListener('visibilitychange', () => { if (document.hidden) LS.set('lastSeen', Date.now()); });
+
+/* ===================== cosmetics: fruit hats + ink colours, earned by using nibbi ===================== */
+const FRUITS = [
+  { id: "strawberry", emoji: "🍓", name: "Strawberry" },
+  { id: "cherries",   emoji: "🍒", name: "Cherries" },
+  { id: "peach",      emoji: "🍑", name: "Peach" },
+  { id: "grapes",     emoji: "🍇", name: "Grapes" },
+  { id: "watermelon", emoji: "🍉", name: "Watermelon" },
+  { id: "pineapple",  emoji: "🍍", name: "Pineapple" },
+  { id: "lemon",      emoji: "🍋", name: "Lemon" },
+  { id: "banana",     emoji: "🍌", name: "Banana" },
+];
+const INKS = [
+  { id: "blush", name: "Blush", rgb: [1.0, 0.45, 0.62] },
+  { id: "sky",   name: "Sky",   rgb: [0.36, 0.62, 1.0] },
+  { id: "mint",  name: "Mint",  rgb: [0.30, 0.85, 0.62] },
+  { id: "gold",  name: "Gold",  rgb: [1.0, 0.75, 0.24] },
+  { id: "grape", name: "Grape", rgb: [0.66, 0.42, 0.95] },
+];
+const QUESTS = [
+  { id: "hello",     name: "First hello",  desc: "Say hi to nibbi",              metric: "msgs",   goal: 1,  type: "fruit", reward: "strawberry" },
+  { id: "architect", name: "Architect",    desc: "Scaffold a project with /new", metric: "new",    goal: 1,  type: "fruit", reward: "peach" },
+  { id: "fixer",     name: "Fixer friend", desc: "Send a fixer with /fix",       metric: "fix",    goal: 1,  type: "fruit", reward: "grapes" },
+  { id: "outloud",   name: "Out loud",     desc: "Turn voice on",                metric: "voice",  goal: 1,  type: "fruit", reward: "cherries" },
+  { id: "dreamer",   name: "Dreamer",      desc: "Set a goal with /goal",        metric: "goal",   goal: 1,  type: "ink",   reward: "sky" },
+  { id: "chatter",   name: "Chatterbox",   desc: "Send 20 messages",             metric: "msgs",   goal: 20, type: "ink",   reward: "blush" },
+  { id: "nightowl",  name: "Night owl",    desc: "Chat after midnight",          metric: "night",  goal: 1,  type: "fruit", reward: "watermelon" },
+  { id: "marathon",  name: "Marathon",     desc: "Send 60 messages",             metric: "msgs",   goal: 60, type: "ink",   reward: "grape" },
+  { id: "collector", name: "Collector",    desc: "Earn 5 treats",                metric: "earned", goal: 5,  type: "fruit", reward: "pineapple" },
+];
+const fruitById = (id) => FRUITS.find((f) => f.id === id);
+const inkById = (id) => INKS.find((k) => k.id === id);
+const rgbCss = (rgb) => "rgb(" + rgb.map((v) => Math.round(v * 255)).join(",") + ")";
+
+const CS = LS.get("cosmetics", null) || { prog: {}, unlocked: [], done: [], equipped: { fruit: null, ink: null } };
+CS.prog = CS.prog || {}; CS.unlocked = CS.unlocked || []; CS.done = CS.done || []; CS.equipped = CS.equipped || { fruit: null, ink: null };
+const saveCS = () => LS.set("cosmetics", CS);
+const hasItem = (type, id) => CS.unlocked.includes(type + ":" + id);
+
+function applyEquipped() {
+  const f = CS.equipped.fruit ? fruitById(CS.equipped.fruit) : null;
+  const k = CS.equipped.ink ? inkById(CS.equipped.ink) : null;
+  nibbi.setHat(f ? f.emoji : null);
+  nibbi.setInk(k ? k.rgb : null);
+}
+function equip(type, id) {
+  if (!hasItem(type, id)) return;
+  CS.equipped[type] = (CS.equipped[type] === id) ? null : id;
+  applyEquipped(); saveCS(); renderWardrobe();
+}
+function unlockItem(type, id, questName) {
+  const key = type + ":" + id;
+  if (CS.unlocked.includes(key)) return;
+  CS.unlocked.push(key);
+  CS.prog.earned = (CS.prog.earned || 0) + 1;
+  const item = type === "fruit" ? fruitById(id) : inkById(id);
+  const label = type === "fruit" ? (item.emoji + " " + item.name) : (item.name + " ink");
+  nibbi.setMood("happy");
+  try { nibbi.splash(type === "ink" ? item.rgb : null, 8); } catch (e) {}
+  toast("✨ quest complete: " + questName + " — earned " + label, 7000, { label: "wear it", run: () => { equip(type, id); openWardrobe(); } });
+  saveCS();
+}
+function checkQuests() {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const q of QUESTS) {
+      if (CS.done.includes(q.id)) continue;
+      if ((CS.prog[q.metric] || 0) >= q.goal) { CS.done.push(q.id); unlockItem(q.type, q.reward, q.name); changed = true; }
+    }
+  }
+}
+function bump(metric, n) {
+  CS.prog[metric] = (CS.prog[metric] || 0) + (n || 1);
+  checkQuests(); saveCS(); renderWardrobe();
+}
+
+let wardBtn = null, wardPanel = null, wardOpen = false;
+function openWardrobe() { if (!wardPanel) return; wardOpen = true; wardPanel.hidden = false; wardBtn.classList.add("on"); renderWardrobe(); }
+function closeWardrobe() { if (!wardPanel) return; wardOpen = false; wardPanel.hidden = true; wardBtn.classList.remove("on"); }
+function buildWardrobe() {
+  wardBtn = document.createElement("button");
+  wardBtn.id = "ward-btn"; wardBtn.type = "button"; wardBtn.textContent = "✨"; wardBtn.title = "wardrobe & quests";
+  wardBtn.onclick = () => (wardOpen ? closeWardrobe() : openWardrobe());
+  wardPanel = document.createElement("div"); wardPanel.id = "ward-panel"; wardPanel.hidden = true;
+  document.body.appendChild(wardBtn); document.body.appendChild(wardPanel);
+}
+function renderWardrobe() {
+  if (!wardPanel || wardPanel.hidden) return;
+  const eq = (type, id) => CS.equipped[type] === id;
+  const fruitCells = FRUITS.map((f) => {
+    const got = hasItem("fruit", f.id);
+    return `<button class="cos${got ? "" : " locked"}${eq("fruit", f.id) ? " on" : ""}" data-t="fruit" data-id="${f.id}" title="${got ? f.name : "locked"}">${got ? f.emoji : "🔒"}</button>`;
+  }).join("");
+  const inkCells = INKS.map((k) => {
+    const got = hasItem("ink", k.id);
+    return `<button class="cos ink${got ? "" : " locked"}${eq("ink", k.id) ? " on" : ""}" data-t="ink" data-id="${k.id}" title="${got ? k.name : "locked"}" style="--c:${rgbCss(k.rgb)}">${got ? "" : "🔒"}</button>`;
+  }).join("");
+  const questRows = QUESTS.map((q) => {
+    const cur = Math.min(CS.prog[q.metric] || 0, q.goal), done = CS.done.includes(q.id);
+    const item = q.type === "fruit" ? fruitById(q.reward) : inkById(q.reward);
+    const rew = q.type === "fruit" ? item.emoji : `<i class="dot" style="background:${rgbCss(item.rgb)}"></i>`;
+    return `<div class="quest${done ? " done" : ""}"><div class="qh"><span>${done ? "✓ " : ""}${q.name}</span><span class="qr">${rew}</span></div><div class="qd">${q.desc}</div><div class="qbar"><i style="width:${Math.round(100 * cur / q.goal)}%"></i></div></div>`;
+  }).join("");
+  const total = FRUITS.length + INKS.length;
+  wardPanel.innerHTML =
+    `<div class="wh">nibbi wardrobe <button class="wx" type="button">✕</button></div>` +
+    `<div class="ws">Fruit hat</div><div class="cos-row">${fruitCells}</div>` +
+    `<div class="ws">Ink colour</div><div class="cos-row">${inkCells}</div>` +
+    `<div class="ws">Quests <small>${CS.unlocked.length}/${total} treats earned</small></div>` +
+    `<div class="quests">${questRows}</div>`;
+  wardPanel.querySelector(".wx").onclick = closeWardrobe;
+  wardPanel.querySelectorAll(".cos").forEach((b) => { b.onclick = () => { if (!b.classList.contains("locked")) equip(b.dataset.t, b.dataset.id); }; });
+}
+function cosOnSend(text) {
+  const t = String(text || "").trim();
+  bump("msgs");
+  if (/^\/new\b/i.test(t)) bump("new");
+  if (/^\/fix\b/i.test(t)) bump("fix");
+  if (/^\/goal\b/i.test(t)) bump("goal");
+  const h = new Date().getHours(); if (h >= 0 && h < 5) bump("night");
+}
+buildWardrobe(); applyEquipped(); checkQuests();
+window.Wardrobe = { onSend: cosOnSend, mark: (m) => bump(m), open: openWardrobe, equip, state: () => CS };
+
+
 window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout };
 })();
