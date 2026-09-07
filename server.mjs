@@ -217,7 +217,7 @@ function tailNotes() {
   try {
     if (!existsSync(NOTES)) return; const size = statSync(NOTES).size; if (size < notesPos) notesPos = 0; if (size === notesPos) return;
     const buf = Buffer.alloc(size - notesPos); const fd = openSyncSafe(NOTES); if (fd === null) return; readSyncSafe(fd, buf, notesPos); closeSyncSafe(fd);
-    const chunk = buf.toString("utf8"); const lines = chunk.split("\n"); const complete = chunk.endsWith("\n") ? lines : lines.slice(0, -1);
+    const chunk = buf.toString("utf8"); const lines = chunk.split("\n"); const complete = lines.slice(0, -1); /* drop the last split element: trailing "" when the chunk ends in \n (was re-emitting all briefs), or a partial final line otherwise */
     notesPos += Buffer.byteLength(complete.join("\n") + (complete.length ? "\n" : ""));
     try { writeFileSync(NOTES_POS, String(notesPos)); } catch { /* disk */ }
     for (const l of complete) { if (!l.trim()) continue; try { const n = JSON.parse(l); emitEvent({ kind: "brief", text: String(n.text || "").slice(0, 4000), silent: !!n.silent, ts: n.ts || Date.now() }); } catch { /* bad line */ } }
