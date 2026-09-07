@@ -167,6 +167,7 @@ function createNibbi(opts) {
   let poseSnap = true;                     // first setTarget snaps
 
   let mood = 'idle', moodAt = 0, moodDef = MOODS.idle;
+  let hat = null, inkTint = null;   // cosmetics: fruit emoji worn on the head + optional ink colour [r,g,b] 0..1
   const ex = { lidTop: 0, lidBot: 0, wide: 1, pupil: 1 };   // smoothed expression
   let reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -447,6 +448,7 @@ function createNibbi(opts) {
         const by = Math.max(0, Math.floor((H - byBot) * DPR)), bh = Math.ceil((byBot - byTop) * DPR);
         gl.scissor(bx, by, bw, bh);
         gl.uniform2f(U.u_center, cx, H - cy); gl.uniform1f(U.u_R, R);
+        gl.uniform3f(U.u_tint, inkTint ? inkTint[0] : 0, inkTint ? inkTint[1] : 0, inkTint ? inkTint[2] : 0); gl.uniform1f(U.u_tintAmt, inkTint ? 0.5 : 0);
         gl.uniform1f(U.u_breath, breath); gl.uniform2f(U.u_noff, noffX, noffY);
         gl.uniform3f(U.u_puff, puffDX, puffDY, puffAmt); gl.uniform1f(U.u_lift, lift); gl.uniform1f(U.u_sq, squash);
         gl.uniform1f(U.u_lean, leanAmt); gl.uniform1f(U.u_poof, poof); gl.uniform1f(U.u_fade, fade);
@@ -513,6 +515,19 @@ function createNibbi(opts) {
         g.drawImage(fxCv, sx * DPR, sy * DPR, sw * DPR, sh * DPR, dx, dy, dw, dh);
       }
     }
+    if (hat) {                                     // fruit worn on the head, follows breath/hop/lean
+      const hs = R * 1.15;
+      const bob = reduced ? 0 : Math.sin(t / 620) * (R * 0.03) + Math.sin(t / 1010) * (R * 0.02);
+      const tilt = reduced ? 0 : Math.sin(t / 1500) * 0.05;
+      const hx = cx + leanAmt * 0.7, hy = (cy - R * breath - lift) - hs * 0.30 + bob;
+      fx.save();
+      fx.globalAlpha = fade;
+      fx.translate(hx, hy); fx.rotate(tilt);
+      fx.font = hs + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      fx.textAlign = 'center'; fx.textBaseline = 'middle';
+      fx.fillText(hat, 0, 0);
+      fx.restore();
+    }
   }
 
   function drawEye(exx, eyy, rx, ry, prx, pry, pox, poy, breath, lift, sy, ybase, cx, s, blinkLid, interest, ctx, E, gx, gy) {
@@ -572,6 +587,9 @@ function createNibbi(opts) {
     shake() { shakeAt = now(); },
     setFade(v) { fadeT = clamp(v, 0, 1); },
     setReducedMotion(b) { reduced = !!b; frozenDrawn = false; },
+    setHat(emoji) { hat = emoji || null; frozenDrawn = false; if (hat) api.hop(); },
+    setInk(rgb) { inkTint = (rgb && rgb.length === 3) ? rgb : null; frozenDrawn = false; },
+    cosmetics: () => ({ hat, ink: inkTint }),
     paperDataURL,
     state: () => ({ x: pose.x, y: pose.y, r: pose.r, mood, fps, gl: glOK, tx: target.x, ty: target.y, tr: target.r }),
     addMirror(canvas) { mirrors.add(canvas); },
