@@ -134,7 +134,7 @@ function newTurn(text, images, at) {
   nibBody.append(bubble, meta);
   nib.append(ava, nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
-  feed.appendChild(turn); S.stick = true; scrollFeed(true);
+  feed.appendChild(turn); if (text !== null) { S.stick = true; scrollFeed(true); } else scrollFeed(false); /* only your own messages snap to bottom; nibbi's auto-bubbles follow only if you're already there */
   const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false };
   S.turns.push(T);
   return T;
