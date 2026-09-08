@@ -16,7 +16,11 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 /* ------------------------------------------------------------------ dom */
 const body = document.body, feed = $('#feed'), pill = $('#pill'), ask = $('#ask'), sendBtn = $('#send'), micBtn = $('#mic'), chipsEl = $('#chips'), status = $('#status'), attachEl = $('#attach'), listenEl = $('#listen');
 const fxCv = $('#fx');
-const nibbi = createNibbi({ ink: $('#ink'), fx: fxCv, motion: Q.get('motion') === 'legacy' ? 'legacy' : 'pocket' });
+const character = ['wash', 'pool', 'dry', 'pool-velvet', 'pool-bloom', 'pool-tide', 'pool-speckle', 'pool-brush'].includes(Q.get('character')) ? Q.get('character') : Q.get('motion') === 'legacy' ? undefined : 'pool-velvet';
+// Ink bubble variants use the Pocket renderer; ordinary URLs retain the legacy escape hatch.
+const nibbi = createNibbi({ ink: $('#ink'), fx: fxCv, character, motion: !character && Q.get('motion') === 'legacy' ? 'legacy' : 'pocket' });
+const gaze = Q.get('gaze');
+if (['left', 'straight', 'right'].includes(gaze)) nibbi.lookDirection?.(gaze === 'left' ? -1 : gaze === 'right' ? 1 : 0, 0);
 body.style.backgroundImage = 'url(' + nibbi.paperDataURL() + ')';
 
 /* ------------------------------------------------------------------ state */

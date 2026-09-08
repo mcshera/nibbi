@@ -5,6 +5,7 @@
      n.setTarget({ x, y, r })   // where the body center should be (css px) and its base radius; spring-eased
      n.setMood('idle'|'listening'|'thinking'|'working'|'speaking'|'happy'|'error'|'sleep')
      n.lookAt(x, y) | n.lookFree()     // gaze target in css px, or back to wander/pointer
+     n.lookDirection(x, y)             // Pocket: fixed direction [-1,1]; +x right, +y down
      n.pointer(x, y)                   // pointer position (css px) for puff + gaze
      n.pulse(e)                        // speech energy impulse 0..1 (bob while talking)
      n.hop() n.blink() n.spatter(k) n.drip() n.shake()
@@ -43,6 +44,17 @@ function paperDataURL() {
   return c.toDataURL();
 }
 
+// Smooth radial fit to the approved ink-bubble hero silhouette. The reference
+// has a narrow dome and broad lower cheeks; an ellipse reverses that balance.
+// Angles use screen coordinates (positive y down), shared by both renderers.
+const B_PROFILE = Object.freeze({
+  radius:.7900250,
+  harmonics:Object.freeze([
+    [.0067754,.0311077],[.1165685,-.0006183],[.0023390,.0484374],
+    [.0120854,.0001272],[.0005678,.0050743],[-.0001541,-.0061422],
+  ]),
+});
+
 /* ---------------------------------------------------------------- shaders */
 const VS = `attribute vec2 a_p; void main(){ gl_Position = vec4(a_p, 0.0, 1.0); }`;
 const FS = `
@@ -72,6 +84,7 @@ uniform vec2 u_scale;
 uniform vec2 u_rotation;
 uniform vec2 u_shift;
 uniform vec3 u_shape;
+uniform float u_character; // 0 = original; 1 wash, 2 pooled ink, 3 dry brush
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
@@ -104,6 +117,107 @@ void main(){
     q.y = yb + (q.y - yb) / u_sq;
     q.x = q.x * (u_sq * 0.55 + 0.45);
     q.x -= u_lean * clamp((q.y - yb) / (1.6 * u_R), 0.0, 1.2);
+  }
+
+  if (u_character > 0.5) {
+    // Flat pigment on paper: every texture coordinate travels with the body.
+    // There is no lighting, depth normal, specular highlight or ground shadow.
+    vec2 n = q / R;
+    float bh = 1.0 + (0.06*u_shape.x + 0.12*u_shape.z)/0.82;
+    float bw = 1.0 - (0.035*u_shape.x + 0.045*u_shape.z)/1.015;
+    vec2 b = vec2(n.x/bw,0.66+(-n.y-0.66)/bh);
+    float bl = length(b);
+    vec2 turn = bl>0.0 ? b/bl : vec2(1.0,0.0);
+    vec2 harmonic = turn;
+    float rad = ${B_PROFILE.radius.toFixed(7)};
+    ${B_PROFILE.harmonics.map(([c,s],i)=>`rad += (${c.toFixed(7)})*harmonic.x+(${s.toFixed(7)})*harmonic.y;${i===4?' rad += 0.020*u_shape.y*harmonic.x;':''}${i<5?' harmonic = vec2(harmonic.x*turn.x-harmonic.y*turn.y,harmonic.y*turn.x+harmonic.x*turn.y);':''}`).join('\n    ')}
+    float d = (bl-rad)*min(bw,bh);
+    if (d > 0.18) { gl_FragColor=vec4(0.0); return; }
+    float coarse = fbm(n*5.8+vec2(8.2,3.7));
+    float broad = fbm(n*2.7+vec2(19.1,7.8)+u_flow*0.08);
+    float fine = fbm(n*52.0+vec2(3.1,6.7));
+    float fiber = vnoise(vec2(n.x*105.0+n.y*21.0,n.y*260.0));
+    d += (fbm(n*24.0)-0.43)*0.035+(fbm(n*75.0)-0.43)*0.014;
+    float A;
+    float tone;
+    if (u_character < 1.5) {
+      // A translucent wash with pooled pigment, tide lines, and capillary bleed.
+      d += (vnoise(n*9.0)-0.5)*0.030;
+      float body = 1.0-smoothstep(-0.028,0.020,d+(fine-0.43)*0.022);
+      float bleed = 0.40*(1.0-smoothstep(-0.018,0.115,d))*clamp((coarse-0.18)*2.2,0.0,1.0)*smoothstep(0.18,0.62,fbm(n*40.0));
+      A = (body+bleed*(1.0-body))*(0.84+0.14*smoothstep(0.22,0.64,broad)+0.03*fine);
+      tone = 0.035+0.13*smoothstep(0.30,0.64,broad)+0.02*fine;
+      float tide = 1.0-smoothstep(0.015,0.06,abs(d+0.042+0.025*(coarse-0.4)));
+      tone *= 1.0-0.40*tide;
+      A *= 0.92+0.08*fiber;
+    } else if (u_character < 2.5) {
+      // Dense velvety ink with a narrow, irregular wet rim.
+      float body = 1.0-smoothstep(-0.014,0.015,d);
+      float rim = 0.24*(1.0-smoothstep(-0.015,0.052,d))*(0.6+coarse);
+      A = (body+rim*(1.0-body))*(0.985+0.015*fiber);
+      tone = 0.026+0.041*fine+0.017*broad;
+      tone *= 1.0-0.25*(1.0-smoothstep(0.0,0.036,abs(d+0.026)));
+    } else if (u_character < 3.5) {
+      // Dry pigment catches the paper: broken bristles and pale fiber scratches.
+      float bristle = fbm(n*vec2(37.0,29.0)+vec2(coarse,broad)*4.0);
+      float scuff = smoothstep(0.50,0.71,fbm(n*83.0+vec2(coarse,broad)*9.0));
+      float edge = smoothstep(-0.22,0.02,d);
+      A = (1.0-smoothstep(-0.022,0.018,d+(fine-0.43)*0.08+(coarse-0.43)*0.045))*(0.91+0.075*broad);
+      A *= (1.0-edge*smoothstep(0.40,0.65,bristle)*0.88)*(1.0-(0.10+0.65*edge)*scuff);
+      tone = 0.045+0.085*smoothstep(0.24,0.66,broad)+0.022*fine;
+    } else if (u_character < 4.5) {
+      // Velvet: soft charcoal pigment, powder mottling and a clean close edge.
+      float body = 1.0-smoothstep(-0.010,0.010,d);
+      float rim = 0.14*(1.0-smoothstep(-0.008,0.026,d));
+      float powder = fbm(n*4.3+vec2(11.3,5.7));
+      A = (body+rim*(1.0-body))*(0.948+0.034*coarse+0.012*fiber);
+      tone = 0.055+0.145*smoothstep(0.23,0.65,powder)+0.016*fine;
+    } else if (u_character < 5.5) {
+      // Bloom: capillary fingers around a deep ink center, laid flat on paper.
+      float edge = smoothstep(-0.24,0.06,d);
+      float body = 1.0-smoothstep(-0.046,0.018,d);
+      float capillary = fbm(n*32.0+vec2(coarse,broad)*5.0);
+      float halo = 0.76*(1.0-smoothstep(-0.025,0.138,d))*smoothstep(0.16,0.61,capillary);
+      A = body*(0.983-0.16*edge)+halo*(1.0-body);
+      tone = 0.020+0.032*fine+0.060*edge*(0.3+coarse);
+    } else if (u_character < 6.5) {
+      // Tide: uneven rings of settled pigment; flat dried ink, not a lit sphere.
+      float body = 1.0-smoothstep(-0.018,0.019,d);
+      float rim = 0.20*(1.0-smoothstep(-0.015,0.055,d));
+      float basin = d+0.19*(fbm(n*4.3+vec2(4.1,8.3))-0.43)+0.045*(coarse-0.43);
+      float tide1 = (1.0-smoothstep(0.012,0.040,abs(basin+0.105)))*smoothstep(0.25,0.58,coarse);
+      float tide2 = (1.0-smoothstep(0.014,0.047,abs(basin+0.265)))*smoothstep(0.28,0.58,fbm(n*7.1+vec2(3.7,14.2)));
+      float tide3 = (1.0-smoothstep(0.016,0.050,abs(basin+0.445)))*smoothstep(0.26,0.62,broad);
+      A = (body+rim*(1.0-body))*(0.95+0.035*fiber);
+      tone = 0.095+0.105*smoothstep(0.24,0.65,broad)+0.026*coarse;
+      tone *= 1.0-0.64*tide1-0.43*tide2-0.28*tide3;
+    } else if (u_character < 7.5) {
+      // Speckle: tiny bare-paper pores inside an otherwise dense black pool.
+      vec2 cell = floor(n*48.0),spot = fract(n*48.0)-(0.2+0.6*hash2(cell+13.7));
+      float radius = 0.10+0.11*hash(cell+31.9);
+      float paper = (1.0-smoothstep(radius*0.32,radius,length(spot)))*step(0.64,hash(cell+6.2));
+      float body = 1.0-smoothstep(-0.015,0.013,d);
+      float rim = 0.16*(1.0-smoothstep(-0.012,0.038,d));
+      A = (body+rim*(1.0-body))*(0.993-0.83*paper);
+      tone = 0.022+0.042*fine+0.010*broad;
+    } else {
+      // Brush: one family of broken diagonal strokes through continuous ink.
+      vec2 brush = vec2(n.x*0.96+n.y*0.28,-n.x*0.28+n.y*0.96);
+      float warp = fbm(n*3.2+vec2(7.1,2.8));
+      float bristles = vnoise(vec2(brush.x*5.0,brush.y*65.0+warp*3.0));
+      float streak = smoothstep(0.40,0.76,bristles)*smoothstep(0.18,0.61,fbm(brush*vec2(12.0,8.0)));
+      float edge = smoothstep(-0.18,0.025,d);
+      float body = 1.0-smoothstep(-0.018,0.017,d+(bristles-0.45)*0.052);
+      float rim = 0.16*(1.0-smoothstep(-0.008,0.049,d))*(0.4+fine);
+      A = (body+rim*(1.0-body))*(0.976-0.20*streak-0.20*edge*streak);
+      tone = 0.029+0.025*fine+0.105*streak;
+    }
+    // Preserve the little ink face at chat size without turning fibers into noise.
+    float tiny = 1.0-smoothstep(15.0,36.0,u_R);
+    A = mix(A,max(A,(1.0-smoothstep(-0.025,0.012,d))*0.96),tiny*0.85);
+    tone *= 1.0-0.28*tiny;
+    vec3 col = mix(vec3(tone,tone*0.975,tone*0.93),u_tint*(0.38+tone*2.6),u_tintAmt);
+    gl_FragColor=vec4(col*A*u_fade,A*u_fade); return;
   }
 
   float an = atan(q.y, q.x);
@@ -626,6 +740,207 @@ const pSmooth = (a,b,v) => { const t=clamp((v-a)/(b-a),0,1); return t*t*(3-2*t);
 const pSmax = (a,b,k) => { const h=clamp(.5+.5*(b-a)/k,0,1); return pMix(a,b,h)+k*h*(1-h); };
 const P_NEUTRAL = Object.freeze({x:0,lift:0,sx:1,sy:1,rotate:0,lean:0,round:0,star:0,drop:0,satellite:0,trail:0,impact:0,eyeX:0,eyeY:0,blink:0,wide:1,happy:0,phase:'rest'});
 const P_SPAT = [[118,-95,4.2],[148,-39,3],[129,-13,2],[159,93,3.6],[-184,63,2.2],[-172,82,3.1],[-151,78,2],[-137,89,2.6],[-159,95,1.6]];
+const B_SPAT = [[-118.7,-55.9,7.4],[-113.3,-64.4,3.4],[-107.8,-46.9,2.4],[132.7,64.4,9.2],[143.5,47.7,3.4],[150.5,73.3,2.2],[109,84.6,3.1]];
+const B_LOOK = {
+  gaze:[3.5,3],
+};
+function bubbleEyes(yaw=0,pitch=0) {
+  yaw=clamp(pFinite(yaw),-1,1);pitch=clamp(pFinite(pitch),-1,1);
+  return [-1,1].map(side=>({
+    x:38.8*yaw+43*side,y:-2-3.5*side*yaw+20*pitch,
+    rx:35-2*side*yaw,ry:41-2*side*yaw,
+    prx:16.5-.5*side*yaw,pry:20-side*yaw,pox:0,poy:0,
+  }));
+}
+const B_CHARACTERS = Object.freeze({wash:1,pool:2,dry:3,'pool-velvet':4,'pool-bloom':5,'pool-tide':6,'pool-speckle':7,'pool-brush':8});
+function bubbleDistance(x,y,p) {
+  const h=1+(.06*p.round+.12*p.drop)/.82,w=1-(.035*p.round+.045*p.drop)/1.015;
+  const nx=x/w,ny=.66+(y-.66)/h,length=Math.hypot(nx,ny),ca=length?nx/length:1,sa=length?ny/length:0;
+  let radius=B_PROFILE.radius,c=1,s=0;
+  // Recur through the harmonics without repeating atan2 / sin / cos for every
+  // contour sample and material pixel. This is the same radial fit as GLSL.
+  for(let i=0;i<B_PROFILE.harmonics.length;i++) {
+    const nextC=c*ca-s*sa;s=s*ca+c*sa;c=nextC;
+    const harmonic=B_PROFILE.harmonics[i];radius+=harmonic[0]*c+harmonic[1]*s;
+    if(i===4)radius+=.020*p.star*c;
+  }
+  return (length-radius)*Math.min(w,h);
+}
+const B_EYE_UNIT=Array.from({length:64},(_,i)=>[Math.cos(i/64*P_TAU),Math.sin(i/64*P_TAU)]);
+function bubbleFaceMargin(p,wide,eyes) {
+  let margin=Infinity;
+  for(const eye of eyes)for(const [x,y] of B_EYE_UNIT)
+    margin=Math.min(margin,-bubbleDistance(eye.x/R0+p.eyeX+x*eye.rx/R0*wide,eye.y/R0+p.eyeY+y*eye.ry/R0*wide,p));
+  return margin;
+}
+function bubbleFacePose(p,wide,eyes) {
+  // Pull an outward-facing pair toward the fitted ink profile's center only
+  // as far as needed. This works for either side and for upward/downward turns.
+  const inset=.016;
+  if(bubbleFaceMargin(p,wide,eyes)>=inset)return p;
+  const w=1-(.035*p.round+.045*p.drop)/1.015,h=1+(.06*p.round+.12*p.drop)/.82;
+  const centerX=B_PROFILE.harmonics[0][0]*w,centerY=.66+(B_PROFILE.harmonics[0][1]-.66)*h;
+  const dx=centerX-(eyes[0].x+eyes[1].x)/(2*R0)-p.eyeX,dy=centerY-(eyes[0].y+eyes[1].y)/(2*R0)-p.eyeY;
+  let lo=0,hi=1;
+  for(let i=0;i<10;i++) {
+    const t=(lo+hi)/2,candidate={...p,eyeX:p.eyeX+dx*t,eyeY:p.eyeY+dy*t};
+    if(bubbleFaceMargin(candidate,wide,eyes)>=inset)hi=t;else lo=t;
+  }
+  return {...p,eyeX:p.eyeX+dx*hi,eyeY:p.eyeY+dy*hi};
+}
+// Cached material atlas for the character Canvas2D fallback. Coordinates use
+// the same neutral bubble field as the fragment shader; local y points down.
+const B_MATERIAL_TILES = new Map();
+const B_MATERIAL_BOUNDS = Object.freeze({left:-1.35,top:-1.35,right:1.35,bottom:1.35,width:2.7,height:2.7});
+
+function bubbleHash(x,y) {
+  // GLSL highp is float32. Rounding the hash arithmetic avoids the very
+  // different random field produced by JavaScript's double precision.
+  const f=Math.fround;
+  x=f(f(x)*f(123.34)); y=f(f(y)*f(456.21));
+  x=f(x-Math.floor(x)); y=f(y-Math.floor(y));
+  const dot=f(f(x*f(x+f(45.32)))+f(y*f(y+f(45.32))));
+  x=f(x+dot); y=f(y+dot);
+  const value=f(x*y);
+  return value-Math.floor(value);
+}
+
+function bubbleNoise(x,y) {
+  const ix=Math.floor(x),iy=Math.floor(y);
+  let fx=x-ix,fy=y-iy;
+  fx=fx*fx*(3-2*fx); fy=fy*fy*(3-2*fy);
+  const a=bubbleHash(ix,iy),b=bubbleHash(ix+1,iy);
+  const c=bubbleHash(ix,iy+1),d=bubbleHash(ix+1,iy+1);
+  return (a+(b-a)*fx)*(1-fy)+(c+(d-c)*fx)*fy;
+}
+
+function bubbleFbm(x,y) {
+  let value=0,amplitude=.5;
+  for(let i=0;i<3;i++) {
+    value+=amplitude*bubbleNoise(x,y);
+    x=x*2.03+17.13; y=y*2.03+9.71;
+    amplitude*=.5;
+  }
+  return value;
+}
+
+function bubbleMaterialTile(character,color=null,tiny=false) {
+  const kind=Object.hasOwn(B_CHARACTERS,character)?B_CHARACTERS[character]:Number.isInteger(character)&&character>=1&&character<=8?character:1;
+  const tint=color?Array.from(color,c=>clamp(Number(c)||0,0,1)):null;
+  const key=kind+':'+(tiny?'tiny':'full')+':'+(tint?tint.join(','):'black');
+  const cached=B_MATERIAL_TILES.get(key);
+  if(cached)return cached;
+  const canvas=document.createElement('canvas');
+  canvas.width=canvas.height=tiny?256:512;
+  const ctx=canvas.getContext('2d');
+  const data=ctx.createImageData(canvas.width,canvas.height),bytes=data.data;
+  const size=canvas.width,step=B_MATERIAL_BOUNDS.width/size;
+  for(let row=0;row<size;row++) {
+    const ly=B_MATERIAL_BOUNDS.top+(row+.5)*step,ny=-ly;
+    for(let column=0;column<size;column++) {
+      const nx=B_MATERIAL_BOUNDS.left+(column+.5)*step;
+      let d=bubbleDistance(nx,ly,P_NEUTRAL);
+      if(d>.18)continue;
+      const coarse=bubbleFbm(nx*5.8+8.2,ny*5.8+3.7);
+      const broad=bubbleFbm(nx*2.7+19.1,ny*2.7+7.8);
+      const fine=bubbleFbm(nx*52+3.1,ny*52+6.7);
+      const fiber=bubbleNoise(nx*105+ny*21,ny*260);
+      d+=(bubbleFbm(nx*24,ny*24)-.43)*.035+(bubbleFbm(nx*75,ny*75)-.43)*.014;
+      let alpha,tone;
+      if(kind===1) {
+        d+=(bubbleNoise(nx*9,ny*9)-.5)*.030;
+        const body=1-pSmooth(-.028,.020,d+(fine-.43)*.022);
+        const bleed=.40*(1-pSmooth(-.018,.115,d))*clamp((coarse-.18)*2.2,0,1)*pSmooth(.18,.62,bubbleFbm(nx*40,ny*40));
+        alpha=(body+bleed*(1-body))*(.84+.14*pSmooth(.22,.64,broad)+.03*fine);
+        tone=.035+.13*pSmooth(.30,.64,broad)+.02*fine;
+        const tide=1-pSmooth(.015,.06,Math.abs(d+.042+.025*(coarse-.4)));
+        tone*=1-.40*tide;
+        alpha*=.92+.08*fiber;
+      } else if(kind===2) {
+        const body=1-pSmooth(-.014,.015,d);
+        const rim=.24*(1-pSmooth(-.015,.052,d))*(.6+coarse);
+        alpha=(body+rim*(1-body))*(.985+.015*fiber);
+        tone=.026+.041*fine+.017*broad;
+        tone*=1-.25*(1-pSmooth(0,.036,Math.abs(d+.026)));
+      } else if(kind===3) {
+        const bristle=bubbleFbm(nx*37+coarse*4,ny*29+broad*4);
+        const scuff=pSmooth(.50,.71,bubbleFbm(nx*83+coarse*9,ny*83+broad*9));
+        const edge=pSmooth(-.22,.02,d);
+        alpha=(1-pSmooth(-.022,.018,d+(fine-.43)*.08+(coarse-.43)*.045))*(.91+.075*broad);
+        alpha*=(1-edge*pSmooth(.40,.65,bristle)*.88)*(1-(.10+.65*edge)*scuff);
+        tone=.045+.085*pSmooth(.24,.66,broad)+.022*fine;
+      } else if(kind===4) {
+        const body=1-pSmooth(-.010,.010,d);
+        const rim=.14*(1-pSmooth(-.008,.026,d));
+        const powder=bubbleFbm(nx*4.3+11.3,ny*4.3+5.7);
+        alpha=(body+rim*(1-body))*(.948+.034*coarse+.012*fiber);
+        tone=.055+.145*pSmooth(.23,.65,powder)+.016*fine;
+      } else if(kind===5) {
+        const edge=pSmooth(-.24,.06,d);
+        const body=1-pSmooth(-.046,.018,d);
+        const capillary=bubbleFbm(nx*32+coarse*5,ny*32+broad*5);
+        const halo=.76*(1-pSmooth(-.025,.138,d))*pSmooth(.16,.61,capillary);
+        alpha=body*(.983-.16*edge)+halo*(1-body);
+        tone=.020+.032*fine+.060*edge*(.3+coarse);
+      } else if(kind===6) {
+        const body=1-pSmooth(-.018,.019,d);
+        const rim=.20*(1-pSmooth(-.015,.055,d));
+        const basin=d+.19*(bubbleFbm(nx*4.3+4.1,ny*4.3+8.3)-.43)+.045*(coarse-.43);
+        const tide1=(1-pSmooth(.012,.040,Math.abs(basin+.105)))*pSmooth(.25,.58,coarse);
+        const tide2=(1-pSmooth(.014,.047,Math.abs(basin+.265)))*pSmooth(.28,.58,bubbleFbm(nx*7.1+3.7,ny*7.1+14.2));
+        const tide3=(1-pSmooth(.016,.050,Math.abs(basin+.445)))*pSmooth(.26,.62,broad);
+        alpha=(body+rim*(1-body))*(.95+.035*fiber);
+        tone=.095+.105*pSmooth(.24,.65,broad)+.026*coarse;
+        tone*=1-.64*tide1-.43*tide2-.28*tide3;
+      } else if(kind===7) {
+        const cellX=Math.floor(nx*48),cellY=Math.floor(ny*48);
+        const jitterX=bubbleHash(cellX+13.7,cellY+13.7);
+        const jitterY=bubbleHash(cellX+13.7+jitterX+17.71,cellY+13.7+jitterX+17.71);
+        const spotX=nx*48-cellX-(.2+.6*jitterX),spotY=ny*48-cellY-(.2+.6*jitterY);
+        const radius=.10+.11*bubbleHash(cellX+31.9,cellY+31.9);
+        const paper=(1-pSmooth(radius*.32,radius,Math.hypot(spotX,spotY)))*(bubbleHash(cellX+6.2,cellY+6.2)>=.64?1:0);
+        const body=1-pSmooth(-.015,.013,d);
+        const rim=.16*(1-pSmooth(-.012,.038,d));
+        alpha=(body+rim*(1-body))*(.993-.83*paper);
+        tone=.022+.042*fine+.010*broad;
+      } else {
+        const brushX=nx*.96+ny*.28,brushY=-nx*.28+ny*.96;
+        const warp=bubbleFbm(nx*3.2+7.1,ny*3.2+2.8);
+        const bristles=bubbleNoise(brushX*5,brushY*65+warp*3);
+        const streak=pSmooth(.40,.76,bristles)*pSmooth(.18,.61,bubbleFbm(brushX*12,brushY*8));
+        const edge=pSmooth(-.18,.025,d);
+        const body=1-pSmooth(-.018,.017,d+(bristles-.45)*.052);
+        const rim=.16*(1-pSmooth(-.008,.049,d))*(.4+fine);
+        alpha=(body+rim*(1-body))*(.976-.20*streak-.20*edge*streak);
+        tone=.029+.025*fine+.105*streak;
+      }
+      if(tiny) {
+        alpha+=(Math.max(alpha,(1-pSmooth(-.025,.012,d))*.96)-alpha)*.85;
+        tone*=.72;
+      }
+      const pixel=(row*size+column)*4;
+      // ImageData stores straight alpha. Canvas performs premultiplication;
+      // multiplying RGB by alpha here would darken translucent wash twice.
+      if(tint) {
+        const intensity=.38+tone*2.6;
+        bytes[pixel]=Math.round(clamp(tint[0]*intensity,0,1)*255);
+        bytes[pixel+1]=Math.round(clamp(tint[1]*intensity,0,1)*255);
+        bytes[pixel+2]=Math.round(clamp(tint[2]*intensity,0,1)*255);
+      } else {
+        bytes[pixel]=Math.round(tone*255);
+        bytes[pixel+1]=Math.round(tone*.975*255);
+        bytes[pixel+2]=Math.round(tone*.93*255);
+      }
+      bytes[pixel+3]=Math.round(clamp(alpha,0,1)*255);
+    }
+  }
+  ctx.putImageData(data,0,0);
+  const tile=Object.freeze({canvas,bounds:B_MATERIAL_BOUNDS});
+  if(B_MATERIAL_TILES.size>=12)B_MATERIAL_TILES.delete(B_MATERIAL_TILES.keys().next().value);
+  B_MATERIAL_TILES.set(key,tile);
+  return tile;
+}
+
 function pocketPose(value, amount=1) {
   const p={...P_NEUTRAL};
   for (const k of Object.keys(p)) if (k!=='phase') p[k]=pFinite(value?.[k],p[k]);
@@ -648,7 +963,8 @@ function pocketInverse(x,y,p,cx,cy,R) {
   const c=Math.cos(p.rotate),s=Math.sin(p.rotate),lx=(c*x+s*y)/p.sx,ly=(-s*x+c*y)/p.sy+.66;
   return [lx-p.lean*clamp((.66-ly)/1.6,0,1.2),ly];
 }
-function pocketDistance(x,y,p) {
+function pocketDistance(x,y,p,character=null) {
+  if(character)return bubbleDistance(x,y,p);
   y=-y; const a=Math.atan2(y,x);
   let rr=1+.054*Math.cos(2*a+1.1)+.048*Math.cos(3*a+2.6)+.028*Math.cos(5*a+4.7)+.016*Math.cos(7*a+1.7);
   rr+=.06*clamp(-Math.sin(a),0,1)-.02*clamp(Math.sin(a),0,1)+.085*Math.exp((Math.cos(a-3.3)-1)*6)+.05*Math.exp((Math.cos(a+.15)-1)*6);
@@ -660,11 +976,11 @@ function pocketDistance(x,y,p) {
   const sum=p.round+p.star+p.drop;
   return blot*(1-Math.min(1,sum))+(round*p.round+star*p.star+drop*p.drop)/Math.max(1,sum);
 }
-function pocketContour(p,pad=.24,n=80) {
+function pocketContour(p,pad=.24,n=80,character=null) {
   const out=[];
   for(let i=0;i<n;i++) {
     const a=i/n*P_TAU,dx=Math.cos(a),dy=Math.sin(a); let lo=0,hi=2.6;
-    for(let j=0;j<12;j++) { const r=(lo+hi)/2; if(pocketDistance(dx*r,-.12+dy*r,p)<pad)lo=r;else hi=r; }
+    for(let j=0;j<12;j++) { const r=(lo+hi)/2; if(pocketDistance(dx*r,-.12+dy*r,p,character)<pad)lo=r;else hi=r; }
     out.push([dx*(lo+hi)/2,-.12+dy*(lo+hi)/2]);
   }
   return out;
@@ -676,23 +992,26 @@ function pocketBox(points) {
   for(const [x,y] of points){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}
   return {left,top,right,bottom,width:right-left,height:bottom-top};
 }
-function pocketGeometry(p,cx,cy,R,wide) {
-  const map=(x,y)=>pocketMap(x,y,p,cx,cy,R),boundary=pocketContour(p);
-  const eyeOutlines=LOOK.eyes.map(e=>pocketRing(e.x/R0+p.eyeX,e.y/R0+p.eyeY,e.rx/R0*wide,e.ry/R0*wide,64));
+function pocketGeometry(p,cx,cy,R,wide,character=null,eyes=null) {
+  const eyeModel=character?(eyes||bubbleEyes()):LOOK.eyes,spatter=character?B_SPAT:P_SPAT;
+  const map=(x,y)=>pocketMap(x,y,p,cx,cy,R),boundary=pocketContour(p,character?.18:.24,80,character);
+  const eyeOutlines=eyeModel.map(e=>pocketRing(e.x/R0+p.eyeX,e.y/R0+p.eyeY,e.rx/R0*wide,e.ry/R0*wide,64));
   const eyePoints=eyeOutlines.flat(),bodyPoints=boundary.map(([x,y])=>map(x,y));
-  const spats=P_SPAT.flatMap(([x,y,r])=>pocketRing(x/R0,y/R0,r/R0,r/R0,8)).map(([x,y])=>map(x,y));
-  const faceMargins=eyeOutlines.map(points=>Math.min(...points.map(([x,y])=>-pocketDistance(x,y,p))));
-  const eyeCenters=LOOK.eyes.map(e=>{const [x,y]=map(e.x/R0+p.eyeX,e.y/R0+p.eyeY);return {x,y};});
+  const spats=spatter.flatMap(([x,y,r])=>pocketRing(x/R0,y/R0,r/R0,r/R0,8)).map(([x,y])=>map(x,y));
+  const faceMargins=eyeOutlines.map(points=>Math.min(...points.map(([x,y])=>-pocketDistance(x,y,p,character))));
+  const eyeCenters=eyeModel.map(e=>{const [x,y]=map(e.x/R0+p.eyeX,e.y/R0+p.eyeY);return {x,y};});
   return {bounds:pocketBox([...bodyPoints,...spats]),bodyBounds:pocketBox(bodyPoints),eyeBounds:pocketBox(eyePoints.map(([x,y])=>map(x,y))),
     eyeCenters,faceContained:Math.min(...faceMargins)>=0,minFaceMargin:Math.min(...faceMargins),faceMargins,
     faceMarginUnit:'R; untextured local body field (approximate signed distance)',
-    eyeGap:(70-(29+29.9)*wide)/R0*R*Math.min(p.sx,p.sy),wide,
+    eyeGap:((eyeModel[1].x-eyeModel[0].x)-(eyeModel[0].rx+eyeModel[1].rx)*wide)/R0*R*Math.min(p.sx,p.sy),wide,
     baseFoot:{x:cx,y:cy+.66*R},foot:{x:cx+p.x*R,y:cy+(.66-p.lift)*R},
     map:{anchor:[0,.66],scale:[p.sx,p.sy],rotate:p.rotate,lean:p.lean,x:p.x,lift:p.lift,center:[cx,cy],radius:R},
     _boundary:boundary};
 }
 
 function createPocketNibbi(opts) {
+  const character=Object.hasOwn(B_CHARACTERS,opts.character)?opts.character:null;
+  const look=character?B_LOOK:LOOK;
   const inkCv=opts.ink,fxCv=opts.fx,fx=fxCv.getContext('2d');
   if(!fx)throw new Error('Nibbi needs a 2D effects canvas.');
   const lib=globalThis.NibbiPocketMotion,director=lib.createDirector({seed:pFinite(opts.seed,7)});
@@ -702,11 +1021,11 @@ function createPocketNibbi(opts) {
   let W=1,H=1,DPR=1,dead=false,raf=0,lastWall=null,clock=0,dirty=true,frameCount=0,fps=0;
   let reduced=!!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   let energy=1,texture='flow',mood='idle',fade=1,fadeTarget=1,speech=0;
-  let current={...P_NEUTRAL},geometry=null,mirrorCrop=null,poseSnap=true;
+  let current={...P_NEUTRAL},currentEyes=character?bubbleEyes():LOOK.eyes,geometry=null,mirrorCrop=null,poseSnap=true;
   const pose={x:innerWidth/2,y:innerHeight*.44,r:120,vx:0,vy:0,vr:0};
   const target={x:pose.x,y:pose.y,r:pose.r};
   const expression={lidTop:0,lidBot:0,wide:1,pupil:.88};
-  let gazeX=-.25,gazeY=.1,gazeTX=-.25,gazeTY=.1,lookX=null,lookY=null,ptrX=-1e6,ptrY=-1e6,ptrAt=-1e6;
+  let gazeX=character?0:-.25,gazeY=character?0:.1,gazeTX=gazeX,gazeTY=gazeY,lookX=null,lookY=null,direction=null,ptrX=-1e6,ptrY=-1e6,ptrAt=-1e6;
   let nextWander=2.5,nextBlink=2.6,blinkAt=-100,forcedBlinkAt=-100,seed=(pFinite(opts.seed,7)|0)>>>0;
   const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
   const sm=(a,b,dt,k)=>a+(b-a)*(1-Math.exp(-k*dt));
@@ -731,6 +1050,7 @@ function createPocketNibbi(opts) {
       const shader=(type,src)=>{const sh=gl.createShader(type);resources.shaders.push(sh);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh)||'shader compile');return sh;};
       const prog=gl.createProgram();resources.program=prog;
       const highp=gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT)?.precision>0;
+      if(character&&!highp)throw new Error('High-precision ink grain unavailable; using Canvas2D');
       gl.attachShader(prog,shader(gl.VERTEX_SHADER,VS));gl.attachShader(prog,shader(gl.FRAGMENT_SHADER,highp?FS:FS.replace('precision highp float','precision mediump float')));gl.linkProgram(prog);
       if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(prog)||'shader link');
       gl.useProgram(prog);
@@ -739,7 +1059,7 @@ function createPocketNibbi(opts) {
       const tex=gl.createTexture();resources.texture=tex;gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
       gl.texImage2D(gl.TEXTURE_2D,0,gl.LUMINANCE,GRAIN,GRAIN,0,gl.LUMINANCE,gl.UNSIGNED_BYTE,grainBytes);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-      U={};for(const n of ['dpr','center','R','breath','h','hp','noff','puff','lift','sq','lean','poof','fade','hAmp','flow','wet','tint','tintAmt','grain','pocket','scale','rotation','shift','shape'])U[n]=gl.getUniformLocation(prog,'u_'+n);
+      U={};for(const n of ['dpr','center','R','breath','h','hp','noff','puff','lift','sq','lean','poof','fade','hAmp','flow','wet','tint','tintAmt','grain','pocket','scale','rotation','shift','shape','character'])U[n]=gl.getUniformLocation(prog,'u_'+n);
       gl.uniform1i(U.grain,0);gl.disable(gl.BLEND);gl.disable(gl.DEPTH_TEST);gl.clearColor(0,0,0,0);glOK=true;backendReason=null;
     }catch(error){backendReason=String(error.message||error);releaseGL();}
   }
@@ -773,6 +1093,7 @@ function createPocketNibbi(opts) {
   }
   function uniforms(cx,cy,R,p,tx,alpha=1,color=null) {
     gl.useProgram(resources.program);gl.uniform1f(U.dpr,DPR);gl.uniform2f(U.center,cx,H-cy);gl.uniform1f(U.R,R);
+    gl.uniform1f(U.character,character?B_CHARACTERS[character]:0);
     gl.uniform1f(U.pocket,1);gl.uniform2f(U.scale,p.sx,p.sy);gl.uniform2f(U.rotation,Math.cos(p.rotate),Math.sin(p.rotate));gl.uniform2f(U.shift,p.x,p.lift);gl.uniform3f(U.shape,p.round,p.star,p.drop);
     gl.uniform1f(U.breath,1);gl.uniform4f(U.h,...LOOK.h);gl.uniform4f(U.hp,...LOOK.hp);gl.uniform2f(U.noff,...tx.offset);gl.uniform2f(U.flow,...tx.flow);
     gl.uniform3f(U.puff,1,0,0);gl.uniform1f(U.lift,0);gl.uniform1f(U.sq,1);gl.uniform1f(U.lean,p.lean*R);gl.uniform1f(U.poof,0);gl.uniform1f(U.fade,alpha);gl.uniform1f(U.hAmp,1);gl.uniform1f(U.wet,tx.wet);
@@ -784,6 +1105,18 @@ function createPocketNibbi(opts) {
     gl.enable(gl.SCISSOR_TEST);gl.scissor(left,inkCv.height-bottom,Math.max(0,right-left),Math.max(0,bottom-top));
   }
   function drawBody2D(ctx,p,cx,cy,R,tx,color=null) {
+    if(character) {
+      const tile=bubbleMaterialTile(character,color,R<26),b=tile.bounds;
+      const sw=(1.015-.035*p.round-.045*p.drop)/1.015,sh=(.82+.06*p.round+.12*p.drop)/.82;
+      const map=(x,y)=>pocketMap(x*sw,.66+(y-.66)*sh,p,cx,cy,R);
+      // The visible body occupies the rig's linear crown-bend segment. This
+      // affine basis carries pigment with the exact same foot, squash and lean
+      // as the eyes. Shape cues round/stretch the bubble without another lobe.
+      const o=map(0,0),x=map(1,0),y=map(0,-.5);
+      ctx.save();ctx.transform(x[0]-o[0],x[1]-o[1],(o[0]-y[0])*2,(o[1]-y[1])*2,o[0],o[1]);
+      ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+      ctx.drawImage(tile.canvas,b.left,b.top,b.width,b.height);ctx.restore();return;
+    }
     const map=(x,y)=>pocketMap(x,y,p,cx,cy,R),phase=tx.offset[0]*7.7+tx.offset[1]*4.6;
     const base=pocketContour(p,0,112),ragged=base.map(([x,y],i)=>{const a=i/base.length*P_TAU,d=.011*Math.sin(i*2.13+phase)+.008*Math.sin(i*4.79-phase*.8);return [x+Math.cos(a)*d,y+Math.sin(a)*d];});
     const ink=color?'rgb('+color.map(c=>Math.round(c*105)).join(',')+')':'#131212';
@@ -796,13 +1129,35 @@ function createPocketNibbi(opts) {
       ctx.fillStyle='rgba(193,187,174,'+(.025+.020*(.5+.5*Math.sin(i*1.7+phase)))+')';pocketPath(ctx,pocketRing(x,y,sz*1.6,sz*.6,8).map(([xx,yy])=>map(xx,yy)));ctx.fill();
     }ctx.restore();
   }
-  function drawEyes(ctx,p,cx,cy,R,E,gx,gy,blink) {
+  function drawEyes(ctx,p,cx,cy,R,E,gx,gy,blink,eyes=null) {
     const map=(x,y)=>pocketMap(x,y,p,cx,cy,R),wide=clamp(E.wide*p.wide,.65,1.14);
     const ellipse=(x,y,rx,ry,fill)=>{pocketPath(ctx,pocketRing(x,y,rx,ry,64).map(([xx,yy])=>map(xx,yy)));ctx.fillStyle=fill;ctx.fill();};
-    for(const eye of LOOK.eyes) {
+    for(const eye of character?(eyes||bubbleEyes(gx,gy)):LOOK.eyes) {
       const x=eye.x/R0+p.eyeX,y=eye.y/R0+p.eyeY,rx=eye.rx/R0*wide,ry=eye.ry/R0*wide;
       const pupil=clamp(E.pupil*(1-.09*p.happy),.5,1.12),prx=eye.prx/R0*pupil,pry=eye.pry/R0*pupil;
-      const px=x+clamp((eye.pox+gx*LOOK.gaze[0])/R0,-rx+prx+.009,rx-prx-.009),py=y+clamp((eye.poy+gy*LOOK.gaze[1])/R0,-ry+pry+.009,ry-pry-.009);
+      const px=x+clamp((eye.pox+gx*look.gaze[0])/R0,-rx+prx+.009,rx-prx-.009),py=y+clamp((eye.poy+gy*look.gaze[1])/R0,-ry+pry+.009,ry-pry-.009);
+      if(character) {
+        const closed=E.lidTop>.42,happy=E.lidBot>.20||p.happy>.42;
+        const eyeRing=pocketRing(x,y,rx,ry*(closed?.87:1),80).map(([xx,yy],i)=>{
+          const wobble=.0035*Math.sin(i*2.07)+.0021*Math.sin(i*4.31);
+          return map(xx+(xx-x)*wobble*4,yy+(yy-y)*wobble*4);
+        });
+        pocketPath(ctx,eyeRing);ctx.fillStyle='#faf6ec';ctx.fill();ctx.save();ctx.clip();
+        if(closed||happy) {
+          ctx.beginPath();
+          for(let i=0;i<=24;i++) {
+            const u=i/24,xx=x+(u-.5)*rx*1.36,yy=y+ry*.08+(closed?1:-1)*Math.sin(u*Math.PI)*ry*.39;
+            const v=map(xx,yy);if(i)ctx.lineTo(...v);else ctx.moveTo(...v);
+          }
+          ctx.strokeStyle='#1b1916';ctx.lineWidth=Math.max(1,R*.040);ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();
+        } else {
+          ellipse(px,py,prx,pry,'#171612');
+          ellipse(px+prx*.24,py-pry*.42,prx*.24,pry*.18,'#faf6ec');
+          const top=clamp(E.lidTop+Math.max(blink,p.blink)*(1-E.lidTop),0,1);
+          if(top>.001)ellipse(x,y-ry-2.1*ry+top*2*ry,rx*2.2,ry*2.1,'#1b1917');
+        }
+        ctx.restore();continue;
+      }
       ellipse(x,y,rx,ry,'#fbfaf5');ctx.save();pocketPath(ctx,pocketRing(x,y,rx,ry,64).map(([xx,yy])=>map(xx,yy)));ctx.clip();
       ellipse(px,py,prx,pry,'#131211');ellipse(px-prx*.34,py-pry*.42,prx*.29,pry*.23,'rgba(251,250,245,.96)');ellipse(px+prx*.32,py+pry*.29,prx*.12,prx*.12,'rgba(251,250,245,.58)');
       const top=clamp(E.lidTop+Math.max(blink,p.blink)*(1-E.lidTop),0,1),bot=clamp(E.lidBot+p.happy*.32,0,.55);
@@ -812,7 +1167,13 @@ function createPocketNibbi(opts) {
   }
   function drawSpats(ctx,p,cx,cy,R) {
     ctx.fillStyle='#191817';
-    for(const [x,y,r] of P_SPAT){pocketPath(ctx,pocketRing(x/R0,y/R0,r/R0,r/R0*.88,12).map(([xx,yy])=>pocketMap(xx,yy,p,cx,cy,R)));ctx.fill();}
+    for(const [x,y,r] of character?B_SPAT:P_SPAT){
+      const points=pocketRing(x/R0,y/R0,r/R0,r/R0*.88,character?32:12).map(([xx,yy],i)=>{
+        const d=character?1+.11*Math.sin(i*2.17)+.08*Math.cos(i*3.13):1;
+        return pocketMap(x/R0+(xx-x/R0)*d,y/R0+(yy-y/R0)*d,p,cx,cy,R);
+      });
+      pocketPath(ctx,points);ctx.fill();
+    }
   }
   function drawImpact(ctx,p,cx,cy,R) {
     if(p.impact<=.001)return;
@@ -831,15 +1192,17 @@ function createPocketNibbi(opts) {
     for(const [id,ag] of agents) {
       if(!ag.canvas.isConnected){agents.delete(id);continue;}
       const surf=surface(ag.canvas);if(!surf)continue;
-      const p=pocketPose(ag.director.update(dt,{energy:.55,reduced,compact:true,speech:0,hidden:document.hidden}),.75);
+      let p=pocketPose(ag.director.update(dt,{energy:.55,reduced,compact:true,speech:0,hidden:document.hidden}),.75);
       const tx=texAt(clock,ag.seed),md=MOODS[ag.mood]||MOODS.working,E={...md,wide:Math.min(1.14,md.wide)};
-      const bounds=pocketGeometry(p,cx,cy,R,clamp(E.wide*p.wide,.65,1.14)).bounds;
+      const gx=reduced?md.gazeBias[0]:md.gazeBias[0]+.18*Math.sin(clock*.7+ag.seed),gy=reduced?md.gazeBias[1]:md.gazeBias[1]+.14*Math.cos(clock*.5+ag.seed);
+      const eyes=character?bubbleEyes(gx,gy):LOOK.eyes;
+      if(character)p=bubbleFacePose(p,clamp(E.wide*p.wide,.65,1.14),eyes);
+      const bounds=pocketGeometry(p,cx,cy,R,clamp(E.wide*p.wide,.65,1.14),character,eyes).bounds;
       const k=Math.min(surf.w/sw,surf.h/sh),dx=(surf.w-sw*k)/2,dy=surf.h-sh*k,g=surf.ctx;
       if(glOK){scissor({left:0,top:0,right:sw,bottom:sh});gl.clear(gl.COLOR_BUFFER_BIT);uniforms(cx,cy,R,p,tx,1,ag.color);scissor(bounds);gl.drawArrays(gl.TRIANGLES,0,3);g.drawImage(inkCv,0,0,Math.round(sw*DPR),Math.round(sh*DPR),dx,dy,sw*k,sh*k);}
       g.save();g.translate(dx,dy);g.scale(k,k);
       if(!glOK)drawBody2D(g,p,cx,cy,R,tx,ag.color);
-      const gx=reduced?md.gazeBias[0]:md.gazeBias[0]+.18*Math.sin(clock*.7+ag.seed),gy=reduced?md.gazeBias[1]:md.gazeBias[1]+.14*Math.cos(clock*.5+ag.seed);
-      drawEyes(g,p,cx,cy,R,E,gx,gy,0);g.restore();
+      drawEyes(g,p,cx,cy,R,E,gx,gy,0,eyes);g.restore();
       ag.bounds=bounds;
     }
   }
@@ -870,18 +1233,24 @@ function createPocketNibbi(opts) {
     current=pocketPose(sampled,room.amount);
     if(reduced)current={...P_NEUTRAL,happy:current.happy,wide:current.wide,phase:sampled.phase||'reduced'};
     const pdx=ptrX-pose.x,pdy=ptrY-pose.y,pd=Math.hypot(pdx,pdy);
-    if(reduced){gazeX=md.gazeBias[0];gazeY=md.gazeBias[1];}
-    else {
-      if(lookX!==null){const dx=lookX-pose.x,dy=lookY-pose.y,d=Math.hypot(dx,dy)||1;gazeTX=dx/d*Math.min(1,d/(1.4*pose.r));gazeTY=dy/d*Math.min(1,d/(1.4*pose.r));}
-      else if(clock-ptrAt<6&&pd<2.6*pose.r){gazeTX=clamp(pdx/(1.5*pose.r),-1,1);gazeTY=clamp(pdy/(1.5*pose.r),-1,1);}
+    if(direction){gazeTX=direction.x;gazeTY=direction.y;}
+    else if(lookX!==null){const dx=lookX-pose.x,dy=lookY-pose.y,d=Math.hypot(dx,dy)||1;gazeTX=dx/d*Math.min(1,d/(1.4*pose.r));gazeTY=dy/d*Math.min(1,d/(1.4*pose.r));}
+    else if(!reduced) {
+      if(clock-ptrAt<6&&pd<2.6*pose.r){gazeTX=clamp(pdx/(1.5*pose.r),-1,1);gazeTY=clamp(pdy/(1.5*pose.r),-1,1);}
       else if(clock>=nextWander){gazeTX=(rnd()-.5)*1.4;gazeTY=(rnd()-.5);nextWander=clock+2.5+rnd()*2.5;}
-      gazeX=sm(gazeX,clamp(gazeTX+md.gazeBias[0],-1,1),dt,11);gazeY=sm(gazeY,clamp(gazeTY+md.gazeBias[1],-1,1),dt,11);
+    }
+    const gazeTargetX=direction?direction.x:clamp((reduced&&lookX===null?0:gazeTX)+md.gazeBias[0],-1,1);
+    const gazeTargetY=direction?direction.y:clamp((reduced&&lookX===null?0:gazeTY)+md.gazeBias[1],-1,1);
+    gazeX=reduced?gazeTargetX:sm(gazeX,gazeTargetX,dt,11);gazeY=reduced?gazeTargetY:sm(gazeY,gazeTargetY,dt,11);
+    if(!reduced) {
       if(clock>=nextBlink){blinkAt=clock;nextBlink=clock+(md.blinkGap[0]+rnd()*md.blinkGap[1])/1000;}
     }
     const blinkWave=at=>{const t=clock-at;return t<0||t>=.24?0:t<.11?pSmooth(0,.11,t):1-pSmooth(.11,.24,t);};
     const blink=reduced?0:Math.max(blinkWave(blinkAt),blinkWave(forcedBlinkAt));
     const wide=clamp(expression.wide*current.wide,.65,1.14);
-    geometry=pocketGeometry(current,pose.x,pose.y,pose.r,wide);geometry.room=room;geometry.inBounds=geometry.bounds.left>=0&&geometry.bounds.top>=0&&geometry.bounds.right<=W&&geometry.bounds.bottom<=H;
+    currentEyes=character?bubbleEyes(gazeX,gazeY):LOOK.eyes;
+    if(character)current=bubbleFacePose(current,wide,currentEyes);
+    geometry=pocketGeometry(current,pose.x,pose.y,pose.r,wide,character,currentEyes);geometry.room=room;geometry.inBounds=geometry.bounds.left>=0&&geometry.bounds.top>=0&&geometry.bounds.right<=W&&geometry.bounds.bottom<=H;
     if(glOK&&gl.isContextLost()){backendReason='WebGL context lost';releaseGL();}
     drawCompanions(dt);
     if(glOK){gl.disable(gl.SCISSOR_TEST);gl.clear(gl.COLOR_BUFFER_BIT);uniforms(pose.x,pose.y,pose.r,current,texAt(clock),fade);scissor(geometry.bodyBounds);gl.drawArrays(gl.TRIANGLES,0,3);}
@@ -889,7 +1258,7 @@ function createPocketNibbi(opts) {
     if(!glOK)drawBody2D(fx,current,pose.x,pose.y,pose.r,texAt(clock));
     drawSpats(fx,current,pose.x,pose.y,pose.r);drawImpact(fx,current,pose.x,pose.y,pose.r);
     for(let i=particles.length-1;i>=0;i--){const sp=particles[i],age=clock-sp.at;if(age>=sp.life){particles.splice(i,1);continue;}if(age<0)continue;const life=age/sp.life;fx.globalAlpha=fade*(1-pSmooth(.4,1,life));fx.fillStyle=sp.color?'rgb('+sp.color.map(c=>Math.round(c*255)).join(',')+')':'#191817';fx.beginPath();fx.ellipse(sp.x+sp.vx*age,sp.y+sp.vy*age+sp.gravity*age*age,sp.r*(1-.4*life),sp.r*.8*(1-.4*life),.4,0,P_TAU);fx.fill();}
-    fx.globalAlpha=fade;drawEyes(fx,current,pose.x,pose.y,pose.r,expression,gazeX,gazeY,blink);fx.globalAlpha=1;
+    fx.globalAlpha=fade;drawEyes(fx,current,pose.x,pose.y,pose.r,expression,gazeX,gazeY,blink,currentEyes);fx.globalAlpha=1;
     drawMirrors(room);dirty=false;
   }
   function frame(stamp) {
@@ -917,7 +1286,8 @@ function createPocketNibbi(opts) {
   const api={
     setTarget(t){setTarget(t);},snapTarget(t){setTarget(t,true);},
     setMood(value){if(dead||!MOODS[value]||mood===value)return;mood=value;director.setMood(value);refresh();},mood:()=>mood,
-    lookAt(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;lookX=x;lookY=y;refresh();},lookFree(){lookX=lookY=null;refresh();},
+    lookAt(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;direction=null;lookX=x;lookY=y;refresh();},lookFree(){direction=null;lookX=lookY=null;refresh();},
+    lookDirection(x,y=0){if(dead||!Number.isFinite(x)||!Number.isFinite(y))return false;direction={x:clamp(x,-1,1),y:clamp(y,-1,1)};lookX=lookY=null;refresh();return true;},
     pointer(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;ptrX=x;ptrY=y;ptrAt=clock;},
     pulse(value){if(dead||reduced)return;speech=clamp(Math.max(speech,pFinite(value)),0,1);dirty=true;},
     hop(){return play('hop',{priority:60});},shake(){return play('wiggle',{priority:60});},
@@ -931,9 +1301,10 @@ function createPocketNibbi(opts) {
     addMirror(canvas){if(!canvas?.getContext||dead)return;mirrors.add(canvas);refresh();},removeMirror(canvas){mirrors.delete(canvas);},
     setAgents(list){if(dead)return;const keep=new Set();for(const a of Array.isArray(list)?list:[]){if(!a?.canvas?.getContext)continue;keep.add(a.id);let ag=agents.get(a.id);if(!ag){const value=pFinite(a.seed,rnd());ag={canvas:a.canvas,seed:value,mood:a.mood||'working',color:[0,0,0],director:lib.createDirector({seed:Math.round(value*1e6)})};ag.director.setMood(ag.mood);agents.set(a.id,ag);}else if(a.mood&&ag.mood!==a.mood){ag.mood=a.mood;ag.director.setMood(a.mood);}ag.canvas=a.canvas;ag.color=(Array.isArray(a.color)?a.color:[0,0,0]).slice(0,3).map(v=>clamp(pFinite(v),0,1));while(ag.color.length<3)ag.color.push(0);}for(const id of agents.keys())if(!keep.has(id))agents.delete(id);refresh();},
     removeMirrorByCanvas(canvas){mirrors.delete(canvas);},
-    hitTest(x,y){if(dead||!Number.isFinite(x)||!Number.isFinite(y)||fade<.01)return false;const q=pocketInverse(x,y,current,pose.x,pose.y,pose.r);return pocketDistance(q[0],q[1],current)<.10;},
+    hitTest(x,y){if(dead||!Number.isFinite(x)||!Number.isFinite(y)||fade<.01)return false;const q=pocketInverse(x,y,current,pose.x,pose.y,pose.r);return pocketDistance(q[0],q[1],current,character)<.10;},
     state(){const ds=director.state(),g=geometry?{...geometry}:null;if(g)delete g._boundary;
-      return {x:pose.x,y:pose.y,r:pose.r,mood,fps,gl:glOK,tx:target.x,ty:target.y,tr:target.r,fade,backend:glOK?'webgl':'canvas2d',fallbackReason:backendReason,dpr:DPR,destroyed:dead,
+      return {x:pose.x,y:pose.y,r:pose.r,mood,fps,gl:glOK,tx:target.x,ty:target.y,tr:target.r,fade,character,backend:glOK?'webgl':'canvas2d',fallbackReason:backendReason,dpr:DPR,destroyed:dead,
+        gaze:{mode:direction?'direction':lookX!==null?'point':'free',direction:direction?{...direction}:null,current:{x:gazeX,y:gazeY},point:lookX!==null?{x:lookX,y:lookY}:null},
         motion:{...ds,enabled:true,pose:{...current},energy,texture,reduced},bounds:g?{...g.bounds}:null,geometry:g,eyeCenters:g?.eyeCenters||[],particleCount:particles.length,
         mirrorCrop:mirrorCrop?{...mirrorCrop}:null,mirrors:mirrors.size,companions:agents.size,clock,manual,frames:frameCount};},
     destroy(){if(dead)return;dead=true;if(raf)cancelAnimationFrame(raf);raf=0;removeEventListener('resize',resize);document.removeEventListener('visibilitychange',visibility);inkCv.removeEventListener('webglcontextlost',lost);inkCv.removeEventListener('webglcontextrestored',restored);particles.length=0;mirrors.clear();agents.clear();if(glOK){gl.disable(gl.SCISSOR_TEST);gl.clear(gl.COLOR_BUFFER_BIT);}releaseGL(true);fx.setTransform(1,0,0,1,0,0);fx.clearRect(0,0,fxCv.width,fxCv.height);},
