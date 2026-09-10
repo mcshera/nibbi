@@ -17,6 +17,8 @@ npm run build
 CI=1 npm run verify
 ```
 
+Nibbi's confined Build worker runs `npm run typecheck && npm run build` locally. The full test suite includes security fixtures that intentionally create protected files and start their own sandbox, so run that suite from a trusted development checkout or GitHub CI. The required GitHub job still runs the full commands above before merge.
+
 GitHub's `verify` workflow reports the `local-platform` job for the current pull request commit. A green result for an older commit does not verify a later revision. The workflow runs for pushes, pull requests and merge groups.
 
 ## Merge and deliver
@@ -24,3 +26,7 @@ GitHub's `verify` workflow reports the `local-platform` job for the current pull
 Merge the reviewed Build pull request into `v2`. Promotion from `v2` to `main` is a separate reviewed pull request covering the complete integration range.
 
 A GitHub merge is distinct from deploying or installing the application. Retain branches and worktrees until their uncommitted and unpublished work has been inspected.
+
+## Bring existing edits into a Build
+
+Select the files to adopt, including any intended untracked files, and inspect that selection before creating the Build. Nibbi copies the selected changes into the Build worktree; the original checkout remains intact. If the source selection changes, review it again before proceeding. After a remote merge, update a local integration checkout only when it is clean and can safely fast-forward.
