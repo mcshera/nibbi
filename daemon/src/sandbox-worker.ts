@@ -21,6 +21,22 @@ try {
   const args = parts as string[], index = args.indexOf('sandbox-exec');
   if (args[0] !== 'env' || index < 1 || args[index + 1] !== '-p' || !args[index + 2]?.includes('(deny default') || args.slice(1, index).some(arg => !/^[a-zA-Z_][a-zA-Z0-9_]*=/.test(arg))) throw new Error('Unsupported sandbox wrapper; upgrade requires policy review');
   const tmp = args.findIndex(arg => arg.startsWith('TMPDIR=')); if (tmp < 1 || !process.env.TMPDIR) throw new Error('Sandbox scratch directory is required'); args[tmp] = 'TMPDIR=' + process.env.TMPDIR;
+  // SRT protects denied read regions against rename/unlink as well as reads.
+  // Its broad /Users and state-directory movement rules also cover explicitly
+  // writable worktrees/scratch, preventing npm from replacing its own files.
+  // Exclude only those writable subtrees from the READ movement guards. Keep
+  // ancestor guards, credential globs and every WRITE denial unchanged.
+  const profile = args[index + 2], readStart = profile.indexOf('; File read\n'), writeStart = profile.indexOf('; File write\n');
+  if (readStart < 0 || writeStart <= readStart) throw new Error('Unsupported sandbox filesystem profile; upgrade requires policy review');
+  const writable = settings.filesystem.allowWrite;
+  if (writable.some(path => !path.startsWith('/') || path === '/' || /[*?\[\]\r\n]/.test(path))) throw new Error('Sandbox write roots must be explicit absolute directories');
+  const readRules = profile.slice(readStart, writeStart).replace(/\(deny file-write-unlink\s+\(subpath ("(?:\\.|[^"\\])*")\)\s+(\(with message "(?:\\.|[^"\\])*"\))\)/g, (rule, quotedPath: string, message: string) => {
+    const deniedPath = JSON.parse(quotedPath) as string;
+    const exceptions = writable.filter(path => path === deniedPath || path.startsWith(deniedPath.replace(/\/$/, '') + '/'));
+    if (!exceptions.length) return rule;
+    return `(deny file-write-unlink\n  (require-all (subpath ${quotedPath})${exceptions.map(path => ` (require-not (subpath ${JSON.stringify(path)}))`).join('')})\n  ${message})`;
+  });
+  args[index + 2] = profile.slice(0, readStart) + readRules + profile.slice(writeStart);
   // SRT allowRead takes precedence over denyRead. Append the credential rule last
   // to the SAME profile (macOS does not support nesting sandbox_apply calls).
   args[index + 2] += '\n(deny file-read* file-write* (regex "(^|/)([.]env([.][^/]+)?|[.]ssh|[.]aws|[.]gnupg|[.]npmrc|[.]netrc)(/|$)"))';
@@ -35,4 +51,15 @@ try {
   try { process.exitCode = await new Promise<number>((resolve, reject) => { child.once('error', reject); child.once('close', code => resolve(code ?? 1)); }); }
   finally { process.off('SIGTERM', stop); process.off('SIGINT', stop); }
 } catch (error) { console.error((error as Error).message); process.exitCode = 1; }
-finally { await SandboxManager.reset(); }
+finally {
+  // SRT's unreferenced proxy servers can leave close callbacks unsettled after
+  // HTTPS downloads. This worker owns one finished command: give cleanup a
+  // bounded grace period, then close its proxy handles by exiting the worker.
+  // Keep the child's actual status, including failures and cancellation.
+  const cleanupDeadline = setTimeout(() => {
+    console.warn('Sandbox proxy cleanup exceeded its grace period; closing command worker');
+    process.exit(typeof process.exitCode === 'number' ? process.exitCode : 1);
+  }, 1000);
+  try { await SandboxManager.reset(); }
+  finally { clearTimeout(cleanupDeadline); }
+}

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, openSync, closeSync } from 'node:fs';
 import { join, dirname, basename, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -27,6 +27,9 @@ import { execute, git } from './processes.js';
 import { sandboxCommand } from './sandbox.js';
 import { lanAddress } from './lan.js';
 import { listProposals, inspectProposal } from './proposals.js';
+import { githubProjectView, githubBuildView, githubBuildSummary, githubPrDraft } from './github-builds.js';
+import { localChangesView } from './build-attempts.js';
+import { projectSection, projectSummaries, projectCommand } from './project-workspace.js';
 
 const notify = (text: string): Promise<void> => notifyOwner(null, text);
 const aliases: Record<string, string> = { '/api/fix': 'run.dispatch', '/api/fix-queue': 'run.queue', '/api/fix-unqueue': 'run.stop', '/api/fix-requeue': 'run.retry', '/api/fixer-stop': 'run.stop', '/api/fixer-discard': 'run.discard', '/api/fixer-merge': 'run.merge', '/api/fixer-steer': 'run.steer', '/api/group-merge': 'group.merge', '/api/group-stop': 'group.stop', '/api/agents-stop-all': 'runs.stop', '/api/auto': 'auto.set', '/nibbi/goal': 'goal.set' };
@@ -34,8 +37,14 @@ const ownerOnly = (req: IncomingMessage): void => { if (!loopback(req)) throw ne
 export async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const path = url.pathname, q = url.searchParams, method = req.method;
   if (!path.startsWith('/api/') && !path.startsWith('/nibbi/')) return false;
+  if (path === '/api/project-command') {
+    if (method !== 'POST') throw new HttpError(405, 'Use POST');
+    const input = await jsonBody(req);
+    const result = await projectCommand({ ...input, idempotencyKey: req.headers['idempotency-key'] ?? input.idempotencyKey ?? randomUUID() });
+    json(res, result.ok ? 200 : ['REVISION_CONFLICT', 'CONFLICT', 'IN_PROGRESS'].includes(result.error.code) ? 409 : 400, result); return true;
+  }
   if (path === '/api/commands' && method === 'POST') {
-    const input = await jsonBody(req); if (/^(skills\.(import|review)|project\.(commands|settings|register|create|scaffold)|schedule\.|proposal\.|vault\.)/.test(String(input.name))) ownerOnly(req);
+    const input = await jsonBody(req); if (input.name === 'github.connect' || input.name === 'github.prepare' && (input.args as Record<string, unknown> | undefined)?.operation === 'github.connect') ownerOnly(req); if (/^(skills\.(import|review)|project\.(commands|settings|register|create|scaffold)|schedule\.|proposal\.|vault\.)/.test(String(input.name))) ownerOnly(req);
     const result = await executeCommand(input, notify); json(res, result.ok ? 200 : result.error.code === 'in_progress' ? 409 : 400, result); return true;
   }
   if (method === 'POST' && aliases[path]) {
@@ -48,7 +57,8 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     json(res, result.ok ? 200 : 400, result.ok ? { ...(result.data as object), ok: true } : { error: result.error.message }); return true;
   }
   if (path === '/api/send' && method === 'POST') {
-    const input = z.object({ message: z.string().max(100_000).default(''), project: z.string().optional(), stream: z.boolean().default(false), images: z.array(z.object({ media_type: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), data: z.string().max(8_000_000) })).max(4).optional() }).parse(await jsonBody(req));
+    const input = z.object({ message: z.string().max(100_000).default(''), project: z.string().optional(), stream: z.boolean().default(false), historySource: z.literal('test').optional(), images: z.array(z.object({ media_type: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), data: z.string().max(8_000_000) })).max(4).optional() }).parse(await jsonBody(req));
+    if (input.historySource !== undefined) ownerOnly(req);
     if (!input.message.trim() && !input.images?.length) throw new HttpError(400, 'Empty message');
     const key = String(req.headers['idempotency-key'] ?? randomUUID()); const claim = runtime().claimCommand(key, input);
     if (claim.state !== 'new') {
@@ -58,7 +68,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     const send = input.stream ? sse(res) : undefined; const ping = send ? setInterval(() => { if (!res.destroyed) res.write(': ping\n\n'); }, 15_000) : undefined;
     try {
       const cmd = await handleCommand(input.message, notify, { project: input.project, idempotencyKey: key + ':slash' });
-      const result = cmd.handled ? { text: cmd.reply ?? 'ok', isError: cmd.ok === false } : await runTurn(input.message || '(image)', undefined, 'app', undefined, text => send?.('delta', { t: text }), name => send?.('tool', { name }), input.images, true, { project: input.project, onStart: runId => send?.('start', { runId }) });
+      const result = cmd.handled ? { text: cmd.reply ?? 'ok', isError: cmd.ok === false } : await runTurn(input.message || '(image)', undefined, 'app', undefined, text => send?.('delta', { t: text }), name => send?.('tool', { name }), input.images, true, { project: input.project, historySource: input.historySource, onStart: runId => send?.('start', { runId }) });
       runtime().finishCommand(key, result);
       if (send) { send('done', result); res.end(); } else json(res, result.isError ? 409 : 200, result);
     } catch (error) {
@@ -87,8 +97,12 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     await execute(config.stateDir, 'open', [target], { timeoutMs: 5000 }); json(res, 200, { ok: true }); return true;
   }
   if (path === '/api/transcribe' && method === 'POST') {
-    const audio = await body(req, 20_000_000); const directory = join(config.stateDir, 'tmp'); mkdirSync(directory, { recursive: true }); const file = join(directory, randomUUID() + '.webm'); writeFileSync(file, audio);
-    const heard = (await execute(directory, join(config.stateDir, 'bin', 'transcribe'), [file, 'fast'], { timeoutMs: 120_000 })).stdout.trim(); json(res, 200, { heard }); return true;
+    const audio = await body(req, 20_000_000); const directory = join(config.stateDir, 'tmp'); mkdirSync(directory, { recursive: true, mode: 0o700 }); const file = join(directory, randomUUID() + '.webm');
+    const fd = openSync(file, 'wx', 0o600);
+    try {
+      try { writeFileSync(fd, audio); } finally { closeSync(fd); }
+      const heard = (await execute(directory, join(config.stateDir, 'bin', 'transcribe'), [file, 'fast'], { timeoutMs: 120_000 })).stdout.trim(); json(res, 200, { heard }); return true;
+    } finally { rmSync(file, { force: true }); }
   }
   if (path === '/nibbi/run' && method === 'POST') {
     ownerOnly(req); const a = z.object({ project: z.string(), script: z.enum(['test', 'build', 'deploy']) }).parse(await jsonBody(req)); const project = games()[a.project]; if (!project) throw new HttpError(404, 'Unknown project');
@@ -111,14 +125,20 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
   }
   if (method !== 'GET') throw new HttpError(405, 'Unsupported method');
   switch (path) {
+    case '/api/github/pr-draft': json(res, 200, await githubPrDraft(q.get('project') ?? '', q.get('buildId') ?? undefined)); break;
+    case '/api/github/project': json(res, 200, await githubProjectView(q.get('project') ?? '')); break;
+    case '/api/github/build': json(res, 200, githubBuildView(q.get('id') ?? '')); break;
+    case '/api/github/changes': json(res, 200, await localChangesView(q.get('project') ?? '', { buildId: q.get('buildId') ?? undefined })); break;
+    case '/api/project-section': json(res, 200, projectSection(q.get('project') ?? '', q.get('section') ?? '')); break;
+    case '/api/project-summaries': json(res, 200, projectSummaries((q.get('projects') ?? '').split(',').filter(Boolean))); break;
     case '/api/snapshot': json(res, 200, snapshot()); break;
     case '/api/status': json(res, 200, status()); break;
     case '/nibbi/health': json(res, 200, { app: 'nibbi', version: '0.8.0', protocolVersion: 1, brain: true, status: status(), tls: process.env.NIBBI_REMOTE === '1', remote: process.env.NIBBI_REMOTE === '1', setup: `https://${lanAddress()}:${config.port + 1}/`, gateway: 'local backend' }); break;
     case '/api/projects': json(res, 200, await projectsView()); break;
-    case '/api/fixers': json(res, 200, listFixers().reverse()); break;
+    case '/api/fixers': json(res, 200, listFixers().reverse().map(run => ({ ...run, github: githubBuildSummary(run.id) })));  break;
     case '/api/fixer-diff': json(res, 200, await getFixerDiff(q.get('id') ?? '')); break;
-    case '/api/fixer-log': { const id = q.get('id') ?? ''; json(res, 200, { fixer: listFixers().find(run => run.id === id), entries: runEvents(id) }); break; }
-    case '/api/fixer-tail': json(res, 200, { lines: runEvents(q.get('id') ?? '').slice(-5).map(event => event.text) }); break;
+    case '/api/fixer-log': { const id = q.get('id') ?? ''; json(res, 200, { fixer: (() => { const run=listFixers().find(run=>run.id===id);return run ? {...run,github:githubBuildSummary(run.id)} : undefined; })(), entries: runEvents(id, q.get('attemptId') ?? undefined) }); break; }
+    case '/api/fixer-tail': json(res, 200, { lines: runEvents(q.get('id') ?? '', q.get('attemptId') ?? undefined).slice(-5).map(event => event.text) }); break;
     case '/api/auto': { const all = autoView(); json(res, 200, q.has('project') ? all[q.get('project')!] : all); break; }
     case '/nibbi/goal': json(res, 200, goals()); break;
     case '/api/schedules': json(res, 200, schedules()); break;

@@ -1,3 +1,4 @@
+import { startGithubCoordinator, stopGithubCoordinator } from './github-builds.js';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { readFileSync, existsSync, mkdirSync, openSync, closeSync, writeSync, unlinkSync, statSync } from 'node:fs';
@@ -72,11 +73,12 @@ export async function startBackend(options: { open?: boolean } = {}): Promise<{ 
     if (process.env.NIBBI_REMOTE === '1') await listen(createHttpsServer(await tlsMaterial(), handler(true)), config.port + 1, '0.0.0.0');
     const notify = (text: string): Promise<void> => notifyOwner(null, text); setDispatchNotify(notify);
     if (process.env.NIBBI_SCHEDULER !== '0') startScheduler(notify);
+    if (process.env.NIBBI_GITHUB_POLL !== '0') startGithubCoordinator();
     const close = async (): Promise<void> => {
       if (closing) return; closing = true;
       process.off('SIGTERM', onSignal); process.off('SIGINT', onSignal);
       const closedServers = servers.map(server => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }));
-      await Promise.all([stopPreviews(), stopScheduler(), shutdownSessions(), shutdownFixers(), stopAuth()]);
+      await Promise.all([stopGithubCoordinator(), stopPreviews(), stopScheduler(), shutdownSessions(), shutdownFixers(), stopAuth()]);
       await stopProcesses(); await closeToolService(); await Promise.all(closedServers); closeRuntime(); release();
     };
     const onSignal = (): void => { void close().catch(error => { console.error('[nibbi] shutdown:', (error as Error).message); process.exitCode = 1; }); };

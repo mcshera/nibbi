@@ -1,7 +1,96 @@
-.platform-panel{width:min(760px,calc(100vw - 28px));max-height:88dvh;box-sizing:border-box;border:1px solid #30312f30;border-radius:20px;background:#f5f2ec;color:#30312f;padding:22px;box-shadow:0 20px 90px #25252140;font:14px/1.5 system-ui,sans-serif}
-.platform-panel::backdrop{background:#2226;backdrop-filter:blur(5px)}
-.platform-panel header{display:flex;align-items:center;justify-content:space-between;gap:16px}.platform-panel h2{margin:0;font-size:23px}.platform-panel h3{font-size:16px}
-.platform-panel nav{display:flex;gap:6px;flex-wrap:wrap;margin:18px 0}.platform-panel button,.platform-panel select,.platform-panel input{font:inherit;color:inherit;border:1px solid #30312f40;border-radius:8px;background:#fff6;padding:8px 11px;max-width:100%;box-sizing:border-box}
-.platform-panel button{cursor:pointer;margin:3px}.platform-panel button[aria-current=page]{background:#30312f;color:#f5f2ec}.platform-panel button:disabled{opacity:.5;cursor:wait}.platform-panel fieldset{border:1px solid #30312f30;border-radius:12px;padding:14px;margin:12px 0}.platform-panel legend{font-weight:600}.platform-panel label{display:block;margin:10px 0}.platform-panel label input:not([type=checkbox]){display:block;width:100%;margin-top:5px}.platform-panel input[type=checkbox]{margin-right:8px}.platform-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#fff7;padding:14px;border-radius:10px;max-height:45vh;overflow:auto}.platform-panel small{display:block;color:#575850}.platform-panel article{border-bottom:1px solid #30312f20;padding:10px 0}.platform-panel .panel-message{color:#9a442f}.platform-panel a{color:inherit;display:inline-block;margin:8px 0}.platform-panel section>button{display:block}
-@media(max-width:520px){.platform-panel{padding:14px;border-radius:14px}.platform-panel nav{gap:2px}.platform-panel nav button{padding:7px 9px}}
-.platform-panel textarea{display:block;width:100%;box-sizing:border-box;font:inherit;resize:vertical;border:1px solid #30312f40;border-radius:8px;padding:10px;background:#fff6;color:inherit}
+/* Advanced forms share the margin cards' paper, ink and pill controls. */
+.platform-panel {
+  width: min(760px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+  max-height: min(820px, calc(100dvh - 40px));
+  box-sizing: border-box;
+  padding: 24px;
+  border: 1px solid var(--line, rgba(21, 20, 19, .10));
+  border-radius: 18px;
+  background: #faf8f3;
+  color: var(--ink-2, #3a3835);
+  box-shadow: 0 20px 60px -24px rgba(21, 20, 19, .30), 0 1px 0 rgba(255, 255, 255, .8) inset;
+  font: 14px/1.5 Geist, ui-sans-serif, -apple-system, system-ui, sans-serif;
+  overflow: auto;
+  overscroll-behavior: contain;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.platform-panel[open] { display: flex; flex-direction: column; }
+.platform-panel::backdrop { background: rgba(21, 20, 19, .13); backdrop-filter: blur(3px); }
+.platform-panel header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; }
+.platform-panel h2 { margin: 0; color: var(--ink, #151413); font-size: 21px; font-weight: 600; letter-spacing: -.035em; }
+.platform-panel h3 { margin: 0 0 8px; color: var(--ink, #151413); font-size: 16px; font-weight: 600; }
+.platform-panel h4 { margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
+.platform-panel p { margin: 0 0 14px; overflow-wrap: anywhere; }
+.platform-panel nav {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 20px 0 18px;
+  padding: 4px;
+  border-radius: 20px;
+  background: rgba(21, 20, 19, .045);
+}
+.platform-panel button, .platform-panel select, .platform-panel input, .platform-panel textarea {
+  box-sizing: border-box;
+  max-width: 100%;
+  border: 1px solid rgba(21, 20, 19, .16);
+  background: rgba(255, 255, 255, .46);
+  color: inherit;
+  font: inherit;
+  padding: 8px 12px;
+}
+.platform-panel button {
+  min-height: 36px;
+  margin: 3px 6px 3px 0;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.platform-panel button:hover:not(:disabled) { background: rgba(21, 20, 19, .055); border-color: rgba(21, 20, 19, .28); }
+.platform-panel button:active:not(:disabled) { background: rgba(21, 20, 19, .10); }
+/* Switch tab ink and fill together; a fading fill leaves the new label unreadable. */
+.platform-panel nav button { flex: 1 0 auto; margin: 0; border-color: transparent; background: transparent; font-size: 13px; transition: none; }
+.platform-panel nav button[aria-current=page],
+.platform-panel nav button[aria-current=page]:hover:not(:disabled),
+.platform-panel nav button[aria-current=page]:active:not(:disabled) { background: var(--ink, #151413); color: #faf8f3; border-color: transparent; }
+.platform-panel .platform-close { flex: none; margin: 0; font-size: 13px; }
+.platform-panel button:disabled { opacity: .5; cursor: not-allowed; }
+.platform-panel :is(button, select, input, textarea, a):focus-visible { outline: 2px solid var(--ink, #151413); outline-offset: 3px; }
+.platform-panel .platform-content { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(21, 20, 19, .20) transparent; padding: 3px 5px 4px; margin: 0 -5px; }
+.platform-panel fieldset { min-width: 0; border: 1px solid var(--line, rgba(21, 20, 19, .10)); border-radius: 14px; background: rgba(255, 255, 255, .24); padding: 14px 16px 16px; margin: 8px 0 18px; }
+.platform-panel legend { padding: 0 6px; color: var(--ink, #151413); font-weight: 600; }
+.platform-panel label { display: block; margin: 12px 0; font-size: 13px; }
+.platform-panel input:not([type=checkbox]), .platform-panel textarea { display: block; width: 100%; margin-top: 6px; border-radius: 10px; }
+.platform-panel select { border-radius: 10px; min-height: 38px; }
+.platform-panel input[type=checkbox] { accent-color: var(--ink, #151413); margin: 0 8px 0 0; vertical-align: middle; }
+.platform-panel textarea { resize: vertical; min-height: 100px; }
+.platform-panel .platform-project { margin: 0 0 14px; color: var(--ink-3, #6f6b65); }
+.platform-panel .platform-project select { display: block; width: 100%; margin-top: 6px; color: var(--ink-2, #3a3835); }
+.platform-panel .platform-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.platform-panel .platform-roles > :only-child, .platform-panel .platform-commands { grid-column: 1 / -1; }
+.platform-panel .platform-connections { border-top: 1px solid var(--line, rgba(21, 20, 19, .10)); padding-top: 14px; margin-bottom: 12px; }
+.platform-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; background: rgba(21, 20, 19, .035); padding: 14px; border: 1px solid var(--line, rgba(21, 20, 19, .10)); border-radius: 12px; max-height: 45vh; overflow: auto; font: 12px/1.65 'Geist Mono', ui-monospace, monospace; }
+.platform-panel small { display: block; color: var(--ink-3, #6f6b65); font-size: 12px; overflow-wrap: anywhere; }
+.platform-panel article { border-bottom: 1px solid var(--line, rgba(21, 20, 19, .10)); padding: 14px 0; overflow-wrap: anywhere; }
+.platform-panel .panel-message { flex: none; max-height: 25dvh; overflow: auto; margin: 0 0 14px; padding: 10px 12px; border: 1px solid rgba(122, 58, 46, .18); border-radius: 12px; color: #7a3a2e; background: rgba(122, 58, 46, .04); }
+.platform-panel .panel-message:empty { margin: 0; padding: 0; border: 0; }
+.platform-panel a { color: inherit; display: inline-block; margin: 8px 0; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.platform-panel section > button { display: block; text-align: left; }
+@media (max-width: 600px) {
+  .platform-panel { padding: 18px; }
+  .platform-panel .platform-roles { grid-template-columns: minmax(0, 1fr); }
+  .platform-panel nav { flex-wrap: nowrap; overflow-x: auto; border-radius: 999px; scrollbar-width: thin; margin: 16px 0; }
+  .platform-panel nav button { flex: none; }
+}
+@media (max-width: 520px) {
+  .platform-panel { width: calc(100vw - 20px); max-width: calc(100vw - 20px); max-height: calc(100dvh - 20px); padding: 14px; }
+  .platform-panel fieldset { padding: 12px; }
+  .platform-panel button, .platform-panel select { min-height: 40px; }
+  .platform-panel input:not([type=checkbox]), .platform-panel textarea { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .platform-panel button { transition: none; } }

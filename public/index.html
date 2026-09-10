@@ -19,26 +19,8 @@
   <canvas id="ink" aria-hidden="true"></canvas>
   <canvas id="fx" aria-hidden="true"></canvas>
 
-  <div id="project" class="project" hidden>
-    <button class="plabel" type="button" aria-haspopup="menu" aria-label="active project"><span class="pname"></span><span class="pdot" aria-hidden="true"></span></button>
-    <div class="pmenu"></div>
-  </div>
-
-  <div id="status" class="status" title="connection">
-    <span class="dot"></span>
-    <span class="label"></span>
-    <div class="menu">
-      <div class="row" id="st-brain">brain</div>
-      <div class="row" id="st-session">session</div>
-      <div class="row" id="st-model">model</div>
-      <button class="row act" id="st-project" type="button">project</button>
-      <button class="row act" id="st-platform" type="button">providers, skills & settings</button>
-      <button class="row act" id="st-motion" type="button" aria-pressed="false">motion: playful</button>
-      <button class="row act" id="st-voice" type="button">voice: off</button>
-      <button class="row act" id="st-demo" type="button">demo brain</button>
-      <button class="row act" id="st-clear" type="button">tidy the table (esc)</button>
-    </div>
-  </div>
+  <nav id="project-rail" aria-label="Projects"></nav>
+  <nav id="settings-rail" aria-label="Preferences"></nav>
 
   <section id="feed" class="feed" aria-label="conversation"></section>
   <div id="sr" class="sr" aria-live="polite"></div>
@@ -46,15 +28,16 @@
   <div id="chips" class="chips" aria-label="suggestions"></div>
 
   <form id="pill" class="pill" autocomplete="off">
-    <button id="mic" class="ico mic" type="button" aria-label="talk to nibbi (⌥ space)" title="talk (⌥ space)">
-      <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5"/></svg>
-    </button>
     <div id="attach" class="attach" hidden></div>
     <textarea id="ask" rows="1" placeholder="Ask nibbi to build something..." aria-label="message nibbi" spellcheck="false"></textarea>
+    <button id="mic" class="ico mic" type="button" aria-label="Hey Nibbi microphone" aria-pressed="false" aria-describedby="listen" aria-keyshortcuts="Alt+Space" title="Hey Nibbi is off — turn microphone on (⌥ Space)">
+      <span class="mic-label">Hey Nibbi</span>
+      <span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>
+    </button>
     <button id="send" class="send" type="submit" aria-label="send">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 14.5V3.5M9 3.5L4 8.5M9 3.5L14 8.5" stroke="#f5f2ea" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <div id="listen" class="listen" hidden><span class="bars"><i></i><i></i><i></i><i></i><i></i></span><span class="heard">listening…</span></div>
+    <div id="listen" class="listen" role="status" aria-live="polite" hidden><span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="heard">listening…</span></div>
   </form>
 
   <div id="agents" class="agents" aria-label="agents at work" hidden></div>

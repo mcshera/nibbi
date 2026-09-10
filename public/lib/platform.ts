@@ -4,14 +4,14 @@ import type { ProjectSettings, SkillDescriptor, SkillRef } from '@nibbi/contract
 const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => { const element = document.createElement(tag); if (text) element.textContent = text; return element; };
 export function platformPanel(activeProject: () => string | undefined, changed: () => void) {
   const api = createClient(activeProject), dialog = node('dialog'); dialog.className = 'platform-panel'; dialog.setAttribute('aria-label', 'Nibbi settings'); document.body.append(dialog);
-  const header = node('header'), title = node('h2', 'Your Nibbi'), close = node('button', 'Close'); close.type = 'button'; close.onclick = () => dialog.close(); header.append(title, close);
-  const tabs = node('nav'); dialog.append(header, tabs);
+  const header = node('header'), title = node('h2', 'Your Nibbi'), close = node('button', 'Close'); close.type = 'button'; close.className = 'platform-close'; close.onclick = () => dialog.close(); header.append(title, close);
+  const tabs = node('nav'); tabs.setAttribute('aria-label', 'Settings sections'); dialog.append(header, tabs);
   let view: HTMLElement[] = [];
   const input = (label: string, value = ''): { label: HTMLLabelElement; input: HTMLInputElement } => { const l = node('label', label), field = node('input'); field.value = value; l.append(field); return { label: l, input: field }; };
   const show = async (tab: string): Promise<void> => {
     // Each visit owns its nodes: delayed reads and saves from an old tab can
     // finish without overwriting the view the owner has since selected.
-    const content = node('section'), message = node('p'); message.className = 'panel-message'; message.setAttribute('role', 'status');
+    const content = node('section'), message = node('p'); content.className = 'platform-content'; content.setAttribute('aria-label', tab); message.className = 'panel-message'; message.setAttribute('role', 'status');
     for (const element of view) element.remove(); view = [message, content]; dialog.append(...view);
     const refresh = async (): Promise<void> => { if (dialog.open && content.isConnected) await show(tab); };
     const action = (label: string, run: () => Promise<unknown>): HTMLButtonElement => {
@@ -22,7 +22,7 @@ export function platformPanel(activeProject: () => string | undefined, changed: 
       if (tab === 'Providers') {
         const projects = await api.get<Array<{ name: string; settings?: ProjectSettings; install?: string; check?: string; play?: string }>>('/api/projects'); const select = node('select'); select.setAttribute('aria-label', 'Project settings');
         for (const project of projects) { const option = node('option', project.name); option.value = project.name; select.append(option); } select.value = activeProject() ?? projects[0]?.name ?? 'vault';
-        content.replaceChildren(select); const roles = node('div'); content.append(roles);
+        const projectLabel = node('label', 'Project settings'); projectLabel.className = 'platform-project'; projectLabel.append(select); content.replaceChildren(projectLabel); const roles = node('div'); roles.className = 'platform-roles'; content.append(roles);
         const render = (): void => {
           roles.replaceChildren(); const project = projects.find(project => project.name === select.value);
           for (const role of (select.value === 'vault' ? ['lead'] : ['lead', 'fixer']) as Array<'lead' | 'fixer'>) {
@@ -33,10 +33,10 @@ export function platformPanel(activeProject: () => string | undefined, changed: 
           }
           if (project && project.name !== 'vault') {
             const group = node('fieldset'), install = input('Install command', project.install ?? 'true'), check = input('Verification command', project.check ?? 'true'), play = input('Preview command or URL', project.play ?? '');
-            group.append(node('legend', 'Project commands'), node('p', 'Commands execute in the OS sandbox. A real passing check is required before any merge.'), install.label, check.label, play.label, action('Save project commands', async () => { await api.command('project.commands', { install: install.input.value, check: check.input.value, play: play.input.value || undefined }, select.value); message.textContent = 'Commands saved. Existing verification is not retroactively trusted.'; })); roles.append(group);
+            group.className = 'platform-commands'; group.append(node('legend', 'Project commands'), node('p', 'Commands execute in the OS sandbox. A real passing check is required before any merge.'), install.label, check.label, play.label, action('Save project commands', async () => { await api.command('project.commands', { install: install.input.value, check: check.input.value, play: play.input.value || undefined }, select.value); message.textContent = 'Commands saved. Existing verification is not retroactively trusted.'; })); roles.append(group);
           }
         }; select.onchange = render; render();
-        const auth = node('div'), connection = node('p'); connection.setAttribute('role', 'status');
+        const auth = node('div'), connection = node('p'); auth.className = 'platform-connections'; connection.setAttribute('role', 'status');
         content.append(auth, connection, node('p', 'Claude uses your Claude Code sign-in on this Mac. No API key is required. Sign-in opens the official Claude Code flow in Terminal and your browser; your credentials stay with Claude Code. Plan limits apply.'));
         auth.append(action('Check connections', async () => { const status = await api.get('/api/providers'); connection.textContent = 'Claude: ' + (status.claude.connected ? (status.claude.mode === 'api-key' ? 'explicit API-key mode' : 'signed in' + (status.claude.subscription ? ' · ' + status.claude.subscription : '')) : status.claude.error || 'sign in required') + ' · Codex: ' + (status.codex.connected ? 'connected' : status.codex.error || 'sign in required'); }), action('Sign in with Claude', async () => { const result = await api.post('/api/providers/claude/login'); connection.textContent = result.message; }), action('Connect Codex', async () => { const result = await api.post('/api/providers/login'); const link = node('a', 'Continue Codex sign-in'); link.href = result.authUrl; link.target = '_blank'; link.rel = 'noopener noreferrer'; auth.append(link); }));
       } else if (tab === 'Skills') {

@@ -34,6 +34,11 @@ export function previewStart(id: string): string {
   const preview = start(id, run.worktree, command(run.worktree)); return preview.url ?? 'Preview starting; query preview status shortly';
 }
 export function previewStop(id: string): string { stop(id); return 'Preview stopping'; }
+/** Read-only affordances use the same command detection and ownership as preview execution. */
+export function allowedPreviewActions(id: string, worktree: string): string[] {
+  if (owned.has(id)) return ['preview.stop'];
+  return existsSync(worktree) && command(worktree) ? ['preview.start'] : [];
+}
 export function previewStatus(id: string): Preview | { running: false } { const preview = runtime().get<Preview>('previews', id); return preview ? { ...preview, running: owned.has(id), starting: owned.has(id) && preview.starting, url: owned.has(id) ? preview.url : undefined } : { running: false }; }
 export function playStart(project: string): { url?: string; starting?: boolean; error?: string } {
   const cfg = games()[project]; if (!cfg) return { error: 'Unknown project' };

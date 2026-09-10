@@ -1,4 +1,16 @@
 import './platform.css';
+import './margins.css';
+import './voice.css';
+import './project-workspace.css';
+import './project-composer.css';
+import { createWakeVoice } from './lib/wake-voice.js';
+import { createMicCapture } from './lib/mic-capture.js';
+import { createVoicePlayer } from './lib/voice-player.js';
+import { installMarginUI } from './lib/margin-ui.js';
+import { installProjectWorkspace } from './lib/project-workspace.js';
+import { projectCommand, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
+import { createProjectSummaryStore, describeProjectSection } from './lib/project-summary.js';
+import { marginMetadata } from './lib/margin-metadata.js';
 import { installPocketInteractions } from './lib/pocket-interactions.js';
 import { createClient, parseSse, subscribeEvents, requestId } from './lib/client.ts';
 import { platformPanel } from './lib/platform.ts';
@@ -14,7 +26,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 /* ------------------------------------------------------------------ dom */
-const body = document.body, feed = $('#feed'), pill = $('#pill'), ask = $('#ask'), sendBtn = $('#send'), micBtn = $('#mic'), chipsEl = $('#chips'), status = $('#status'), attachEl = $('#attach'), listenEl = $('#listen');
+const body = document.body, feed = $('#feed'), pill = $('#pill'), ask = $('#ask'), sendBtn = $('#send'), micBtn = $('#mic'), chipsEl = $('#chips'), attachEl = $('#attach'), listenEl = $('#listen');
+// The Mac shell overlays its window buttons; ordinary browser layouts need no inset.
+body.classList.toggle('native-mac', (!!window.__TAURI__ || Q.get('app') === '1') && /Mac/.test(navigator.platform));
 const fxCv = $('#fx');
 const character = ['wash', 'pool', 'dry', 'pool-velvet', 'pool-bloom', 'pool-tide', 'pool-speckle', 'pool-brush'].includes(Q.get('character')) ? Q.get('character') : Q.get('motion') === 'legacy' ? undefined : 'pool-velvet';
 // Ink bubble variants use the Pocket renderer; ordinary URLs retain the legacy escape hatch.
@@ -30,30 +44,55 @@ const S = {
   demo: Q.get('demo') === '1',
   busy: false,
   turns: [],
+  projectView: null,
+  projectComposerExpanded: null,
   sessionCost: 0, sessionTurns: 0,
   status: null,            // last /api/status
   fixers: [],              // last /api/fixers
   voiceOn: LS.get('voice', !!window.__TAURI__),
+  micEnabled: false, micPhase: 'off', micCapturing: false,
   lastActivity: performance.now(),
   restTimer: 0, sleepTimer: 0, chipTimer: 0,
   abort: null,
 };
 if (S.voiceOn) body.classList.add('voice-on');
+let visibleProjectIds = [];
+const projectSummaries = createProjectSummaryStore({ onChange: (project, summaries) => { projectWorkspace.setSummaries?.(project, summaries); syncMargins(); } });
+const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
+const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: closeProjectView, onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
+const composeToggle = document.createElement('button'); composeToggle.type = 'button'; composeToggle.id = 'project-compose-toggle'; composeToggle.className = 'project-compose-toggle'; composeToggle.hidden = true; composeToggle.setAttribute('aria-controls', 'ask attach'); pill.prepend(composeToggle);
+composeToggle.onclick = () => { S.projectComposerExpanded = body.classList.contains('project-compose-compact'); layout(false); if (S.projectComposerExpanded) ask.focus(); };
+function watchProjectSummaries() { projectSummaries.watch([...new Set([...visibleProjectIds, ...(S.projectView ? [S.projectView.project] : [])])]); }
+function syncProjectComposer() {
+  const available = !!S.projectView && innerHeight < 600;
+  const expanded = S.projectComposerExpanded ?? innerHeight >= 600;
+  const compact = available && !expanded;
+  composeToggle.hidden = !available; body.classList.toggle('project-compose-compact', compact);
+  composeToggle.setAttribute('aria-expanded', String(!compact));
+  const draft = ask.value.trim();
+  composeToggle.textContent = compact ? draft ? 'Draft: ' + draft.replace(/\s+/g, ' ') : pendingImages.length ? `${pendingImages.length} attachment${pendingImages.length === 1 ? '' : 's'} · Write a message` : 'Ask Nibbi…' : 'Hide draft';
+  composeToggle.title = compact ? 'Open composer; your draft and attachments are preserved' : 'Collapse composer while reading';
+}
 
 /* ------------------------------------------------------------------ layout: where nibbi sits */
-function idleRadius() { return Math.max(56, Math.min(150, Math.min(innerWidth, innerHeight) * 0.16)); }
+function workspaceLeft() { return parseFloat(getComputedStyle(body).getPropertyValue('--workspace-left')) || 0; }
+function idleRadius() { return Math.max(56, Math.min(150, Math.min(innerWidth - workspaceLeft(), innerHeight) * 0.16)); }
 function layout(snap) {
+  // Initialization runs before the attachment state is declared.
+  if (typeof composeToggle !== 'undefined') syncProjectComposer();
   const W = innerWidth, H = innerHeight, r0 = idleRadius();
+  const center = (W + workspaceLeft()) / 2;
   const pillTop = pill.getBoundingClientRect().top || (H - 124);
   let pose;
-  if (S.mode === 'talk') {
-    const r = Math.max(34, Math.min(52, r0 * 0.34, H * 0.06));
-    const cy = 30 + r * 1.15;
-    pose = { x: W / 2, y: cy, r };
+  if (S.mode === 'talk' || S.projectView) {
+    const compactProject = S.projectView && H < 520;
+    const r = compactProject ? 24 : Math.max(34, Math.min(52, r0 * 0.34, H * 0.06));
+    const cy = (compactProject ? 18 : 30) + r * 1.15;
+    pose = { x: center, y: cy, r };
     document.documentElement.style.setProperty('--feed-top', Math.round(cy + r * 1.1 + 10) + 'px');
   } else {
     const focused = document.activeElement === ask && !S.busy;
-    pose = { x: W / 2, y: H * (focused ? 0.47 : 0.49) - (H < 600 ? 20 : 0), r: r0 };
+    pose = { x: center, y: H * (focused ? 0.47 : 0.49) - (H < 600 ? 20 : 0), r: r0 };
   }
   const hasAgents = body.classList.contains('has-agents');
   document.documentElement.style.setProperty('--agents-bottom', Math.round(H - pillTop - 3) + 'px');   // perched on the pill's top edge
@@ -61,6 +100,7 @@ function layout(snap) {
   if (snap) nibbi.snapTarget(pose); else nibbi.setTarget(pose);
 }
 addEventListener('resize', () => layout(false));
+document.addEventListener('nibbi:sidebar', () => layout(false));
 layout(true);
 const interactions = installPocketInteractions({ nibbi, canvas: fxCv,
   getContext: () => ({ busy: S.busy, mode: S.mode, mood: nibbi.mood() }), onInteract: () => activity() });
@@ -68,11 +108,8 @@ let calmMotion = LS.get('pocketCalm', false) === true;
 function syncMotionPreference() {
   const system = reducedMotion.matches, calm = system || calmMotion;
   nibbi.setReducedMotion(calm); interactions.setReducedMotion(calm);
-  const control = $('#st-motion'); control.disabled = system;
-  control.textContent = system ? 'motion: calm (system preference)' : 'motion: ' + (calm ? 'calm' : 'playful');
-  control.setAttribute('aria-pressed', String(calm));
+  syncMargins();
 }
-$('#st-motion').onclick = () => { calmMotion = !calmMotion; LS.set('pocketCalm', calmMotion); syncMotionPreference(); };
 reducedMotion.addEventListener('change', syncMotionPreference);
 
 function setMode(m) {
@@ -263,7 +300,6 @@ async function* offlineTurn() { await sleep(600); yield { ev: 'done', text: 'gat
 /* ------------------------------------------------------------------ client-side commands: the build loop lives here */
 const api = createClient(() => activeProject());
 const openPlatform = platformPanel(() => activeProject(), () => { refreshProjects(); refreshStatus(); });
-$('#st-platform').onclick = () => openPlatform();
 const projectNames = () => (S.projects || []).map((p) => p.name);
 const activeProject = () => (S.project && (!S.projects || projectNames().includes(S.project)) ? S.project : projectNames()[0]) || 'vault';
 const bar = (done, total) => { const n = 12, f = total ? Math.round(n * done / total) : 0; return '`' + '█'.repeat(f) + '░'.repeat(n - f) + '`'; };
@@ -271,7 +307,7 @@ const bar = (done, total) => { const n = 12, f = total ? Math.round(n * done / t
 /* a turn that nibbi answers itself (no model call): fn(T) → { text, acts?, ok?, plain?, html? } */
 async function localTurn(userText, fn, opts) {
   if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
-  S.busy = true; body.classList.add('busy'); activity(); hideChips(); if (!(opts && opts.keepInput)) { ask.value = ''; autosize(); } setMode('talk');
+  S.busy = true; body.classList.add('busy'); activity(); hideChips(); if (!(opts && opts.keepInput)) { ask.value = ''; autosize(); } setMode('talk'); syncMargins();
   const T = newTurn(userText === undefined ? null : userText); T.plain = false;
   nibbi.setMood('working'); const fr = feed.getBoundingClientRect(); nibbi.lookAt(innerWidth / 2 + 40, fr.top + 30);
   let out;
@@ -282,7 +318,7 @@ async function localTurn(userText, fn, opts) {
   setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
   if (!ok) T.nib.classList.add('error');
   if (out.acts && out.acts.length) addActs(T, out.acts);
-  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1400 : 2600);
+  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1400 : 2600); syncMargins();
   $('#sr').textContent = stripMd(out.text || ''); scheduleIdleTimers(); refreshStatus();
   return T;
 }
@@ -295,12 +331,15 @@ async function issuesFile(proj) {
 /* ---- fixer helpers ---- */
 const fixerById = (id) => (S.fixers || []).find((f) => f.id === id);
 const fixerTitle = (f) => f.title || (f.issue || '').slice(0, 60) || f.id;
+const githubBuild = f => f?.workflowMode === 'github' || f?.github?.mode === 'github';
+const inspectGithubBuild = f => openProjectSection(f.game || f.project, 'builds', { buildId: f.id, evidence: 'github' });
 function fixerActs(f, opts) {
   const a = []; const st = f.status;
-  if (st === 'staged') a.push({ label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) }, { label: 'approve & merge', confirm: 'merge into ' + (opts && opts.target || 'the branch') + ' — sure?', warn: true, run: () => send('/approve ' + f.id) });
+  if (st === 'staged' && githubBuild(f)) a.push({ label: 'Review GitHub delivery', run: () => inspectGithubBuild(f) }, { label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) });
+  if (st === 'staged' && !githubBuild(f)) a.push({ label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) }, { label: 'approve & merge', confirm: 'merge into ' + (opts && opts.target || 'the branch') + ' — sure?', warn: true, run: () => send('/approve ' + f.id) });
   if (st === 'running' || st === 'installing') a.push({ label: 'steer', run: () => { ask.value = '/steer ' + f.id + ' '; ask.focus(); autosize(); } }, { label: 'stop', confirm: 'stop it — sure?', warn: true, run: () => send('/stop ' + f.id) });
   if (st === 'queued') a.push({ label: 'unqueue', confirm: 'drop it from the queue?', run: () => api.post('/api/fix-unqueue', { id: f.id }).then(() => toast('unqueued')).catch((e) => toast(e.message)) });
-  if (st === 'failed') a.push({ label: 'log', run: () => send('/log ' + f.id) }, { label: 'requeue', run: () => api.post('/api/fix-requeue', { id: f.id }).then(() => toast('requeued')).catch((e) => toast(e.message)) });
+  if (st === 'failed') a.push({ label: 'log', run: () => send('/log ' + f.id) }, { label: 'Start replacement build', run: () => api.post('/api/fix-requeue', { id: f.id }).then(() => toast('requeued')).catch((e) => toast(e.message)) });
   if (st === 'merged') a.push({ label: 'what changed', run: () => send('/diff ' + f.id) });
   a.push({ label: 'ask nibbi', run: () => send('how is the fixer "' + fixerTitle(f) + '" (' + f.id + ') doing, and what should I check?') });
   return a.slice(0, 4);
@@ -379,7 +418,7 @@ const COMMANDS = [
   { cmd: '/help', args: '', desc: 'this list', local: true },
 ];
 
-async function runLocalCommand(name, arg) {
+async function runLocalCommand(name, arg, opts) {
   switch (name) {
     case 'preview': return localTurn('/preview ' + arg, async () => {
       const [id, action] = arg.split(/\s+/); if (!id) return { ok: false, text: 'Use /preview <fixer-id> [stop].' };
@@ -465,7 +504,7 @@ async function runLocalCommand(name, arg) {
       const st = addStep(T, 'reading the diff'); const d = await api.get('/api/fixer-diff?id=' + encodeURIComponent(arg)); markStep(st, 'done');
       const f = f0 || { id: arg, status: 'staged' };
       return { html: renderDiff(d), text: (d.diffstat || '').trim(), acts: fixerActs(f, { target: d.target }).filter((a) => a.label !== 'diff' && a.label !== 'what changed') };
-    });
+    }, opts);
     case 'review': {
       if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
       try { S.fixers = await api.get('/api/fixers'); } catch { /* keep */ }
@@ -478,7 +517,7 @@ async function runLocalCommand(name, arg) {
     }
     case 'steer': { const m = arg.match(/^(\S+)\s+([\s\S]+)$/); return localTurn('/steer ' + arg, async () => { if (!m) return { ok: false, text: '`/steer <fixer-id> <note>`' }; const r = await api.post('/api/fixer-steer', { id: m[1], text: m[2] }); return { text: r.text || 'sent' }; }); }
     case 'stop': return localTurn('/stop ' + arg, async () => { if (!arg) return { ok: false, text: '`/stop <fixer-id>`' }; const r = await api.post('/api/fixer-stop', { id: arg }); refreshStatus(); return { text: r.text || 'stopped' }; });
-    case 'log': return localTurn('/log ' + arg, async () => { if (!arg) return { ok: false, text: '`/log <fixer-id>`' }; const r = await api.get('/api/fixer-log?id=' + encodeURIComponent(arg)); const es = (r.entries || []).slice(-14); const f = fixerById(arg); const shots = f ? await fixerShots(f) : []; setTimeout(() => { const t = S.turns[S.turns.length - 1]; const row = shotsRow(shots); if (t && row) t.said.appendChild(row); }, 0); return { text: (f ? '**' + md.esc(fixerTitle(f)) + '** · ' + f.status + '\n\n' : '') + (es.length ? es.map((e) => (e.kind === 'tool' ? '› ' : e.kind === 'assistant' ? '' : '· ') + e.text.slice(0, 220)).join('\n') : '_no log yet_'), acts: f ? fixerActs(f) : [] }; });
+    case 'log': return localTurn('/log ' + arg, async () => { if (!arg) return { ok: false, text: '`/log <fixer-id>`' }; const r = await api.get('/api/fixer-log?id=' + encodeURIComponent(arg)); const es = (r.entries || []).slice(-14); const f = fixerById(arg); const shots = f ? await fixerShots(f) : []; setTimeout(() => { const t = S.turns[S.turns.length - 1]; const row = shotsRow(shots); if (t && row) t.said.appendChild(row); }, 0); return { text: (f ? '**' + md.esc(fixerTitle(f)) + '** · ' + f.status + '\n\n' : '') + (es.length ? es.map((e) => (e.kind === 'tool' ? '› ' : e.kind === 'assistant' ? '' : '· ') + e.text.slice(0, 220)).join('\n') : '_no log yet_'), acts: f ? fixerActs(f) : [] }; }, opts);
     case 'plan': { const em = arg.match(/^edit\s+([\s\S]+)$/i); if (em) { send('Rewrite plans/' + activeProject() + '.md in the vault: ' + em[1] + '. Keep the milestone/checkbox format, keep completed items checked, and reply with a 3-line summary of what changed.'); return; } }
       return localTurn('/plan' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = arg || activeProject(); const st = addStep(T, 'reading plans/' + proj + '.md');
@@ -574,16 +613,39 @@ function sound(kind) {
     o.connect(g); g.connect(c.destination); o.start(t0); o.stop(t0 + 0.18);
   } catch { /* no audio */ }
 }
-$('#st-demo').insertAdjacentHTML('beforebegin', '<button class="row act" id="st-sounds" type="button">sounds: off</button>');
-$('#st-sounds').onclick = () => { const v = !LS.get('sounds', false); LS.set('sounds', v); $('#st-sounds').textContent = 'sounds: ' + (v ? 'on' : 'off'); if (v) sound('send'); };
-$('#st-sounds').textContent = 'sounds: ' + (LS.get('sounds', false) ? 'on' : 'off');
 
 /* ------------------------------------------------------------------ native hooks (desktop shell): notifications + dock badge, feature-detected */
+let notificationPermission = 'unavailable', notificationCheck = 0;
+function notificationApi() {
+  const native = window.__TAURI__?.notification;
+  if (typeof native?.isPermissionGranted === 'function' && typeof native?.requestPermission === 'function' && typeof native?.sendNotification === 'function') return { kind: 'native', api: native };
+  return typeof window.Notification === 'function' ? { kind: 'browser', api: window.Notification } : null;
+}
+async function refreshNotificationPermission() {
+  const check = ++notificationCheck, n = notificationApi();
+  let permission = 'unavailable';
+  try { if (n) permission = n.kind === 'native' ? (await n.api.isPermissionGranted() ? 'granted' : 'default') : n.api.permission; } catch { /* unsupported permission bridge */ }
+  if (check === notificationCheck) { notificationPermission = permission; syncMargins(); }
+}
+async function toggleNotifications() {
+  const n = notificationApi();
+  if (!n) throw new Error('Notifications are not supported here.');
+  if (LS.get('notifications', true) && notificationPermission === 'granted') { LS.set('notifications', false); syncMargins(); return; }
+  ++notificationCheck;
+  let permission = notificationPermission;
+  if (permission !== 'granted') permission = await n.api.requestPermission();
+  notificationPermission = permission;
+  LS.set('notifications', permission === 'granted'); syncMargins();
+  if (permission !== 'granted') throw new Error('Notifications are not allowed. You can allow them in system or browser settings.');
+}
 async function notify(title, body) {
+  if (!LS.get('notifications', true)) return;
   try {
-    const N = window.__TAURI__ && window.__TAURI__.notification;
-    if (N) { let ok = await N.isPermissionGranted(); if (!ok) ok = (await N.requestPermission()) === 'granted'; if (ok) N.sendNotification({ title, body }); return; }
-    if ('Notification' in window) { if (Notification.permission === 'default') await Notification.requestPermission(); if (Notification.permission === 'granted') new Notification(title, { body }); }
+    await refreshNotificationPermission();
+    const n = notificationApi();
+    if (!n || notificationPermission !== 'granted' || !LS.get('notifications', true)) return;
+    if (n.kind === 'native') n.api.sendNotification({ title, body });
+    else new n.api(title, { body });
   } catch { /* no notifications here */ }
 }
 async function setBadge(n) { try { const W = window.__TAURI__ && window.__TAURI__.window; if (W && W.getCurrentWindow) { const w = W.getCurrentWindow(); if (w.setBadgeCount) await w.setBadgeCount(n > 0 ? n : undefined); } } catch { /* unsupported */ } }
@@ -600,9 +662,10 @@ function connectEvents() {
   LS.set('eventCursor', after);
   const close = subscribeEvents({
     after, onCursor: (id) => LS.set('eventCursor', id),
-    onReady: () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; refreshStatus(); },
-    onOffline: () => { evReady = false; setLink('offline'); },
+    onReady: () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; refreshStatus(); scheduleProjectRefresh(); },
+    onOffline: () => { evReady = false; setLink('offline'); projectSummaries.markStale(); },
     onEvent: (event) => {
+      if (/^(run\.updated|vault\.updated|roadmap\.|project\.|goal\.|github\.|build\.)/.test(event.type)) scheduleProjectRefresh(event.projectId || event.payload?.run?.game || event.payload?.project);
       if (event.type === 'run.updated') {
         const run = event.payload.run; if (!run) return; if (run.status === 'done') run.status = 'staged';
         S.fixers = [...(S.fixers || []).filter((f) => f.id !== run.id), run];
@@ -611,6 +674,7 @@ function connectEvents() {
         if (!evReady) evReplay.push(ev); else if (['staged', 'failed', 'merged', 'interrupted', 'cancelled'].includes(run.status)) postFixerBubble(run);
       } else if (event.type === 'process.output' || event.type === 'tool.started') {
         const a = agentEls.get(event.runId); if (a) { const tail = a.card.querySelector('.tail'); if (tail) tail.textContent = String(event.payload.text || event.payload.name || '').slice(-400); }
+        queueProjectActivity(event.projectId || S.fixers.find(run => run.id === event.runId)?.game);
       } else if (['brief', 'goal.updated', 'goal.completed', 'scheduler.error'].includes(event.type)) {
         const text = event.payload.text || event.payload.message || (event.payload.goal && event.payload.goal.text);
         if (!text) return;
@@ -637,7 +701,7 @@ function postFixerBubble(f) {
   const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
   const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
   const cost = (f.costUsd ? ' · $' + Number(f.costUsd).toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
-  const mode = autoOf(f.game || f.project).mode;
+  const mode = githubBuild(f) ? 'github' : autoOf(f.game || f.project).mode;
   const text = f.status === 'staged' ? (mode === 'ship' ? 'Fixer **' + title + '** finished on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Ship mode: it merges itself once you\'ve been quiet a few minutes (isolated integration → checks → target). I\'ll say when it lands.' : 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?') : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**' + cost + (mode === 'ship' ? ' — on its own.' : '.') : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '') + (/maximum number of turns/i.test(String(f.summary || '')) ? ' Work is preserved; inspect it before an explicit retry.' : '');
   setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
   addActs(T, (f.status === 'staged' && mode === 'ship') ? fixerActs(f).filter((a) => !/approve/.test(a.label)) : fixerActs(f), { sticky: true }); T.fixerId = f.id; if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
@@ -677,13 +741,15 @@ async function showReview() {
   if (!R.T) { R.T = newTurn('/review'); R.T.plain = false; R.T.bubble.classList.remove('live'); R.T.el.classList.add('review'); }
   const T = R.T; T.said.replaceChildren(); const old = T.body.querySelector('.acts'); if (old) old.remove();
   const head = document.createElement('div'); head.className = 'rhead'; head.innerHTML = '<b>' + (R.i + 1) + ' of ' + R.ids.length + '</b> · ' + escapeHtml(fixerTitle(f)) + ' <span class="m">' + escapeHtml([f.game, f.model, f.costUsd ? '$' + Number(f.costUsd).toFixed(2) : null, f.group].filter(Boolean).join(' · ')) + '</span><span class="keys">j/k next · a approve · x discard · p preview</span>';
+  if(githubBuild(f))head.querySelector('.keys').textContent='j/k next · GitHub delivery';
   T.said.appendChild(head);
   if (f.summary) { const s = document.createElement('div'); s.className = 'rsum'; s.textContent = String(f.summary).slice(0, 400); T.said.appendChild(s); }
   try { const d = await api.get('/api/fixer-diff?id=' + encodeURIComponent(id)); if (!current()) return; T.said.appendChild(renderDiff(d)); } catch (e) { if (!current()) return; const p = document.createElement('p'); p.textContent = 'diff unavailable — ' + e.message; T.said.appendChild(p); }
   const acts = [];
   if (R.ids.length > 1) acts.push({ label: 'next (j)', run: () => reviewStep(1) });
-  acts.push({ label: 'approve & merge (a)', confirm: 'merge — sure?', warn: true, reviewMutation: true, run: () => reviewAct('approve', R, id) }, { label: 'preview (p)', run: () => send('/preview ' + id) }, { label: 'discard (x)', confirm: 'discard this fixer — sure?', reviewMutation: true, run: () => reviewAct('discard', R, id) });
-  if (R.ids.length > 1 && f.group && R.ids.filter((x) => { const other = fixerById(x); return other?.group === f.group && other.game === f.game; }).length > 1) acts.push({ label: 'merge whole group', confirm: 'merge all of "' + f.group + '" — sure?', warn: true, reviewMutation: true, run: () => reviewAct('group', R, id) });
+  if (githubBuild(f)) acts.push({label:'Review GitHub delivery',run:()=>inspectGithubBuild(f)});
+  else acts.push({ label: 'approve & merge (a)', confirm: 'merge — sure?', warn: true, reviewMutation: true, run: () => reviewAct('approve', R, id) }, { label: 'preview (p)', run: () => send('/preview ' + id) }, { label: 'discard (x)', confirm: 'discard this fixer — sure?', reviewMutation: true, run: () => reviewAct('discard', R, id) });
+  if (!githubBuild(f) && !R.ids.some(id => githubBuild(fixerById(id))) && R.ids.length > 1 && f.group && R.ids.filter((x) => { const other = fixerById(x); return other?.group === f.group && other.game === f.game; }).length > 1) acts.push({ label: 'merge whole group', confirm: 'merge all of "' + f.group + '" — sure?', warn: true, reviewMutation: true, run: () => reviewAct('group', R, id) });
   acts.push({ label: 'done reviewing', run: endReview });
   addActs(T, acts); S.stick = true; scrollFeed(true);
 }
@@ -714,7 +780,9 @@ async function reviewAct(kind, R, id) {
 function endReview(done) { const R = S.review; if (!R) return; S.review = null; if (R.T) { R.T.said.replaceChildren(renderMd(done ? 'Review done — nothing left staged.' : 'Left review mode.')); const a = R.T.body.querySelector('.acts'); if (a) a.remove(); R.T.el.classList.remove('review'); } refreshStatus(); }
 function keyboardInputOwned(e, allowComposer = false) {
   const target = e.target instanceof Element ? e.target : document.activeElement;
-  return e.defaultPrevented || e.isComposing || !!document.querySelector('dialog[open]') || ((!allowComposer || target !== ask) && !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'));
+  // Rail buttons own Space and letter keys too; keep Alt+Space available outside cards.
+  const railInput = !!target?.closest('.workspace-sidebar, .sidebar-toggle, .project-workspace') && !(allowComposer && e.altKey && e.code === 'Space');
+  return e.defaultPrevented || e.isComposing || railInput || !!document.querySelector('dialog[open], .margin-card:not([hidden])') || ((!allowComposer || target !== ask) && !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'));
 }
 addEventListener('keydown', (e) => {
   if (!S.review || keyboardInputOwned(e) || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
@@ -799,7 +867,7 @@ ask.addEventListener('keydown', (e) => {
 /* ------------------------------------------------------------------ /play: launch a project's dev server through the gateway's sanctioned launcher */
 const openUrl = (u) => { if (window.__TAURI__) api.post('/api/open', { url: u }).catch(() => window.open(u, '_blank')); else window.open(u, '_blank'); };
 async function playFlow(project, action) {
-  S.busy = true; body.classList.add('busy'); activity(); hideChips(); ask.value = ''; autosize(); setMode('talk');
+  S.busy = true; body.classList.add('busy'); activity(); hideChips(); ask.value = ''; autosize(); setMode('talk'); syncMargins();
   const T = newTurn('/play ' + project + (action !== 'start' ? ' ' + action : '')); T.plain = false;
   nibbi.setMood('working'); const fr = feed.getBoundingClientRect(); nibbi.lookAt(innerWidth / 2 + 40, fr.top + 30);
   const api = (action) => action === 'status' ? createClient(() => project).get('/api/play?project=' + encodeURIComponent(project)) : createClient(() => project).post('/api/play', { project, action });
@@ -825,7 +893,7 @@ async function playFlow(project, action) {
   else if (ok && action === 'status' && /Want me to start/.test(text)) acts.push({ label: 'start it', run: () => send('/play ' + project) });
   else if (!ok) acts.push({ label: 'try again', run: () => send('/play ' + project) });
   addActs(T, acts, { sticky: !!url });
-  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1500 : 2600);
+  S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1500 : 2600); syncMargins();
   $('#sr').textContent = stripMd(text); scheduleIdleTimers();
 }
 function launchActsFor(text) {
@@ -843,13 +911,15 @@ async function send(text, images) {
   text = (text || '').trim(); images = images || [];
   if (!text && !images.length) return;
   if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
+  if (S.projectView) closeProjectView(false);
+  if (listening && wakeVoice.snapshot().phase !== 'sending') wakeVoice.setSuspended(true);
   const isCommand = text.startsWith('/');
   if (S.demo && isCommand) { toast('Demo is read-only. Leave demo mode to run commands.'); return; }
   const pm = text.match(/^\/play\s+([\w.-]+)(?:\s+(stop|status))?\s*$/i);
   if (pm) { await playFlow(pm[1].toLowerCase(), (pm[2] || 'start').toLowerCase()); return; }
   const cm = text.match(/^\/(\w+)\s*([\s\S]*)$/);
   if (cm && COMMANDS.some((c) => c.cmd === '/' + cm[1].toLowerCase() && c.local)) { await runLocalCommand(cm[1].toLowerCase(), cm[2].trim()); return; }
-  S.busy = true; body.classList.add('busy'); sendBtn.setAttribute('aria-label', 'stop watching');
+  S.busy = true; body.classList.add('busy'); sendBtn.setAttribute('aria-label', 'stop watching'); syncMargins();
   activity(); hideChips();
   ask.value = ''; autosize(); clearAttach(); sound('send');
   setMode('talk');
@@ -899,7 +969,7 @@ async function send(text, images) {
   $('#sr').textContent = ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200);
   T.done = true;
   if (!ok) T.nib.classList.add('error');
-  S.busy = false; body.classList.remove('busy'); sendBtn.setAttribute('aria-label', 'send'); S.abort = null;
+  S.busy = false; body.classList.remove('busy'); sendBtn.setAttribute('aria-label', 'send'); S.abort = null; syncMargins();
   nibbi.lookFree();
   if (!ok) { nibbi.setMood('error'); addActs(T, errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
   else if (!result.aborted) { nibbi.setMood('happy'); interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); }
@@ -1028,89 +1098,224 @@ async function fillCard(a) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('.agent')) for (const a of agentEls.values()) a.el.classList.remove('pinned'); });
 
-/* ------------------------------------------------------------------ projects: a quiet presence top-left; auto mode is a project setting, not an agent */
-const projectEl = $('#project'), pnameEl = $('.pname', projectEl), pdotEl = $('.pdot', projectEl), pmenuEl = $('.pmenu', projectEl);
-const msCache = new Map();
-async function milestonesFor(name) { const c = msCache.get(name); if (c && Date.now() - c.at < 60000) return c.ms; try { const ms = await api.get('/api/milestones?project=' + encodeURIComponent(name)); msCache.set(name, { at: Date.now(), ms }); return ms; } catch { return []; } }
+/* ------------------------------------------------------------------ live margin model: the view never owns app or backend state */
+const msCache = new Map(), msPending = new Map();
+async function milestonesFor(name) {
+  const cached = msCache.get(name);
+  if (cached && Date.now() - cached.at < 60000) return cached.ms;
+  if (msPending.has(name)) return msPending.get(name);
+  const pending = (async () => {
+    let ms = null;
+    try { const result = await api.get('/api/milestones?project=' + encodeURIComponent(name)); if (Array.isArray(result)) ms = result; } catch { /* unavailable is not zero progress */ }
+    msCache.set(name, { at: Date.now(), ms }); return ms;
+  })();
+  msPending.set(name, pending);
+  try { return await pending; } finally { msPending.delete(name); }
+}
 const MODES = ['off', 'suggest', 'stage', 'ship'];
 function autoOf(name) { const a = (S.auto || {})[name]; if (!a) return { on: false, mode: 'off', inflight: 0, pending: 0, staged: 0, spend: 0 }; return { ...a, mode: a.on ? (a.mode || 'stage') : 'off' }; }
-function renderProject() {
-  const list = (S.projects || []).filter((p) => p.kind !== 'brain');
-  projectEl.hidden = !list.length;
-  if (!list.length) return;
-  const name = activeProject(); const a = autoOf(name);
-  const goal = (S.goals || {})[name];
-  pnameEl.textContent = name + (goal && goal.focus ? ' · ' + goal.focus : '');
-  pdotEl.dataset.mode = a.mode; pdotEl.classList.toggle('busy', a.inflight > 0);
-  projectEl.title = name + (a.on ? ' · auto ' + a.mode + (a.inflight ? ' · ' + a.inflight + ' in flight' : '') : '');
-  const running = (S.fixers || []).filter((f) => ACTIVE.has(f.status));
-  pmenuEl.replaceChildren();
-  for (const p of list) {
-    const pa = autoOf(p.name); const row = document.createElement('div'); row.className = 'prow' + (p.name === name ? ' active' : '');
-    const head = document.createElement('button'); head.type = 'button'; head.className = 'phead'; head.innerHTML = '<span class="n">' + escapeHtml(p.name) + '</span><span class="m">' + escapeHtml((p.branch || '') + (p.dirty ? ' · ' + p.dirty + ' dirty' : '')) + '</span>';
-    head.onclick = () => { if (p.name !== name) send('/project ' + p.name); else send('/plan ' + p.name); };
-    const bar = document.createElement('div'); bar.className = 'pbar'; bar.innerHTML = '<i></i>'; milestonesFor(p.name).then((ms) => { const d = ms.reduce((x, m) => x + m.done, 0), t = ms.reduce((x, m) => x + m.total, 0); bar.hidden = !t; bar.querySelector('i').style.width = (t ? Math.round(100 * d / t) : 0) + '%'; bar.title = d + '/' + t + ' tasks'; });
-    const auto = document.createElement('div'); auto.className = 'pauto';
-    const lab = document.createElement('span'); lab.className = 'l'; lab.textContent = 'auto'; auto.appendChild(lab);
-    const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', 'auto mode for ' + p.name);
-    for (const m of MODES) { const b = document.createElement('button'); b.type = 'button'; b.className = 'segb' + (pa.mode === m ? ' on' : '') + (m === 'ship' ? ' ship' : ''); b.textContent = m; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(pa.mode === m)); b.title = { off: 'nothing dispatches on its own', suggest: 'auto proposes tasks, you dispatch', stage: 'auto dispatches; you approve every merge', ship: 'auto dispatches AND merges when the gate passes' }[m];
-      let armed = 0; b.onclick = (e) => { e.stopPropagation(); if (pa.mode === m) return; if (m === 'ship' && !armed) { armed = setTimeout(() => { armed = 0; b.textContent = 'ship'; b.classList.remove('armed'); }, 4000); b.textContent = 'ship — sure?'; b.classList.add('armed'); return; } clearTimeout(armed); send('/auto ' + p.name + ' ' + m); }; seg.appendChild(b); }
-    auto.appendChild(seg);
-    const tune = document.createElement('div'); tune.className = 'ptune';
-    const capL = document.createElement('label'); capL.innerHTML = 'cap $<input type="number" min="0" step="1" placeholder="∞">'; const capI = capL.querySelector('input'); capI.value = pa.spendCap ? pa.spendCap : ''; capI.onclick = (e) => e.stopPropagation(); capI.onchange = (e) => { e.stopPropagation(); api.post('/api/auto', { project: p.name, spendCap: Number(capI.value) || 0 }).then(() => { toast(capI.value ? 'cap $' + capI.value + ' on ' + p.name : 'no spend cap on ' + p.name); refreshStatus(); }).catch((er) => toast(er.message)); };
-    const modS = document.createElement('button'); modS.type = 'button'; modS.textContent = 'providers & models'; modS.onclick = e => { e.stopPropagation(); S.project = p.name; LS.set('project', p.name); openPlatform('Providers'); };
-    tune.append(capL, modS);
-    const stat = document.createElement('div'); stat.className = 'pstat'; const rf = running.filter((f) => (f.game || f.project) === p.name).length; const pg = (S.goals || {})[p.name]; stat.textContent = [pg ? 'goal: ' + pg.text.slice(0, 40) : '', pa.on ? pa.inflight + ' in flight · ' + pa.pending + ' pending · ' + pa.staged + ' staged' : (rf ? rf + ' fixer' + (rf > 1 ? 's' : '') + ' running' : ''), pa.spend ? '$' + pa.spend.toFixed(2) + ' auto spend' : ''].filter(Boolean).join(' · '); if (pa.on && pa.note) { stat.title = pa.note; stat.textContent += '\n' + String(pa.note).slice(0, 90) + (pa.note.length > 90 ? '…' : ''); }
-    const acts = document.createElement('div'); acts.className = 'pacts';
-    const mk = (t, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip in'; b.textContent = t; b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; };
-    acts.append(mk('plan', () => send('/plan ' + p.name)));
-    if ((S.playable || []).some((x) => x.name === p.name)) acts.append(mk('play', () => send('/play ' + p.name)));
-    acts.append(mk('fix…', () => { if (p.name !== name) { S.project = p.name; LS.set('project', p.name); renderProject(); } ask.value = '/fix '; ask.focus(); autosize(); }));
-    row.append(head, bar, auto, tune, stat, acts); pmenuEl.appendChild(row);
-  }
-  const foot = document.createElement('button'); foot.type = 'button'; foot.className = 'pnew'; foot.textContent = '+ new project'; foot.onclick = () => { ask.value = '/new '; ask.focus(); autosize(); }; pmenuEl.appendChild(foot);
+const liveNumber = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : null;
+function syncMargins() {
+  const active = activeProject(), status = S.status;
+  const selected = (S.projects || []).find(p => p.name === active);
+  const projects = (S.projects || []).filter(p => p.kind !== 'brain').map(p => {
+    const sectionData = projectSummaries.get(p.name);
+    const a = (S.auto || {})[p.name], ms = msCache.get(p.name)?.ms;
+    const valid = Array.isArray(ms) && ms.length > 0 && ms.every(m => liveNumber(m.done) !== null && liveNumber(m.total) !== null);
+    const canonical = sectionData?.plans?.counts;
+    const total = canonical ? liveNumber(canonical.total) : valid ? ms.reduce((n, m) => n + m.total, 0) : null;
+    const done = canonical ? liveNumber(canonical.done) : valid && total > 0 ? ms.reduce((n, m) => n + Math.min(m.done, m.total), 0) : null;
+    const goal = (S.goals || {})[p.name];
+    return { id: p.name, name: p.name, active: p.name === active, branch: p.branch || '',
+      goal: [goal?.focus, goal?.text].filter(Boolean).join(' · '), mode: a ? autoOf(p.name).mode : 'unknown',
+      inFlight: liveNumber(a?.inflight), pending: liveNumber(a?.pending), staged: liveNumber(a?.staged),
+      spend: liveNumber(a?.spend), spendCap: a ? (liveNumber(a.spendCap) ?? 0) : null,
+      done, total: total > 0 ? total : null, planAvailable: sectionData?.plans ? !!(canonical?.total || sectionData.plans.hasNotes) : Array.isArray(ms) ? ms.length > 0 : undefined,
+      playable: (S.playable || []).some(item => item.name === p.name),
+      sections: Object.fromEntries(['builds','issues','plans'].map(section => [section, describeProjectSection(section, sectionData?.[section])])) };
+  });
+  const metadata = marginMetadata({ status, project: selected, busy: S.busy, link: S.link, demo: S.demo, sessionCost: S.sessionCost, sessionTurns: S.sessionTurns });
+  projectWorkspace.setBusy(S.busy);
+  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), activeProject: active, view: S.projectView, busy: S.busy, settings: {
+    microphone: S.micEnabled, microphonePhase: S.micPhase,
+    voice: S.voiceOn, sounds: LS.get('sounds', false) === true,
+    notifications: LS.get('notifications', true) === true && notificationPermission === 'granted',
+    notificationsSupported: !!notificationApi(),
+    notificationStatus: { granted: 'System permission granted', denied: 'Blocked in system or browser settings', default: 'Permission is needed to enable notifications', unavailable: 'Permission is not available here' }[notificationPermission] || 'Permission is not available here',
+    ...metadata,
+    demo: S.demo, calm: calmMotion, systemReduced: reducedMotion.matches,
+  } });
 }
-projectEl.addEventListener('click', (e) => { if (e.target.closest('.plabel')) projectEl.classList.toggle('open'); });
-document.addEventListener('click', (e) => { if (!e.target.closest('#project')) projectEl.classList.remove('open'); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') projectEl.classList.remove('open'); });
+function renderProject() {
+  if (S.projectView && Array.isArray(S.projects) && !S.projects.some(p => p.name === S.projectView.project)) closeProjectView(false);
+  syncMargins();
+  watchProjectSummaries();
+  for (const p of (S.projects || []).filter(p => p.kind !== 'brain')) {
+    const cached = msCache.get(p.name);
+    if ((!cached || Date.now() - cached.at >= 60000) && !msPending.has(p.name)) {
+      // Resolve against current state, never against the project selected when a read began.
+      void milestonesFor(p.name).then(syncMargins);
+    }
+  }
+}
+function selectMarginProject(id) {
+  const p = (S.projects || []).find(p => p.name === id && p.kind !== 'brain');
+  if (!p) throw new Error('This project is no longer available.');
+  S.project = p.name; LS.set('project', p.name); renderProject(); activity();
+  return p.name;
+}
+async function handleMarginAction(action, id, value) {
+  activity();
+  if (['newProject', 'fix', 'plan', 'play', 'review', 'autoMode', 'spendCap'].includes(action) && S.busy) throw new Error(NAME + ' is still working — one thing at a time.');
+  switch (action) {
+    case 'selectProject': if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
+    case 'projectSection': openProjectSection(id, value); return;
+    case 'repository': openProjectSection(id, 'repository'); margins.close(); return;
+    case 'newProject': margins.close(); ask.value = '/new '; ask.focus(); autosize(); return;
+    case 'fix': selectMarginProject(id); margins.close(); ask.value = '/fix '; ask.focus(); autosize(); return;
+    case 'plan': case 'play': case 'review':
+      selectMarginProject(id); margins.close(); await send('/' + action + ' ' + id); return;
+    case 'autoMode':
+      if (!MODES.includes(value)) throw new Error('Unknown automation mode.');
+      selectMarginProject(id); margins.close(); await send('/auto ' + id + ' ' + value); return;
+    case 'spendCap': {
+      if (!(S.projects || []).some(p => p.name === id && p.kind !== 'brain')) throw new Error('This project is no longer available.');
+      if (S.demo) throw new Error('Leave demo mode to change project settings.');
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('Enter a cap of zero or more.');
+      await api.post('/api/auto', { project: id, spendCap: value });
+      await refreshStatus(); toast(value ? 'cap $' + value + ' on ' + id : 'no spend cap on ' + id); return;
+    }
+    case 'providers': selectMarginProject(id); margins.close(); openPlatform('Providers'); return;
+    case 'model': case 'advancedSettings': margins.close(); openPlatform('Providers'); return;
+    case 'microphone':
+      // All microphone controls share the wake toggle. Never await permission here: Off must remain clickable.
+      margins.close(); void toggleListen(); return;
+    case 'voice':
+      S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn);
+      if (!S.voiceOn) stopSpeaking(); syncMargins(); toast(S.voiceOn ? 'spoken replies on' : 'spoken replies off — microphone unchanged'); return;
+    case 'sounds': { const on = !LS.get('sounds', false); LS.set('sounds', on); syncMargins(); if (on) sound('send'); return; }
+    case 'notifications': await toggleNotifications(); return;
+    case 'calm': if (!reducedMotion.matches) { calmMotion = !calmMotion; LS.set('pocketCalm', calmMotion); syncMotionPreference(); } return;
+    case 'demo': S.demo = !S.demo; syncMargins(); await refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); return;
+    case 'tidy': margins.close(); tidy(); return;
+    default: throw new Error('This control is not available.');
+  }
+}
+
+function openProjectSection(id, section, detail = {}) {
+  if (!['builds','issues','plans','repository'].includes(section)) return;
+  const project = (S.projects || []).find(p => p.name === id && p.kind !== 'brain');
+  if (!project) { toast('This project is no longer available.'); return; }
+  selectMarginProject(id); margins.close();
+  if (!S.projectView) S.projectComposerExpanded = null;
+  S.projectView = { project: id, section }; body.classList.add('project-view');
+  hideChips(); paletteEl.hidden = true;
+  projectWorkspace.open({ project: id, kind: project.kind, section, ...detail });
+  projectWorkspace.setSummaries?.(id, projectSummaries.get(id)); watchProjectSummaries();
+  syncMargins(); layout(false);
+}
+function closeProjectView(focus = true) {
+  if (!S.projectView) return;
+  S.projectView = null; S.projectComposerExpanded = null; projectWorkspace.close(); body.classList.remove('project-view'); watchProjectSummaries();
+  syncMargins(); layout(false); if (focus) ask.focus();
+}
+async function handleProjectAction(action, project, value) {
+  if (action === 'githubRead') {
+    if (value.kind === 'build') return loadGithubBuild({project, buildId:value.buildId, signal:value.signal});
+    if (value.kind === 'prDraft') return loadGithubPrDraft({project, buildId:value.buildId, signal:value.signal});
+    if (value.kind === 'changes') return loadGithubChanges({project, buildId:value.buildId, signal:value.signal});
+    return loadGithubProject({project, signal:value.signal});
+  }
+  if (action === 'githubRefresh') {
+    const result = await githubCommand(project, 'github.refresh', value || {});
+    projectSummaries.invalidate([project]); return result;
+  }
+  if (action === 'buildEvidence') {
+    const id = encodeURIComponent(value.id);
+    if (value.kind === 'changes') return api.get('/api/fixer-diff?id=' + id);
+    const result = await api.get('/api/fixer-log?id=' + id + (value.attemptId ? '&attemptId=' + encodeURIComponent(value.attemptId) : ''));
+    return value.kind === 'checks' ? {verification: result.fixer?.verification, entries: result.entries} : result;
+  }
+  if (S.busy) throw new Error('Nibbi is still working. You can keep browsing while it finishes.');
+  if (S.demo && ['projectCommand','buildCommand','githubCommand'].includes(action)) throw new Error('Leave demo mode before changing project work.');
+  selectMarginProject(project);
+  if (action === 'githubCommand') {
+    const allowed = ['build.prDraft','build.connect','project.promotionReady','project.verifyPromotion','project.issueLink','github.prepare','github.connect','build.publish','build.prCreate','build.prReady','build.prMerge','build.prAdopt','build.verifyMerged','build.cleanup','build.adoptChanges','build.update','build.checkpoint','build.updateBase','build.adoptRemote','project.syncTarget','project.preparePromotion','project.mergePromotion','project.publishBranch'];
+    if (!allowed.includes(value.command)) throw new Error('This repository action is unavailable.');
+    const result = await githubCommand(project, value.command, value.args || {});
+    if (value.command !== 'github.prepare') { projectSummaries.invalidate([project]); void refreshStatus(); }
+    return result;
+  }
+  if (action === 'projectCommand') {
+    const result = await projectCommand(project, value);
+    if (result.section?.section) projectSummaries.accept(project, result.section.section, result.section);
+    if (result.plan?.section) projectSummaries.accept(project, result.plan.section, result.plan);
+    projectSummaries.invalidate([project]); void refreshStatus(); return result;
+  }
+  if (action === 'buildCommand') {
+    const allowed = ['run.stop','run.retry','run.verify','run.discard','run.merge','run.steer','preview.start','preview.stop','run.dispatch'];
+    if (!allowed.includes(value.command)) throw new Error('This build action is unavailable.');
+    const result = await api.command(value.command, {id:value.id, ...(value.args || {})}, project);
+    projectSummaries.invalidate([project]); void refreshStatus(); return result;
+  }
+  if (action === 'buildChanges' || action === 'buildLog') {
+    closeProjectView(false);
+    await runLocalCommand(action === 'buildChanges' ? 'diff' : 'log', value, { keepInput: true });
+    ask.focus(); return;
+  }
+  const prompts = { newBuild: '/fix ', newIssue: '/issue ', newPlan: 'Write a plan with milestones and checkbox tasks for ' + project + ' in plans/' + project + '.md: ', editPlan: '/plan edit ' };
+  if (!(action in prompts)) throw new Error('This project action is unavailable.');
+  closeProjectView(false);
+  if (ask.value.trim() || pendingImages.length) { ask.focus(); toast('Your draft is still here. Send or clear it before starting something new.'); return; }
+  ask.value = prompts[action]; ask.focus(); autosize();
+}
+
+let projectRefreshTimer = 0, allProjectRefresh = false;
+let projectActivityTimer = 0;
+const projectRefreshIds = new Set();
+function queueProjectActivity(project) {
+  if (projectActivityTimer || S.projectView?.project !== project || S.projectView?.section !== 'builds') return;
+  projectActivityTimer = setTimeout(() => { projectActivityTimer = 0; if (S.projectView?.project === project && S.projectView?.section === 'builds') void projectWorkspace.refresh(); }, 3000);
+}
+function scheduleProjectRefresh(project) {
+  if (project) projectRefreshIds.add(project); else allProjectRefresh = true;
+  if (projectRefreshTimer) return;
+  projectRefreshTimer = setTimeout(() => {
+    projectRefreshTimer = 0;
+    const ids = allProjectRefresh ? null : [...projectRefreshIds];
+    projectRefreshIds.clear(); allProjectRefresh = false;
+    projectSummaries.invalidate(ids);
+    if (S.projectView && (!ids || ids.includes(S.projectView.project))) void projectWorkspace.refresh();
+  }, 400);
+}
 
 /* ------------------------------------------------------------------ status / link */
-let linkFreshT = 0;
+let linkFreshT = 0, statusRead = 0;
 function setLink(l) {
   if (S.link !== l) { body.classList.add('link-fresh'); clearTimeout(linkFreshT); linkFreshT = setTimeout(() => body.classList.remove('link-fresh'), 2600); }
-  S.link = l; body.dataset.link = l;
-  $('.label', status).textContent = { live: 'nibbi', busy: 'working', demo: 'demo brain', offline: 'brain offline', booting: 'waking' }[l] || l;
+  S.link = l; body.dataset.link = l; syncMargins();
 }
 async function refreshStatus() {
+  const read = ++statusRead;
   try {
-    const r = await fetch('/api/snapshot', { cache: 'no-store' }); const snap = await r.json(); const h = { brain: !!snap.status, status: snap.status }; S.fixers = snap.fixers || []; S.auto = snap.auto || {}; S.goals = snap.goals || {}; S.snapshotCursor = snap.cursor;
-    if (h.brain && h.status) {
-      S.status = h.status;
-      if (!S.busy) setLink(S.demo ? 'demo' : (h.status.busy ? 'busy' : 'live'));
-      $('#st-brain').textContent = 'brain · ' + (h.status.busy ? 'busy' : 'ready') + ' · ' + Math.round((h.status.ctxTokens || 0) / 1000) + 'k ctx · ' + (h.status.turns || 0) + ' turns';
-      $('#st-session').textContent = 'session · ' + (h.status.sessionShort || '—') + (h.status.rateLimit && h.status.rateLimit.status !== 'allowed' ? ' · rate-limited' : '');
-      $('#st-model').textContent = 'model · ' + (h.status.modelOverride || 'default') + ' · $' + Number(h.status.costUsdTotal || 0).toFixed(2) + ' known lifetime cost' + (h.status.rateLimit && h.status.rateLimit.status !== 'allowed' ? ' · rate-limited until ' + new Date((h.status.rateLimit.resetsAt || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
-      const pt = h.status.playtestGame || null; if (pt !== S.playtest) { S.playtest = pt; body.classList.toggle('playtest', !!pt); ask.placeholder = pt ? 'Playtesting ' + pt + ' — tell nibbi what happened…' : 'Ask nibbi to build something...'; if (pt && document.activeElement === ask) showChips('focus'); }
-    } else {
-      if (!S.busy) { setLink(S.demo ? 'demo' : 'offline'); if (!S.demo && S.mode === 'idle' && nibbi.mood() === 'idle') nibbi.setMood('sleep'); }
-      $('#st-brain').textContent = 'brain · unreachable at ' + (h.gateway || 'gateway');
-      $('#st-session').textContent = 'launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway';
-      $('#st-model').textContent = 'model · —';
+    const r = await fetch('/api/snapshot', { cache: 'no-store' });
+    if (!r.ok) throw new Error('Snapshot unavailable');
+    const snap = await r.json(); if (read !== statusRead) return;
+    S.fixers = snap.fixers || []; S.auto = snap.auto || {}; S.goals = snap.goals || {}; S.snapshotCursor = snap.cursor;
+    S.status = snap.status || null;
+    if (S.status) {
+      if (!S.busy) setLink(S.demo ? 'demo' : (S.status.busy ? 'busy' : 'live'));
+      const pt = S.status.playtestGame || null; if (pt !== S.playtest) { S.playtest = pt; body.classList.toggle('playtest', !!pt); ask.placeholder = pt ? 'Playtesting ' + pt + ' — tell nibbi what happened…' : 'Ask nibbi to build something...'; if (pt && document.activeElement === ask) showChips('focus'); }
+    } else if (!S.busy) {
+      setLink(S.demo ? 'demo' : 'offline'); if (!S.demo && S.mode === 'idle' && nibbi.mood() === 'idle') nibbi.setMood('sleep');
     }
     renderAgents(S.fixers, S.auto); if (S.demo) fleetEvents(demoFixers()); renderProject(); refreshBadge(); reattachFixerActs();
   } catch {
-    if (!S.busy) setLink('offline');
-    $('#st-brain').textContent = 'host · not reachable (open via node server.mjs)';
+    if (read !== statusRead) return;
+    S.status = null; if (!S.busy) setLink(S.demo ? 'demo' : 'offline');
   }
-  $('#st-project').textContent = 'project: ' + activeProject() + (projectNames().length > 1 ? ' (click to switch)' : '');
-  $('#st-session').textContent += (S.sessionTurns ? ' · known sitting cost $' + S.sessionCost.toFixed(2) + ' / ' + S.sessionTurns + ' turn' + (S.sessionTurns > 1 ? 's' : '') : '');
-  $('#st-voice').textContent = 'voice: ' + (S.voiceOn ? 'on' : 'off');
-  $('#st-demo').textContent = S.demo ? 'demo brain: on (click for the real one)' : 'demo brain: off';
+  syncMargins();
 }
-$('#st-project').onclick = () => { const names = projectNames(); if (!names.length) return; const i = names.indexOf(activeProject()); send('/project ' + names[(i + 1) % names.length]); };
-$('#st-voice').onclick = () => { S.voiceOn = !S.voiceOn; LS.set('voice', S.voiceOn); body.classList.toggle('voice-on', S.voiceOn); refreshStatus(); toast(S.voiceOn ? NAME + ' will speak replies' : 'voice off'); if (S.voiceOn) speak('Okay. I\'ll talk.'); };
-$('#st-demo').onclick = () => { S.demo = !S.demo; refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); };
-$('#st-clear').onclick = () => tidy();
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
 refreshStatus().then(connectEvents); setInterval(() => { if (!evReady) refreshStatus().then(connectEvents); }, 30000);
 function mostActiveProject(list) {
@@ -1121,10 +1326,27 @@ function mostActiveProject(list) {
   for (const f of S.fixers || []) { const t = Date.parse(f.endedAt || f.startedAt || 0) || 0; const n = f.game || f.project; if (names.has(n) && t > at) { at = t; best = n; } }
   return best || autoOn[0] || null;
 }
-async function refreshProjects() { try { if (!S.auto) { try { S.auto = await api.get('/api/auto'); } catch { /* offline */ } } if (!S.fixers || !S.fixers.length) { try { S.fixers = await api.get('/api/fixers'); } catch { /* offline */ } } const r = await fetch('/api/projects'); if (!r.ok) return; const list = await r.json(); S.projects = list; const saved = LS.get('project', null); const recent = mostActiveProject(list); const g = (saved && list.find((p) => p.name === saved)) || (recent && list.find((p) => p.name === recent)) || list.find((p) => p.kind === 'game') || list[0]; if (g) S.project = g.name; const pl = []; for (const p of list.filter((x) => x.kind === 'game')) { try { const ps = await fetch('/api/play?project=' + encodeURIComponent(p.name)).then((x) => x.json()); if (ps.playable) pl.push({ name: p.name, running: ps.running, url: ps.url }); } catch { /* skip */ } } S.playable = pl; renderProject(); } catch { /* offline */ } }
+let projectsRead = 0;
+async function refreshProjects() {
+  const read = ++projectsRead;
+  try {
+    const r = await fetch('/api/projects'); if (!r.ok) return;
+    const list = await r.json(); if (read !== projectsRead || !Array.isArray(list)) return;
+    S.projects = list;
+    const saved = LS.get('project', null), recent = mostActiveProject(list);
+    // Read current selection after the await, so a refresh cannot undo a user's choice.
+    const selected = list.find(p => p.name === S.project) || list.find(p => p.name === saved) || list.find(p => p.name === recent) || list.find(p => p.kind === 'game') || list[0];
+    S.project = selected?.name || null; renderProject();
+    const playable = await Promise.all(list.filter(p => p.kind === 'game').map(async p => {
+      try { const r = await fetch('/api/play?project=' + encodeURIComponent(p.name)); if (!r.ok) return null; const ps = await r.json(); return ps.playable ? { name: p.name, running: ps.running, url: ps.url } : null; } catch { return null; }
+    }));
+    if (read !== projectsRead) return;
+    S.playable = playable.filter(Boolean); renderProject();
+  } catch { /* offline */ }
+}
 refreshProjects(); setInterval(() => { if (!document.hidden) refreshProjects(); }, 120000);
 (async () => { try { const items = await api.get('/api/history?n=12'); const recent = (Array.isArray(items) ? items : []).filter((m) => m.channel === 'app'); S.recent = recent.length > 0 && Date.now() - Date.parse(recent[recent.length - 1].ts) < 12 * 3600000; } catch { S.recent = false; } })();
-if (S.demo) { S.auto = { shipless: { on: true, mode: 'stage', inflight: 2, pending: 17, staged: 3, done: 12, total: 29, spend: 4.2 } }; renderAgents([], {}); renderProject(); }
+if (S.demo) { renderAgents([], {}); renderProject(); }
 
 /* ------------------------------------------------------------------ contextual chips */
 let chipsShown = false;
@@ -1167,7 +1389,7 @@ function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c
 /* ------------------------------------------------------------------ pill */
 function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; layout(false); }
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); activity(); });
-ask.addEventListener('focus', () => { layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
+ask.addEventListener('focus', () => { if (S.projectView) S.projectComposerExpanded = true; layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
@@ -1175,11 +1397,10 @@ ask.addEventListener('keydown', (e) => {
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else { ask.blur(); if (S.mode === 'talk' && !S.busy) tidy(); } }
 });
-pill.addEventListener('submit', (e) => { e.preventDefault(); if (S.busy) { if (S.activeRunId) { api.command('turn.stop', { id: S.activeRunId }).then(() => { S.abort?.abort(); toast('turn stopped; work preserved'); }).catch((e) => toast(e.message)); } else if (S.abort) { S.abort.abort(); toast('connection closed; check Activity for queued work'); } return; } send(ask.value, pendingImages.slice()); });
-addEventListener('keyup', (e) => { if (e.code === 'Space' && S.holdStarted && listening === true && performance.now() - (S.holdAt || 0) > 350) { S.holdStarted = false; stopListen(true); } }, { passive: true });
+pill.addEventListener('submit', (e) => { e.preventDefault(); if (!S.busy && !ask.value.trim() && !pendingImages.length && wakeVoice.snapshot().phase === 'listening' && micCapture.finishUtterance()) return; if (S.busy) { if (S.activeRunId) { api.command('turn.stop', { id: S.activeRunId }).then(() => { S.abort?.abort(); toast('turn stopped; work preserved'); }).catch((e) => toast(e.message)); } else if (S.abort) { S.abort.abort(); toast('connection closed; check Activity for queued work'); } return; } send(ask.value, pendingImages.slice()); });
 addEventListener('keydown', (e) => {
   if (keyboardInputOwned(e, true)) return;
-  if (e.altKey && e.code === 'Space') { e.preventDefault(); if (e.repeat) return; S.holdAt = performance.now(); if (!listening) { S.holdStarted = true; startListen(); } else { S.holdStarted = false; stopListen(true); } return; }
+  if (e.altKey && e.code === 'Space') { e.preventDefault(); if (!e.repeat && !window.__TAURI__?.event) void toggleListen(); return; }
   if (e.key === 'Escape' && document.activeElement !== ask && S.mode === 'talk' && !S.busy) { tidy(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.activeElement !== ask && !e.repeat && S.turns.length && !S.busy) { const map = { d: /^(diff|what changed)$/, p: /^preview$/, a: /^approve/, s: /^stop/, o: /^open/ }; const rx = map[e.key.toLowerCase()]; if (rx) { const chip = [...S.turns[S.turns.length - 1].body.querySelectorAll('.acts .chip')].find((c) => rx.test(c.textContent)); if (chip) { e.preventDefault(); chip.click(); chip.focus(); return; } } }
@@ -1200,69 +1421,126 @@ document.addEventListener('paste', (e) => { for (const it of e.clipboardData?.it
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => { e.preventDefault(); for (const f of e.dataTransfer?.files || []) addImage(f); ask.focus(); });
 
-/* ------------------------------------------------------------------ voice in (mic → /api/transcribe) */
-let listening = false, rec = null, recChunks = [], audioCtx = null, meterRaf = 0, silenceAt = 0, heardSpeech = false;
-micBtn.addEventListener('click', toggleListen);
-async function toggleListen() { if (listening) stopListen(true); else startListen(); }
-async function startListen() {
-  if (S.busy) return;
-  stopSpeaking();   // barge-in: talking interrupts nibbi
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    listening = true; pill.classList.add('listening'); listenEl.hidden = false; $('.heard', listenEl).textContent = 'listening…';
-    nibbi.setMood('listening'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.3, r.top);
-    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac'].find((m) => MediaRecorder.isTypeSupported(m));
-    recChunks = []; rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-    rec.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
-    rec.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(recChunks, { type: (rec && rec.mimeType) || 'audio/webm' });
-      if (!listening && blob.size < 400) return;
-      $('.heard', listenEl).textContent = 'hearing…';
-      try {
-        const res = await fetch('/api/transcribe', { method: 'POST', headers: { 'content-type': blob.type || 'application/octet-stream' }, body: blob });
-        const j = await res.json();
-        endListenUI();
-        if (j.heard) { ask.value = j.heard; autosize(); send(j.heard); } else toast('heard nothing');
-      } catch { endListenUI(); toast(S.demo || S.link === 'offline' ? 'voice needs the real gateway (whisper lives there)' : 'could not transcribe'); }
-    };
-    rec.start(250);
-    // level meter + silence auto-stop
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)(); const src = audioCtx.createMediaStreamSource(stream); const an = audioCtx.createAnalyser(); an.fftSize = 512; src.connect(an);
-    const buf = new Uint8Array(an.frequencyBinCount); const bars = listenEl.querySelectorAll('.bars i'); silenceAt = performance.now(); heardSpeech = false;
-    const tick = () => {
-      if (!listening) return;
-      an.getByteFrequencyData(buf); let sum = 0; for (let i = 2; i < 40; i++) sum += buf[i]; const lvl = Math.min(1, sum / (38 * 140));
-      bars.forEach((b, i) => { b.style.transform = 'scaleY(' + (0.3 + lvl * (1.6 + Math.sin(performance.now() / 90 + i) * 0.8)).toFixed(2) + ')'; });
-      nibbi.pulse(lvl * 0.5);
-      if (lvl > 0.12) { heardSpeech = true; silenceAt = performance.now(); } else if (heardSpeech && performance.now() - silenceAt > 1400) { stopListen(true); return; }
-      if (!heardSpeech && performance.now() - silenceAt > 8000) { stopListen(false); toast('heard nothing'); return; }
-      meterRaf = requestAnimationFrame(tick);
-    }; tick();
-  } catch (e) { toast('microphone unavailable'); listening = false; }
+/* ------------------------------------------------------------------ opt-in mic toggle + local “Hey Nibbi” wake gate */
+let listening = false, micStarting = false, micEpoch = 0, micProject = null, voiceCooldown = 0;
+let sayPlaying = false, sayGeneration = 0; const sayQ = [];
+const voicePlayer = createVoicePlayer({
+  onStart: () => nibbi.setMood('speaking'),
+  onEnd: () => { voiceCooldown = performance.now() + 500; if (!S.busy && nibbi.mood() === 'speaking') nibbi.setMood('idle'); },
+  onLevel: level => nibbi.pulse(level),
+});
+const wakeVoice = createWakeVoice({
+  transcribe: async (blob, signal) => {
+    const controller = new AbortController(); let timedOut = false;
+    const cancel = () => controller.abort(); signal.addEventListener('abort', cancel, { once: true });
+    if (signal.aborted) controller.abort();
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 25000);
+    try {
+      const response = await fetch('/api/transcribe', { method: 'POST', headers: { 'content-type': blob.type || 'application/octet-stream' }, body: blob, signal: controller.signal });
+      if (!response.ok) throw new Error('Could not hear you. Check the local speech service.');
+      const result = await response.json(); return result.heard || '';
+    } catch (error) {
+      if (timedOut) throw new Error('Speech recognition took too long. Try “Hey Nibbi” again.');
+      throw error;
+    } finally { clearTimeout(timeout); signal.removeEventListener('abort', cancel); }
+  },
+  greet: async (text, signal) => { activity(); await voicePlayer.play(text, signal); },
+  send: async text => {
+    if (!listening || S.busy || activeProject() !== micProject) return;
+    // Voice must not erase a typed draft or silently attach images from another message.
+    if (ask.value.trim() || pendingImages.length) { toast('Finish your draft, then say “Hey Nibbi” again.'); return; }
+    await send(text);
+  },
+  onState: () => { renderVoice(); syncVoiceAvailability(); },
+  onError: error => { if (error?.name !== 'AbortError') toast(error?.message || 'Voice is unavailable. Try again.'); },
+});
+const micCapture = createMicCapture({
+  canCapture: () => {
+    if (listening && activeProject() !== micProject) { stopListen(); toast('Mic off — project changed.'); return false; }
+    syncVoiceAvailability();
+    return listening && ['armed', 'listening'].includes(wakeVoice.snapshot().phase) && performance.now() >= voiceCooldown;
+  },
+  silenceMs: () => wakeVoice.snapshot().phase === 'listening' ? 900 : 750,
+  onSpeechStart: () => { S.micCapturing = true; wakeVoice.holdFollowup(); renderVoice(); },
+  onSpeechEnd: () => { S.micCapturing = false; renderVoice(); },
+  onUtterance: blob => wakeVoice.submit(blob),
+  onLevel: level => {
+    for (const [i, bar] of [...listenEl.querySelectorAll('.bars i')].entries()) bar.style.transform = 'scaleY(' + (0.5 + level * (1.6 + Math.sin(performance.now() / 90 + i) * 0.6)).toFixed(2) + ')';
+    if (wakeVoice.snapshot().phase === 'listening') nibbi.pulse(level * 0.5);
+  },
+  onError: error => { stopListen(); toast(error?.message || 'Microphone unavailable.'); },
+});
+function syncVoiceAvailability() {
+  const phase = wakeVoice.snapshot().phase;
+  if (!listening || micStarting || phase === 'sending') return;
+  // The gate owns its greeting; external replies/typed turns must cancel a pending wake.
+  const blocked = S.busy || sayPlaying || S.demo || S.link === 'offline' || !!ask.value.trim() || !!pendingImages.length || (phase !== 'greeting' && phase !== 'listening' && performance.now() < voiceCooldown);
+  wakeVoice.setSuspended(blocked);
 }
-function stopListen(keep) { if (!listening) return; listening = keep ? 'sending' : false; cancelAnimationFrame(meterRaf); try { rec && rec.state !== 'inactive' && rec.stop(); } catch { /* already */ } if (!keep) endListenUI(); }
-function endListenUI() { listening = false; pill.classList.remove('listening'); listenEl.hidden = true; if (audioCtx) { audioCtx.close(); audioCtx = null; } if (!S.busy) { nibbi.setMood('idle'); nibbi.lookFree(); } }
+function renderVoice() {
+  const state = wakeVoice.snapshot();
+  const finishing = listening && micCapture.snapshot().finishing && ['armed', 'listening'].includes(state.phase);
+  const phase = micStarting ? 'starting' : finishing ? 'transcribing' : state.phase;
+  S.micEnabled = listening; S.micPhase = phase;
+  micBtn.setAttribute('aria-pressed', String(listening));
+  micBtn.title = (listening ? 'Hey Nibbi is on — turn microphone off' : 'Hey Nibbi is off — turn microphone on') + ' (⌥ Space)';
+  body.dataset.mic = phase; pill.classList.toggle('mic-on', listening); pill.classList.toggle('listening', phase === 'listening');
+  listenEl.hidden = !listening;
+  const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: "What's up, Matty?", listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
+  $('.heard', listenEl).textContent = labels[phase] || '';
+  if (!S.busy) {
+    const finishVoice = phase === 'listening' && S.micCapturing;
+    sendBtn.setAttribute('aria-label', finishVoice ? 'Finish voice message' : 'send');
+    sendBtn.title = finishVoice ? 'Finish this voice message now' : 'Send message';
+  }
+  if (phase === 'listening') { nibbi.setMood('listening'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.3, r.top); }
+  else if (!S.busy && nibbi.mood() === 'listening') { nibbi.setMood('idle'); nibbi.lookFree(); }
+  syncMargins(); layout(false);
+}
+micBtn.addEventListener('click', () => { void toggleListen(); });
+async function toggleListen() {
+  if (listening) { stopListen(); return; }
+  if (S.demo || S.link === 'offline') { toast('Voice needs Nibbi’s local gateway and speech service.'); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { toast('Microphone unavailable. Open Nibbi on localhost or paired HTTPS.'); return; }
+  listening = true; micStarting = true; micProject = activeProject(); const epoch = ++micEpoch;
+  activity(); stopSpeaking(); renderVoice();
+  // Explicit click/shortcut unlocks future audio. Do not reopen the mic automatically on reload.
+  void voicePlayer.unlock().catch(() => {});
+  try {
+    const started = await micCapture.start();
+    if (epoch !== micEpoch || !listening || !started) return;
+    micStarting = false; wakeVoice.enable(); syncVoiceAvailability(); renderVoice();
+  } catch (error) {
+    if (epoch !== micEpoch) return;
+    stopListen();
+    toast(error?.name === 'NotAllowedError' ? 'Microphone blocked. Allow Nibbi in microphone settings, then turn it on.' : error?.message || 'Microphone unavailable.');
+  }
+}
+function stopListen() {
+  micEpoch++; listening = false; micStarting = false; wakeVoice.disable(); micCapture.stop(); stopSpeaking(); renderVoice();
+}
+renderVoice();
+addEventListener('pagehide', stopListen);
+document.addEventListener('visibilitychange', () => { if (document.hidden && listening) stopListen(); });
 
-/* ------------------------------------------------------------------ voice out (/api/say → kokoro): sentence-streamed queue + barge-in */
-let speakingAudio = null; const sayQ = []; let sayPlaying = false, sayCtx = null;
-function stopSpeaking() { sayQ.length = 0; if (speakingAudio) { try { speakingAudio.pause(); } catch { /* */ } speakingAudio = null; } sayPlaying = false; if (!S.busy && nibbi.mood() === 'speaking') nibbi.setMood('idle'); }
+/* ------------------------------------------------------------------ cancellable local voice out + sentence queue */
+function stopSpeaking() {
+  sayGeneration++; sayQ.length = 0; sayPlaying = false; voicePlayer.stop();
+  if (!S.busy && nibbi.mood() === 'speaking') nibbi.setMood('idle');
+}
 function enqueueSay(text) {
   const t = String(text || '').trim(); if (!t || !S.voiceOn || S.demo || S.link === 'offline') return;
-  sayQ.push(t.slice(0, 600)); if (!sayPlaying) playNext();
+  sayQ.push(t.slice(0, 600)); if (!sayPlaying) void playNext();
 }
 async function playNext() {
-  const t = sayQ.shift(); if (!t) { sayPlaying = false; if (!S.busy && nibbi.mood() === 'speaking') nibbi.setMood('idle'); return; }
-  sayPlaying = true;
+  if (sayPlaying) return;
+  const epoch = sayGeneration; sayPlaying = true; syncVoiceAvailability();
   try {
-    const a = new Audio('/api/say?text=' + encodeURIComponent(t)); speakingAudio = a;
-    sayCtx = sayCtx || new (window.AudioContext || window.webkitAudioContext)(); const src = sayCtx.createMediaElementSource(a); const an = sayCtx.createAnalyser(); an.fftSize = 256; src.connect(an); an.connect(sayCtx.destination);
-    const buf = new Uint8Array(an.frequencyBinCount);
-    nibbi.setMood('speaking');
-    const tick = () => { if (a.paused || a.ended) return; an.getByteTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; } nibbi.pulse(Math.min(1, Math.sqrt(s / buf.length) * 6)); requestAnimationFrame(tick); };
-    a.onplay = tick; a.onended = a.onerror = () => { if (speakingAudio === a) speakingAudio = null; playNext(); };
-    await a.play();
-  } catch { speakingAudio = null; playNext(); }
+    while (sayQ.length && epoch === sayGeneration) {
+      try { await voicePlayer.play(sayQ.shift()); }
+      catch (error) { if (epoch === sayGeneration && error?.name !== 'AbortError') { sayQ.length = 0; toast(error.message || 'Nibbi’s voice is unavailable.'); } }
+    }
+  } finally { if (epoch === sayGeneration) { sayPlaying = false; syncVoiceAvailability(); } }
 }
 /* streaming: speak sentences as they complete (unless the brain wrote a »voice: line — then only that) */
 let sentenceCursor = 0, sentencesSpoken = 0;
@@ -1283,6 +1561,8 @@ async function speak(text) {
 
 /* ------------------------------------------------------------------ boot */
 syncMotionPreference(); interactions.event('greet');
+void refreshNotificationPermission();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshNotificationPermission(); });
 if ('serviceWorker' in navigator && window.isSecureContext && !Q.get('nosw')) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 if (standalone) body.classList.add('standalone');
@@ -1293,9 +1573,9 @@ document.addEventListener('click', (e) => { const a = e.target.closest && e.targ
 /* live state report: the running app tells the host what it is showing (loopback-readable at /nibbi/state) */
 let stateTimer = 0;
 function snapshot() {
-  return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
+  return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mic: { enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }, mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
     turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => s.textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
-    chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), toast: $('#toast').hidden ? null : $('#toast').textContent };
+    chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectWorkspace.snapshot(), composerCollapsed: body.classList.contains('project-compose-compact'), toast: $('#toast').hidden ? null : $('#toast').textContent };
 }
 function persistTranscript() {
   try {
@@ -1326,5 +1606,5 @@ const _toast = toast; window.__toastLog = true;
 
 addEventListener('pagehide', () => LS.set('lastSeen', Date.now()));
 document.addEventListener('visibilitychange', () => { if (document.hidden) LS.set('lastSeen', Date.now()); });
-window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout, interactions };
+window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout, interactions, voice: { snapshot: () => ({ enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }) } };
 })();
