@@ -1,5 +1,6 @@
 import { CommandRequestSchema, ProjectSettingsSchema, SkillRefSchema, failure, success, type CommandResult } from '@nibbi/contracts';
 import { z } from 'zod';
+import { executeGithubCommand } from './github-builds.js';
 import { runtime } from './store.js';
 import { createProject, registerProject, updateProject } from './projects.js';
 import { approveFixer, discardFixer, spawnFixer, queueFix, requeueFix, stopFixer, stopAllFixers, stopGroup, mergeGroup, steerFixer, setAuto, previewStart, previewStop, playStart, playStop } from './fixer.js';
@@ -24,7 +25,7 @@ export async function executeCommand(input: unknown, notify: (message: string) =
     try {
       switch (command.name) {
         case 'run.dispatch': case 'run.queue': {
-          const opts = z.object({ provider: z.enum(['claude', 'codex']).optional(), model: z.string().optional(), title: z.string().optional(), context: z.string().optional(), task: z.string().optional(), taskId: z.string().optional(), group: z.string().optional() }).parse(a);
+          const opts = z.object({ provider: z.enum(['claude', 'codex']).optional(), model: z.string().optional(), title: z.string().optional(), context: z.string().optional(), task: z.string().optional(), taskId: z.string().optional(), group: z.string().optional(), issueIds: z.array(z.string().regex(/^[a-zA-Z0-9_-]+$/)).max(100).optional() }).parse(a);
           const project = projectId(command.projectId ?? a.project), issue = text(a.issue);
           data = command.name === 'run.dispatch' ? spawnFixer(project, issue, notify, opts) : queueFix(project, issue, opts); break;
         }
@@ -60,7 +61,7 @@ export async function executeCommand(input: unknown, notify: (message: string) =
         case 'preview.stop': message = previewStop(text(a.id)); break;
         case 'play.start': data = playStart(projectId(command.projectId ?? a.project)); if ((data as { error?: string }).error) throw new Error((data as { error: string }).error); break;
         case 'play.stop': message = playStop(projectId(command.projectId ?? a.project)); break;
-        default: throw new Error('Unknown command: ' + command.name);
+        default: data = await executeGithubCommand(command.name, projectId(command.projectId ?? a.project), a, notify); break;
       }
       const result = success(data ?? { text: message }, message); store.finishCommand(command.idempotencyKey, result); return result;
     } catch (error) { const result = failure('command_failed', (error as Error).message); store.finishCommand(command.idempotencyKey, result); return result; }

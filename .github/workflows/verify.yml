@@ -12,11 +12,13 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: command -v rg || brew install ripgrep
       - run: npm ci
+      - run: npx playwright install chromium
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npx playwright install chromium
       - run: npm run verify
+        env: { CI: '1' }
+      - run: node tools/github-workflow-verify.mjs
         env: { CI: '1' }
       - run: npm run test:fresh
       - name: Preserve browser evidence

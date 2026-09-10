@@ -32,13 +32,15 @@ export async function sandboxCommand(cwd: string, command: string, options: { si
       allowWrite: [root, scratch],
       denyWrite: [...getDefaultWritePaths().filter(path => !path.startsWith('/dev/')), '**/.git', '**/.claude', '**/.codex', '**/.agents', '**/AGENTS.md', '**/CLAUDE.md'],
     },
-    network: { allowedDomains: options.domains ?? [], deniedDomains: [], allowLocalBinding: true },
+    // Toolchains such as tsx use a local Unix socket beneath TMPDIR. Permit
+    // only this command's private scratch sockets, never host service sockets.
+    network: { allowedDomains: options.domains ?? [], deniedDomains: [], allowLocalBinding: true, allowUnixSockets: [scratch] },
   };
   const file = join(directory, 'settings.json'); writeFileSync(file, JSON.stringify(settings), { mode: 0o600 });
   const source = import.meta.url.endsWith('.ts');
   const worker = fileURLToPath(new URL(source ? './sandbox-worker.ts' : './sandbox-worker.js', import.meta.url));
   return execute(root, process.execPath, [...(source ? ['--import', require.resolve('tsx')] : []), worker, file, command, searchPath], {
     ...options, timeoutMs: options.timeoutMs ?? 10 * 60_000,
-    env: { ...safeEnvironment(), TMPDIR: scratch, npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: npmUser, npm_config_globalconfig: npmGlobal, npm_config_update_notifier: 'false', npm_config_audit: 'false', npm_config_fund: 'false', PYTHONDONTWRITEBYTECODE: '1' },
+    env: { ...safeEnvironment(), TMPDIR: scratch, npm_config_cache: join(scratch, 'npm-cache'), npm_config_devdir: join(scratch, 'node-gyp'), npm_config_userconfig: npmUser, npm_config_globalconfig: npmGlobal, npm_config_update_notifier: 'false', npm_config_audit: 'false', npm_config_fund: 'false', PYTHONDONTWRITEBYTECODE: '1' },
   });
 }

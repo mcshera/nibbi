@@ -37,3 +37,10 @@ export const ProjectSettingsSchema = z.object({
 });
 export function success<T>(data: T, text?: string): CommandResult<T> { return { ok: true, data, ...(text ? { text } : {}) }; }
 export function failure(code: string, message: string, retryable = false): CommandResult<never> { return { ok: false, error: { code, message, retryable } }; }
+
+/** GitHub writes execute only persisted reviews; these names never accept raw shell arguments. */
+export const GithubOperationNameSchema = z.enum(['github.connect', 'build.publish', 'build.prCreate', 'build.prAdopt', 'build.connect', 'build.prReady', 'build.prDraft', 'build.prMerge', 'build.verifyMerged', 'project.publishBranch', 'project.syncTarget', 'project.preparePromotion', 'project.mergePromotion', 'project.promotionReady', 'project.verifyPromotion', 'project.issueLink', 'build.cleanup', 'build.adoptChanges', 'build.update', 'build.checkpoint', 'build.updateBase', 'build.adoptRemote']);
+export type GithubOperationName = z.infer<typeof GithubOperationNameSchema>;
+export const GithubExecuteSchema = z.object({ operationId: z.string().regex(/^ghop-[a-f0-9-]+$/) }).strict();
+export const GithubFreshnessSchema = z.object({ status: z.enum(['fresh','stale','error','not_connected']), observedAt: z.number().nullable(), error: z.string().optional() });
+export interface GithubReview { operationId: string; operation: GithubOperationName; state: string; review: Record<string, unknown>; expiresAt: number }

@@ -4,18 +4,14 @@ import { autoConfig, autoSpend, drainQueues, inflightFor, integrate, listFixers,
 import { leadBusy, runTurn } from './session.js';
 import { games } from './projects.js';
 import { roadmap } from './roadmap.js';
+import { connectionFor } from './github-repositories.js';
 
-export interface Schedule { id: string; name: string; pattern: string; when: string; desc: string; prompt: string; enabled: boolean; next?: string; last?: number; error?: string }
-const defaults: Schedule[] = [
-  { id: 'heartbeat', name: 'heartbeat', pattern: '*/30 8-23 * * *', when: 'every 30 min · 8am–11pm', desc: 'Read the watching list; report only what needs attention.', prompt: 'Read HEARTBEAT.md. Report only what needs attention; otherwise reply HEARTBEAT_OK. Do not dispatch work.', enabled: false },
-  { id: 'brief', name: 'morning brief', pattern: '30 7 * * *', when: '7:30 AM daily', desc: 'A short brief from journal, issues and inbox.', prompt: 'Read recent journal, issues and inbox. Compose a concise morning brief.', enabled: false },
-  { id: 'consolidate', name: 'consolidation', pattern: '0 3 * * *', when: '3:00 AM daily', desc: 'File durable notes into unprotected vault pages.', prompt: 'Review recent journal and inbox. File durable facts into unprotected vault pages. Do not remove source evidence or activate skills.', enabled: false },
-  { id: 'review', name: 'weekly self-review', pattern: '0 18 * * 0', when: 'Sundays 6:00 PM', desc: 'Review lessons; propose improvements for owner review.', prompt: 'Review recent journal and work. Write a weekly brief with shipped work, repeated lessons and possible skill candidates. Learned skills require two evidence runs and owner review; never enable them yourself.', enabled: false },
-];
+import { scheduleSettings, type Schedule } from './schedule-config.js';
+export type { Schedule } from './schedule-config.js';
+
 export function schedules(): Schedule[] {
-  return defaults.map(def => {
-    const saved = runtime().get<Partial<Schedule>>('schedules', def.id) ?? {};
-    const result = { ...def, ...saved }; const cron = new Cron(result.pattern, { paused: true }); result.next = cron.nextRun()?.toISOString(); cron.stop(); return result;
+  return scheduleSettings().map(result => {
+    const cron = new Cron(result.pattern, { paused: true }); result.next = cron.nextRun()?.toISOString(); cron.stop(); return result;
   });
 }
 export function configureSchedule(id: string, enabled: boolean): Schedule {
@@ -61,7 +57,8 @@ export async function schedulerCycle(notify: (message: string) => Promise<void>)
     if (now - lastAuto < 90_000) return; lastAuto = now;
     for (const [project, cfg] of Object.entries(autoConfig())) {
       if (!cfg.on || stopped) continue;
-      const recent = listFixers().filter(run => run.game === project && run.startedAt >= (cfg.onAt ?? ''));
+      if (cfg.mode === 'ship' && connectionFor(project)?.workflowMode === 'github') { setAuto(project, { mode: 'off', note: 'GitHub delivery requires reviewed PR actions. Legacy ship automation is paused.' }); continue; }
+      const recent = listFixers().filter(run => run.game === project && (run.latestAttemptStartedAt ?? run.startedAt) >= (cfg.onAt ?? ''));
       if (recent.some(run => ['failed', 'interrupted', 'cancelled'].includes(run.status))) { setAuto(project, { mode: 'off', note: 'A run needs review. Work is preserved; automatic retries are paused.' }); continue; }
       if (cfg.spendCap && (autoSpend(project) >= cfg.spendCap || recent.some(run => ['staged', 'done', 'merged'].includes(run.status) && run.costUsd === undefined))) {
         setAuto(project, { mode: 'off', note: 'Spend cap reached, or provider cost is unavailable. Review before resuming.' }); continue;
