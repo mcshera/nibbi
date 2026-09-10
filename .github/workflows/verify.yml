@@ -1,5 +1,5 @@
 name: verify
-on: [push, pull_request]
+on: [push, pull_request, merge_group, workflow_dispatch]
 permissions:
   contents: read
 jobs:
@@ -19,3 +19,11 @@ jobs:
       - run: npm run verify
         env: { CI: '1' }
       - run: npm run test:fresh
+      - name: Preserve browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: output/playwright/
+          if-no-files-found: ignore
+          retention-days: 7
