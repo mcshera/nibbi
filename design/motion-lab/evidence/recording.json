@@ -1,0 +1,10 @@
+{
+  "frames": 411,
+  "seconds": 13.7,
+  "fps": 30,
+  "method": "Offline deterministic frame rendering, then FFmpeg encoding; not real-time performance evidence",
+  "size": [
+    1200,
+    540
+  ]
+}

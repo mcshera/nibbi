@@ -1,7 +1,7 @@
 {
   "name": "Nibbi",
   "short_name": "Nibbi",
-  "description": "Oracle's face: a little ink blot that builds games and web projects with you.",
+  "description": "Your local agent companion for projects, memory and reviewed skills.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,13 +10,13 @@
   "theme_color": "#f5f2ec",
   "icons": [
     {
-      "src": "icons/icon-192.png",
+      "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "icons/icon-512.png",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

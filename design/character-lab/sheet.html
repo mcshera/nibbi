@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Nibbi character sheet</title>
+<style>
+  @font-face { font-family: Geist; src: url(/public/fonts/GeistVF.woff2) format('woff2'); font-weight: 100 900; }
+  @font-face { font-family: 'Geist Mono'; src: url(/public/fonts/GeistMonoVF.woff2) format('woff2'); font-weight: 100 900; }
+  body { margin: 0; background: #f3f0ea; color: #1b1a18; font: 14px/1.4 Geist, system-ui, sans-serif; }
+  .sheet { padding: 20px 24px 28px; }
+  h1 { font-size: 22px; margin: 0 0 2px; font-weight: 600; }
+  .sub { color: #6b665e; font: 12px 'Geist Mono', monospace; margin-bottom: 10px; }
+  table { border-collapse: collapse; }
+  th { font: 11px 'Geist Mono', monospace; color: #6b665e; text-align: left; padding: 6px 8px 2px; font-weight: 500; }
+  th.row { vertical-align: top; padding-top: 14px; width: 62px; }
+  td { padding: 2px 4px; vertical-align: middle; }
+  canvas { display: block; border-radius: 6px; }
+  .sizes { display: flex; gap: 8px; align-items: flex-end; }
+  .stack { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+</style></head>
+<body><div class="sheet" id="sheet"></div>
+<script type="module">
+import { ACTIONS } from './actions.mjs';
+import * as ink from './ink.mjs';
+const q = new URLSearchParams(location.search);
+const ids = (q.get('ids') || '').split(',').filter(Boolean);
+const fracs = (q.get('fracs') || '0,.2,.45,.7,.9').split(',').map(Number);
+const energy = Number(q.get('energy') || 1), reduced = q.get('reduced') === '1', tint = q.get('tint') || null;
+const R = 42, cellW = Math.round(3.4 * R), cellH = Math.round(3.6 * R); // hero cell scaled for the sheet; matches the contract stage
+const dpr = Math.min(2, window.devicePixelRatio || 1);
+function canvasEl(w, h) { const c = document.createElement('canvas'); c.width = w * dpr; c.height = h * dpr; c.style.width = w + 'px'; c.style.height = h + 'px'; const ctx = c.getContext('2d'); ctx.scale(dpr, dpr); return { c, ctx }; }
+function draw(mod, action, frac, Rpx, w, h, tag) {
+  const { c, ctx } = canvasEl(w, h);
+  ink.paper(ctx, w, h, { grain: 0 });
+  const s = mod.sample(action, mod.durationFor(action) * frac, { energy, reduced });
+  const footX = w / 2, footY = h - 0.5 * Rpx;
+  mod.render(ctx, s, { R: Rpx, footX, footY, time: 1.7 + frac * 9, reduced, tint, size: tag });
+  return c;
+}
+const root = document.getElementById('sheet');
+if (q.get('mode') === 'matrix') {
+  // rows: options · columns: moments at 45% · each cell: hero over chat-row size
+  const fracParam = q.get('frac'); const frac = Number(fracParam || .45); const useStills = !fracParam;
+  const h1 = document.createElement('h1'); h1.textContent = useStills ? 'Nibbi — five options × nine moments (each option’s declared signature still)' : `Nibbi — five options × nine moments (${Math.round(frac * 100)}% of each gesture)`; root.appendChild(h1);
+  const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = `rows: options · columns: moments · big = hero stage, small = 24px chat-row avatar · energy ${energy}${reduced ? ' · reduced motion' : ''}`; root.appendChild(sub);
+  const table = document.createElement('table');
+  const head = table.insertRow(); head.insertCell().outerHTML = '<th></th>';
+  for (const a of ACTIONS) head.insertCell().outerHTML = `<th>${a.label}</th>`;
+  const Rm = 30, cw = Math.round(3.4 * Rm), ch = Math.round(3.6 * Rm);
+  for (const id of ids) {
+    const mod = await import(`./options/${id}.mjs`);
+    const tr = table.insertRow(); tr.insertCell().outerHTML = `<th class="row">${mod.meta.name}</th>`;
+    for (const a of ACTIONS) {
+      const td = tr.insertCell(); const wrap = document.createElement('div'); wrap.className = 'stack';
+      const f = useStills ? (mod.stillAt?.[a.id] ?? .45) : frac;
+      wrap.appendChild(draw(mod, a.id, f, Rm, cw, ch, 'hero')); wrap.appendChild(draw(mod, a.id, f, 12, 42, 44, 'tiny')); td.appendChild(wrap);
+    }
+  }
+  root.appendChild(table);
+} else
+for (const id of ids) {
+  const mod = await import(`./options/${id}.mjs`);
+  const h1 = document.createElement('h1'); h1.textContent = `${mod.meta.name} — ${mod.meta.tagline}`; root.appendChild(h1);
+  const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = `${id}.mjs · rows: actions · columns: fraction of duration · energy ${energy}${reduced ? ' · reduced motion' : ''} · last columns: pill 52px / chat row 24px at 45%`; root.appendChild(sub);
+  const table = document.createElement('table');
+  const head = table.insertRow(); head.insertCell().outerHTML = '<th></th>';
+  for (const f of fracs) head.insertCell().outerHTML = `<th>${Math.round(f * 100)}%</th>`;
+  head.insertCell().outerHTML = '<th>pill · chat row</th>';
+  for (const a of ACTIONS) {
+    const tr = table.insertRow(); tr.insertCell().outerHTML = `<th class="row">${a.label}<br><span style="font-weight:400">${mod.durationFor(a.id).toFixed(1)}s</span></th>`;
+    for (const f of fracs) tr.insertCell().appendChild(draw(mod, a.id, f, R, cellW, cellH, 'hero'));
+    const td = tr.insertCell(); const wrap = document.createElement('div'); wrap.className = 'sizes';
+    wrap.appendChild(draw(mod, a.id, .45, 26, 90, 94, 'pill')); wrap.appendChild(draw(mod, a.id, .45, 12, 42, 44, 'tiny'));
+    td.appendChild(wrap);
+  }
+  root.appendChild(table);
+}
+await document.fonts.ready;
+window.sheetReady = true;
+</script></body></html>

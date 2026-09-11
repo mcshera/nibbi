@@ -1,0 +1,561 @@
+{
+  "checks": [
+    {
+      "name": "Five options load in the lab",
+      "ids": [
+        "inkdrop",
+        "sumi",
+        "cutout",
+        "sketch",
+        "glyph"
+      ]
+    },
+    {
+      "name": "3645 poses inside the stage with eyes inside the body (5 options × 9 moments × 3 energies × 9 times × 3 sizes)",
+      "samples": 3645
+    },
+    {
+      "name": "Reduced motion: every option × moment is pixel-identical across time (no motion, no texture drift)"
+    },
+    {
+      "name": "Quiet idle: hero ink box moves ≤ 8 px between idle instants",
+      "idle": [
+        {
+          "id": "inkdrop",
+          "dx": 0,
+          "dy": 2
+        },
+        {
+          "id": "sumi",
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "id": "cutout",
+          "dx": 2,
+          "dy": 0
+        },
+        {
+          "id": "sketch",
+          "dx": 0,
+          "dy": 2
+        },
+        {
+          "id": "glyph",
+          "dx": 0,
+          "dy": 2
+        }
+      ]
+    },
+    {
+      "name": "Legibility evidence recorded (normalised to ink area) for normal and reduced mode at 24 px and hero",
+      "tiny": {
+        "inkdrop": "6/8 states differ from idle · 3 indistinct pairs",
+        "sumi": "6/8 states differ from idle · 2 indistinct pairs",
+        "cutout": "6/8 states differ from idle · 4 indistinct pairs",
+        "sketch": "6/8 states differ from idle · 4 indistinct pairs",
+        "glyph": "7/8 states differ from idle · 1 indistinct pairs"
+      },
+      "hero": {
+        "inkdrop": "6/8 states differ from idle · 3 indistinct pairs",
+        "sumi": "6/8 states differ from idle · 2 indistinct pairs",
+        "cutout": "6/8 states differ from idle · 4 indistinct pairs",
+        "sketch": "6/8 states differ from idle · 2 indistinct pairs",
+        "glyph": "8/8 states differ from idle · 0 indistinct pairs"
+      },
+      "heroReduced": {
+        "inkdrop": "6/8 states differ from idle · 3 indistinct pairs",
+        "sumi": "6/8 states differ from idle · 3 indistinct pairs",
+        "cutout": "8/8 states differ from idle · 0 indistinct pairs",
+        "sketch": "7/8 states differ from idle · 1 indistinct pairs",
+        "glyph": "8/8 states differ from idle · 0 indistinct pairs"
+      },
+      "tinyReduced": {
+        "inkdrop": "6/8 states differ from idle · 4 indistinct pairs",
+        "sumi": "6/8 states differ from idle · 4 indistinct pairs",
+        "cutout": "8/8 states differ from idle · 0 indistinct pairs",
+        "sketch": "7/8 states differ from idle · 2 indistinct pairs",
+        "glyph": "8/8 states differ from idle · 1 indistinct pairs"
+      }
+    },
+    {
+      "name": "Hero signature stills: every option separates ≥ 6 of 8 states from idle"
+    },
+    {
+      "name": "Controls: cue buttons, number keys, space pause"
+    },
+    {
+      "name": "No console or page errors"
+    },
+    {
+      "name": "Mobile 390 px: no horizontal overflow, sticky cue bar",
+      "overflow": 0
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently"
+  ],
+  "environment": "local Chrome via Playwright, Canvas2D; not a real-device performance benchmark",
+  "legibility": {
+    "indistinctThreshold": 0.06,
+    "method": "mean |Δ| over the union of both ink bounding boxes (+2px) of each option’s declared signature still; 36 pairs per option",
+    "tiny": {
+      "inkdrop": {
+        "indistinct": [
+          "hello/work 0.035",
+          "idle/tap 0.038",
+          "idle/work 0.055"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "hello/work",
+            "diff": 0.035
+          },
+          {
+            "pair": "idle/tap",
+            "diff": 0.038
+          },
+          {
+            "pair": "idle/work",
+            "diff": 0.055
+          }
+        ],
+        "medianDiff": 0.145,
+        "distinctFromIdle": 6
+      },
+      "sumi": {
+        "indistinct": [
+          "idle/work 0.050",
+          "idle/tap 0.058"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/work",
+            "diff": 0.05
+          },
+          {
+            "pair": "idle/tap",
+            "diff": 0.058
+          },
+          {
+            "pair": "work/tap",
+            "diff": 0.061
+          }
+        ],
+        "medianDiff": 0.118,
+        "distinctFromIdle": 6
+      },
+      "cutout": {
+        "indistinct": [
+          "idle/success 0.027",
+          "work/success 0.034",
+          "listen/think 0.035",
+          "idle/work 0.037"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/success",
+            "diff": 0.027
+          },
+          {
+            "pair": "work/success",
+            "diff": 0.034
+          },
+          {
+            "pair": "listen/think",
+            "diff": 0.035
+          }
+        ],
+        "medianDiff": 0.207,
+        "distinctFromIdle": 6
+      },
+      "sketch": {
+        "indistinct": [
+          "idle/hello 0.035",
+          "idle/think 0.042",
+          "hello/think 0.050",
+          "listen/think 0.054"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/hello",
+            "diff": 0.035
+          },
+          {
+            "pair": "idle/think",
+            "diff": 0.042
+          },
+          {
+            "pair": "hello/think",
+            "diff": 0.05
+          }
+        ],
+        "medianDiff": 0.139,
+        "distinctFromIdle": 6
+      },
+      "glyph": {
+        "indistinct": [
+          "idle/listen 0.058"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/listen",
+            "diff": 0.058
+          },
+          {
+            "pair": "think/work",
+            "diff": 0.074
+          },
+          {
+            "pair": "listen/work",
+            "diff": 0.074
+          }
+        ],
+        "medianDiff": 0.168,
+        "distinctFromIdle": 7
+      }
+    },
+    "hero": {
+      "inkdrop": {
+        "indistinct": [
+          "hello/work 0.037",
+          "idle/tap 0.041",
+          "idle/work 0.055"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "hello/work",
+            "diff": 0.037
+          },
+          {
+            "pair": "idle/tap",
+            "diff": 0.041
+          },
+          {
+            "pair": "idle/work",
+            "diff": 0.055
+          }
+        ],
+        "medianDiff": 0.157,
+        "distinctFromIdle": 6
+      },
+      "sumi": {
+        "indistinct": [
+          "idle/work 0.041",
+          "idle/tap 0.048"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/work",
+            "diff": 0.041
+          },
+          {
+            "pair": "idle/tap",
+            "diff": 0.048
+          },
+          {
+            "pair": "work/tap",
+            "diff": 0.063
+          }
+        ],
+        "medianDiff": 0.129,
+        "distinctFromIdle": 6
+      },
+      "cutout": {
+        "indistinct": [
+          "idle/success 0.031",
+          "listen/think 0.037",
+          "work/success 0.046",
+          "idle/work 0.046"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/success",
+            "diff": 0.031
+          },
+          {
+            "pair": "listen/think",
+            "diff": 0.037
+          },
+          {
+            "pair": "work/success",
+            "diff": 0.046
+          }
+        ],
+        "medianDiff": 0.229,
+        "distinctFromIdle": 6
+      },
+      "sketch": {
+        "indistinct": [
+          "idle/work 0.031",
+          "idle/hello 0.055"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/work",
+            "diff": 0.031
+          },
+          {
+            "pair": "idle/hello",
+            "diff": 0.055
+          },
+          {
+            "pair": "hello/work",
+            "diff": 0.072
+          }
+        ],
+        "medianDiff": 0.101,
+        "distinctFromIdle": 6
+      },
+      "glyph": {
+        "indistinct": [],
+        "weakestPairs": [
+          {
+            "pair": "idle/listen",
+            "diff": 0.063
+          },
+          {
+            "pair": "listen/work",
+            "diff": 0.077
+          },
+          {
+            "pair": "think/work",
+            "diff": 0.083
+          }
+        ],
+        "medianDiff": 0.179,
+        "distinctFromIdle": 8
+      }
+    },
+    "heroReduced": {
+      "inkdrop": {
+        "indistinct": [
+          "idle/success 0.035",
+          "idle/tap 0.046",
+          "work/tap 0.050"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/success",
+            "diff": 0.035
+          },
+          {
+            "pair": "idle/tap",
+            "diff": 0.046
+          },
+          {
+            "pair": "work/tap",
+            "diff": 0.05
+          }
+        ],
+        "medianDiff": 0.141,
+        "distinctFromIdle": 6
+      },
+      "sumi": {
+        "indistinct": [
+          "idle/tap 0.034",
+          "idle/work 0.040",
+          "work/tap 0.050"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/tap",
+            "diff": 0.034
+          },
+          {
+            "pair": "idle/work",
+            "diff": 0.04
+          },
+          {
+            "pair": "work/tap",
+            "diff": 0.05
+          }
+        ],
+        "medianDiff": 0.134,
+        "distinctFromIdle": 6
+      },
+      "cutout": {
+        "indistinct": [],
+        "weakestPairs": [
+          {
+            "pair": "work/sleep",
+            "diff": 0.07
+          },
+          {
+            "pair": "idle/work",
+            "diff": 0.082
+          },
+          {
+            "pair": "work/tap",
+            "diff": 0.084
+          }
+        ],
+        "medianDiff": 0.261,
+        "distinctFromIdle": 8
+      },
+      "sketch": {
+        "indistinct": [
+          "idle/work 0.032"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/work",
+            "diff": 0.032
+          },
+          {
+            "pair": "idle/sleep",
+            "diff": 0.069
+          },
+          {
+            "pair": "idle/think",
+            "diff": 0.08
+          }
+        ],
+        "medianDiff": 0.102,
+        "distinctFromIdle": 7
+      },
+      "glyph": {
+        "indistinct": [],
+        "weakestPairs": [
+          {
+            "pair": "listen/work",
+            "diff": 0.066
+          },
+          {
+            "pair": "idle/error",
+            "diff": 0.072
+          },
+          {
+            "pair": "idle/listen",
+            "diff": 0.081
+          }
+        ],
+        "medianDiff": 0.179,
+        "distinctFromIdle": 8
+      }
+    },
+    "tinyReduced": {
+      "inkdrop": {
+        "indistinct": [
+          "idle/success 0.033",
+          "idle/tap 0.042",
+          "work/tap 0.048",
+          "hello/error 0.059"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/success",
+            "diff": 0.033
+          },
+          {
+            "pair": "idle/tap",
+            "diff": 0.042
+          },
+          {
+            "pair": "work/tap",
+            "diff": 0.048
+          }
+        ],
+        "medianDiff": 0.131,
+        "distinctFromIdle": 6
+      },
+      "sumi": {
+        "indistinct": [
+          "idle/tap 0.034",
+          "idle/work 0.034",
+          "hello/tap 0.049",
+          "work/tap 0.050"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/tap",
+            "diff": 0.034
+          },
+          {
+            "pair": "idle/work",
+            "diff": 0.034
+          },
+          {
+            "pair": "hello/tap",
+            "diff": 0.049
+          }
+        ],
+        "medianDiff": 0.123,
+        "distinctFromIdle": 6
+      },
+      "cutout": {
+        "indistinct": [],
+        "weakestPairs": [
+          {
+            "pair": "work/sleep",
+            "diff": 0.061
+          },
+          {
+            "pair": "error/tap",
+            "diff": 0.064
+          },
+          {
+            "pair": "work/tap",
+            "diff": 0.066
+          }
+        ],
+        "medianDiff": 0.229,
+        "distinctFromIdle": 8
+      },
+      "sketch": {
+        "indistinct": [
+          "idle/think 0.043",
+          "listen/think 0.045"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "idle/think",
+            "diff": 0.043
+          },
+          {
+            "pair": "listen/think",
+            "diff": 0.045
+          },
+          {
+            "pair": "idle/listen",
+            "diff": 0.069
+          }
+        ],
+        "medianDiff": 0.148,
+        "distinctFromIdle": 7
+      },
+      "glyph": {
+        "indistinct": [
+          "listen/work 0.058"
+        ],
+        "weakestPairs": [
+          {
+            "pair": "listen/work",
+            "diff": 0.058
+          },
+          {
+            "pair": "idle/listen",
+            "diff": 0.072
+          },
+          {
+            "pair": "think/work",
+            "diff": 0.075
+          }
+        ],
+        "medianDiff": 0.167,
+        "distinctFromIdle": 8
+      }
+    }
+  },
+  "failed": false
+}

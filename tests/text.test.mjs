@@ -53,3 +53,15 @@ test('relTime and escapeHtml', () => {
   assert.equal(relTime(Date.now() - 5 * 60000), '5 min ago');
   assert.equal(escapeHtml('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
 });
+
+test('governed Nibbi tools get honest human labels and keep their exact names recoverable', async () => {
+  const { governedToolName } = await import('../public/lib/text.js');
+  assert.equal(toolLabel('mcp__nibbi__web_fetch'), 'reading a page');
+  assert.equal(toolLabel('mcp__nibbi__web_search'), 'searching the web');
+  assert.equal(toolLabel('mcp__nibbi__read_roadmap'), 'reading the plan');
+  assert.equal(toolLabel('mcp__nibbi__ext_notion_search'), 'using notion');
+  assert.equal(toolLabel('mcp__nibbi__some_future_tool'), 'some future tool');
+  assert.equal(governedToolName('mcp__nibbi__web_fetch'), 'web_fetch');
+  assert.equal(governedToolName('Read'), null);
+  assert.equal(toolLabel('mcp__github__list_issues'), 'on github');
+});

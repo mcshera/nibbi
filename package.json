@@ -1,23 +1,32 @@
 {
   "name": "nibbi",
-  "version": "0.7.0",
+  "version": "0.8.0",
+  "workspaces": ["shared", "daemon", "desktop"],
   "private": true,
   "type": "module",
-  "description": "Nibbi \u2014 Oracle's new face: a little ink-blot character at the center of the app. Zero-build web surface + zero-dep host that proxies to the Oracle gateway.",
+  "description": "Nibbi — a local agent companion with governed tools, reviewed skills and one responsive interface.",
   "scripts": {
     "start": "node server.mjs --open",
+    "dev": "npm run build && npm start",
+    "build": "npm run build -w @nibbi/contracts && npm run build -w @nibbi/daemon && vite build",
+    "typecheck": "npm run build -w @nibbi/contracts && npm run typecheck -w @nibbi/daemon && tsc -p tsconfig.ui.json",
     "serve": "node server.mjs",
     "shot": "node tools/shot.mjs",
-    "verify": "node tools/verify.mjs",
-    "test": "node --test tests/*.test.mjs && node tools/verify.mjs",
-    "deploy": "cd desktop && npm i --no-audit --no-fund && npx tauri build && rm -rf \"$HOME/Applications/Nibbi.app\" && cp -R \"${CARGO_TARGET_DIR:-src-tauri/target}/release/bundle/macos/Nibbi.app\" \"$HOME/Applications/Nibbi.app\" && echo \"Nibbi.app installed\"",
+    "verify": "node tools/verify.mjs && node tools/review-verify.mjs",
+    "fixture": "node tools/test-backend.mjs",
+    "test": "npm run build -w @nibbi/contracts && npm run test:unit && npm test -w @nibbi/daemon",
+    "deploy": "bash scripts/deploy-app.sh",
     "test:unit": "node --test tests/*.test.mjs",
-    "sync:daemon": "scripts/sync-daemon.sh",
     "release:app": "cd \"${CARGO_TARGET_DIR:-desktop/src-tauri/target}/release/bundle/macos\" && rm -f Nibbi.app.zip && ditto -c -k --keepParent Nibbi.app Nibbi.app.zip && echo \"$(pwd)/Nibbi.app.zip\"",
     "test:fresh": "scripts/fresh-test.sh"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.14"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0",
+    "playwright": "^1.55.0",
+    "typescript": "^7.0.2"
   },
   "repository": "github:mcshera/nibbi",
   "homepage": "https://nibbi.ai",

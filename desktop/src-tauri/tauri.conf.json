@@ -1,10 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Nibbi",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "identifier": "com.nibbi.app",
   "build": {
-    "frontendDist": "../../public"
+    "frontendDist": "../../dist/ui"
   },
   "app": {
     "withGlobalTauri": true,
@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' http://localhost:4527; script-src 'self' http://localhost:4527; style-src 'self' 'unsafe-inline' http://localhost:4527; img-src 'self' data: blob: http://localhost:4527; font-src 'self' http://localhost:4527; connect-src 'self' ipc: http://ipc.localhost http://localhost:4527; media-src 'self' blob: http://localhost:4527; frame-src http://localhost:* http://127.0.0.1:*"
     },
     "macOSPrivateApi": true
   },

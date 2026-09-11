@@ -3,7 +3,7 @@
 import json, os, subprocess, sys, tempfile, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-FFMPEG = os.path.expanduser("~/.nibbi/bin/ffmpeg")
+FFMPEG = os.path.join(os.environ.get("NIBBI_STATE_DIR", os.path.expanduser("~/.nibbi")), "bin", "ffmpeg")
 REPO = "mlx-community/whisper-large-v3-turbo"
 REPO_FAST = "mlx-community/whisper-small-mlx"
 VOCAB = "Nibbi, SHIPLESS, Matty, fixer, playtest, golden gate, worktree, vault, Telegram, Kokoro, derelict."
@@ -55,7 +55,7 @@ class H(BaseHTTPRequestHandler):
                 try: os.remove(p)
                 except OSError: pass
         body = json.dumps({"heard": text}).encode()
-        sys.stderr.write(f"stt[{'fast' if fast else 'turbo'}] {time.time()-t0:.2f}s: {text[:70]!r}\n"); sys.stderr.flush()
+        sys.stderr.write(f"stt[{'fast' if fast else 'turbo'}] {time.time()-t0:.2f}s\n"); sys.stderr.flush()
         self.send_response(200)
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(body)))

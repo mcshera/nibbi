@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset="utf-8"><title>technique test</title>
+<style>body{margin:0;background:#f3f0ea}.hosts{display:flex;gap:12px;padding:12px;align-items:flex-start}</style></head>
+<body><div class="hosts" id="hosts"></div>
+<script type="module">
+import { ACTION_IDS } from '../actions.mjs';
+const id = new URLSearchParams(location.search).get('id');
+const out = { id, checks: [], failures: [], errors: [] };
+addEventListener('error', e => out.errors.push(String(e.message)));
+const fail = m => out.failures.push(m); const ok = m => out.checks.push(m);
+async function snapshot(host) { // rasterise whatever the technique put in the host (canvas 2d/webgl or svg) to pixel data
+  const r = host.getBoundingClientRect(); const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(r.width)); c.height = Math.max(1, Math.round(r.height)); const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f3f0ea'; ctx.fillRect(0, 0, c.width, c.height);
+  for (const el of host.querySelectorAll('canvas, svg, img')) {
+    const b = el.getBoundingClientRect(); const x = b.left - r.left, y = b.top - r.top;
+    if (el.tagName === 'CANVAS') ctx.drawImage(el, x, y, b.width, b.height);
+    else if (el.tagName === 'IMG') ctx.drawImage(el, x, y, b.width, b.height);
+    else { const svg = new XMLSerializer().serializeToString(el); const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('svg raster failed')); }); ctx.drawImage(img, x, y, b.width, b.height); }
+  }
+  return ctx.getImageData(0, 0, c.width, c.height).data;
+}
+const inkCount = px => { let n = 0; for (let i = 0; i < px.length; i += 4) if (px[i] < 150 && px[i + 3] > 40) n++; return n; };
+const diff = (a, b) => { let d = 0; for (let i = 0; i < a.length; i += 4) d += Math.abs(a[i] - b[i]); return d / (a.length / 4) / 255; };
+const run = (ctl, frames) => { for (let i = 0; i < frames; i++) ctl.step(1 / 60); };
+try {
+  const mod = await import(`./techniques/${id}.mjs`);
+  const m = mod.meta; if (!m || m.id !== id) fail('meta.id must equal file name'); else ok(`meta ${m.name}`);
+  for (const k of ['name', 'technique', 'tagline', 'look', 'motion', 'eyes']) if (!m?.[k]) fail(`meta.${k} missing`);
+  if (!Array.isArray(m?.risks) || !m.risks.length) fail('meta.risks empty');
+  if (!Array.isArray(m?.fun) || m.fun.length < 3) fail('meta.fun must list at least three toy behaviours');
+  if (!m?.stills || ACTION_IDS.some(a => !(m.stills[a] > 0))) fail('meta.stills must give a positive seconds value for every action');
+  const hosts = document.getElementById('hosts');
+  const sizes = [{ size: 'hero', R: 96 }, { size: 'pill', R: 26 }, { size: 'tiny', R: 12 }];
+  const inst = {};
+  for (const s of sizes) { const host = document.createElement('div'); hosts.appendChild(host); const t0 = performance.now(); inst[s.size] = { host, ctl: mod.mount(host, { R: s.R, seed: 1, size: s.size }), R: s.R }; const dt = performance.now() - t0;
+    const r = host.getBoundingClientRect(); if (Math.abs(r.width - 3.4 * s.R) > 2 || Math.abs(r.height - 3.6 * s.R) > 2) fail(`${s.size}: host must be 3.4R×3.6R, got ${r.width}×${r.height}`); if (dt > 6000) fail(`${s.size}: mount took ${dt.toFixed(0)}ms`); }
+  ok('mounted at hero/pill/tiny');
+  for (const k of ['cue', 'step', 'setReduced', 'setEnergy', 'setTint', 'destroy']) if (typeof inst.hero.ctl[k] !== 'function') fail(`controller.${k} missing`);
+  // idle warm-up and cost
+  let t0 = performance.now(); run(inst.hero.ctl, 120); const perFrame = (performance.now() - t0) / 120; ok(`hero step+draw ≈ ${perFrame.toFixed(2)} ms/frame`); if (perFrame > 8) fail(`hero step+draw too slow: ${perFrame.toFixed(1)} ms/frame (budget ~4)`);
+  const idlePx = await snapshot(inst.hero.host); if (inkCount(idlePx) < 200) fail('hero idle draws (almost) no ink');
+  run(inst.tiny.ctl, 60); const tinyPx = await snapshot(inst.tiny.host); if (inkCount(tinyPx) < 15) fail('tiny idle draws (almost) no ink');
+  // quiet idle: drift over 2 s must be small
+  run(inst.hero.ctl, 120); const idlePx2 = await snapshot(inst.hero.host); const idleDrift = diff(idlePx, idlePx2); ok(`idle change over 2 s: ${idleDrift.toFixed(4)}`); if (idleDrift > .02) fail(`idle is busy (${idleDrift.toFixed(3)} mean change over 2 s; keep ≤ .02)`);
+  // every moment renders, differs from idle at its still, and one-shots return to idle
+  const stills = {}; const cueTimes = {};
+  for (const a of ACTION_IDS) {
+    const { ctl, host } = inst.hero; ctl.cue('idle'); run(ctl, 90); const base = await snapshot(host);
+    t0 = performance.now(); ctl.cue(a); const frames = Math.max(1, Math.round((m.stills?.[a] ?? .7) * 60)); run(ctl, frames); cueTimes[a] = (performance.now() - t0) / frames;
+    const px = await snapshot(host); stills[a] = px; if (inkCount(px) < 200) fail(`${a}: draws (almost) no ink at its still`);
+    if (a !== 'idle' && diff(px, base) < .004) fail(`${a}: still is identical to idle (mean diff ${diff(px, base).toFixed(4)})`);
+    // tiny renders every action
+    inst.tiny.ctl.cue(a); run(inst.tiny.ctl, frames); if (inkCount(await snapshot(inst.tiny.host)) < 10) fail(`${a}: tiny draws nothing`);
+  }
+  ok('all nine moments render at hero and tiny and differ from idle at their stills');
+  for (const a of ['hello', 'tap', 'success', 'error']) { const { ctl, host } = inst.hero; ctl.cue('idle'); run(ctl, 120); const base = await snapshot(host); ctl.cue(a); run(ctl, 60 * 4); const after = await snapshot(host); const d = diff(after, base); if (d > .03) fail(`${a}: did not return to idle after 4 s (mean diff ${d.toFixed(3)})`); }
+  ok('one-shots return to idle within 4 s');
+  // reduced motion: frames become identical
+  { const { ctl, host } = inst.hero; ctl.cue('think'); ctl.setReduced(true); run(ctl, 90); const a1 = await snapshot(host); run(ctl, 45); const a2 = await snapshot(host); const d = diff(a1, a2); if (d > 0) fail(`reduced motion still changes frames (mean diff ${d.toFixed(5)})`); else ok('reduced motion converges to identical frames');
+    ctl.cue('success'); run(ctl, 90); const b1 = await snapshot(host); run(ctl, 30); const b2 = await snapshot(host); if (diff(b1, b2) > 0) fail('reduced motion: success does not settle to a still'); if (diff(a1, b1) < .004) fail('reduced motion: think and success stills are identical'); ctl.setReduced(false); }
+  // touch response
+  { const { ctl, host, R } = inst.hero; ctl.cue('idle'); run(ctl, 120); const base = await snapshot(host); const x = 1.7 * R, y = 3.1 * R - .7 * R;
+    if (typeof ctl.poke === 'function') { ctl.poke(x, y, 'down'); run(ctl, 6); ctl.poke(x + 10, y + 12, 'move'); run(ctl, 6); ctl.poke(x + 10, y + 12, 'up'); }
+    else { for (const [type, dx] of [['pointerdown', 0], ['pointermove', 10], ['pointerup', 10]]) { host.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: host.getBoundingClientRect().left + x + dx, clientY: host.getBoundingClientRect().top + y, pointerId: 1, isPrimary: true })); run(ctl, 6); } }
+    run(ctl, 10); const after = await snapshot(host); const d = diff(after, base); ok(`touch response change: ${d.toFixed(4)}`); if (d < .004) fail('body does not respond to a pointer press/drag'); }
+  // tint
+  { const { ctl, host } = inst.pill; ctl.setTint('#7a4b2a'); ctl.cue('idle'); run(ctl, 30); const px = await snapshot(host); let tinted = 0; for (let i = 0; i < px.length; i += 4) if (px[i] > px[i + 2] + 25 && px[i] < 200) tinted++; if (tinted < 20) fail('setTint did not recolour the ink'); else ok('tint recolours the ink'); ctl.setTint(null); }
+  // energy + destroy
+  inst.hero.ctl.setEnergy(1.5); run(inst.hero.ctl, 10); for (const s of sizes) inst[s.size].ctl.destroy(); if (hosts.querySelector('canvas,svg')) fail('destroy() left DOM behind'); else ok('destroy cleans up');
+  out.perf = { heroMsPerFrame: Number(perFrame.toFixed(2)), cueMsPerFrame: Object.fromEntries(Object.entries(cueTimes).map(([k, v]) => [k, Number(v.toFixed(2))])) };
+} catch (e) { out.failures.push('exception: ' + (e.stack || e.message)); }
+window.__result = out;
+</script></body></html>

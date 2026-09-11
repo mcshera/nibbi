@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — reliability
+
+- Suggestion-only automation stays in suggest mode when recording notes or updating focus, capacity, model or spend limits.
+- Review keeps each diff and merge/discard action attached to its original run when navigating quickly, and prevents duplicate pending actions.
+- Settings fields and dialogs retain their keyboard input without triggering background review or chat shortcuts.
+- Delayed Settings responses and saves no longer replace the currently selected tab.
+- Added automation regressions and isolated browser coverage for delayed review and Settings requests; `npm run verify` runs both browser suites.
+
 ## 0.6.0 — 2026-09-03
 - Chips from meaning: Oracle's `»acts:` line renders as chips; regex only as fallback (yes/no only for yes/no questions).
 - Host event log + SSE (`/nibbi/events`): exact "while you were away", live fixer bubbles, macOS notifications + Dock badge.

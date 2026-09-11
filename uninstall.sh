@@ -1,8 +1,18 @@
 #!/bin/bash
-# uninstall.sh — stop and remove Nibbi's services and app. Keeps your vault, projects and state unless --purge.
+# Remove services and app recoverably. Never purge vaults, state, branches or worktrees.
 set -euo pipefail
-UID_="$(id -u)"; PURGE=0; for a in "$@"; do [ "$a" = "--purge" ] && PURGE=1; done
-for u in com.nibbi.gateway com.nibbi.host com.nibbi.kokoro com.nibbi.whisper com.nibbi.ollama; do launchctl bootout "gui/$UID_/$u" >/dev/null 2>&1 || true; rm -f "$HOME/Library/LaunchAgents/$u.plist"; done
-rm -rf "$HOME/Applications/Nibbi.app"; rm -f "$HOME/Documents/NibbiVault"
-echo "services + app removed."
-if [ "$PURGE" = 1 ]; then rm -rf "$HOME/.nibbi" "$HOME/NibbiWork"; echo "state removed. Your vault ($HOME/NibbiVault) and projects ($HOME/NibbiProjects) were kept — delete them yourself if you mean it."; fi
+if [ "$#" -gt 0 ]; then
+  echo "Automatic purge is disabled. Back up and inspect retained work before any manual cleanup."
+  exit 2
+fi
+NIBBI_UID="$(id -u)"
+NIBBI_STATE_DIR="${NIBBI_STATE_DIR:-$HOME/.nibbi}"
+NIBBI_BACKUP="$NIBBI_STATE_DIR/backups/uninstall-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$NIBBI_BACKUP"
+for unit in com.nibbi.gateway com.nibbi.host com.nibbi.kokoro com.nibbi.whisper com.nibbi.ollama; do
+  launchctl bootout "gui/$NIBBI_UID/$unit" >/dev/null 2>&1 || true
+  if [ -f "$HOME/Library/LaunchAgents/$unit.plist" ]; then mv "$HOME/Library/LaunchAgents/$unit.plist" "$NIBBI_BACKUP/$unit.plist"; fi
+done
+if [ -d "$HOME/Applications/Nibbi.app" ]; then mv "$HOME/Applications/Nibbi.app" "$NIBBI_BACKUP/Nibbi.app"; fi
+echo "Services stopped; app and launchd definitions moved to $NIBBI_BACKUP."
+echo "Vault, state, projects, branches and worktrees were retained. Manually launched backends must be stopped separately."

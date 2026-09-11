@@ -1,27 +1,21 @@
 #!/bin/bash
-# nibbi-doctor — flagship "it just works" diagnostics
-G="\033[32m✓\033[0m"; B="\033[31m✗\033[0m"; Y="\033[33m•\033[0m"
-ok(){ printf "$G %s\n" "$1"; }; bad(){ printf "$B %s\n" "$1"; }; note(){ printf "$Y %s\n" "$1"; }
-
-curl -s -m 2 http://127.0.0.1:4519/api/status >/dev/null && ok "gateway :4519" || bad "gateway :4519 — launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway"
-curl -s -m 2 http://127.0.0.1:4521/health >/dev/null && ok "kokoro voice :4521" || bad "kokoro :4521 — launchctl kickstart -k gui/$(id -u)/com.nibbi.kokoro"
-curl -s -m 2 http://127.0.0.1:4522/health >/dev/null && ok "whisper ears :4522" || bad "whisper :4522 — launchctl kickstart -k gui/$(id -u)/com.nibbi.whisper"
-
-S=$(curl -s -m 2 http://127.0.0.1:4519/api/status 2>/dev/null)
-[ -n "$S" ] && note "$(python3 -c "import json,sys;s=json.loads(sys.stdin.read());print(f'session {s.get(\"sessionShort\")} · {s.get(\"turns\")} turns · \${s.get(\"costUsdTotal\",0):.2f} · up {s.get(\"uptimeSec\",0)//60}m')" <<<"$S")"
-
-if [ -f ~/.nibbi/turn.lock ]; then
-  AGE=$(( $(date +%s) - $(stat -f %m ~/.nibbi/turn.lock) ))
-  [ $AGE -gt 900 ] && bad "turn.lock STALE (${AGE}s) — rm ~/.nibbi/turn.lock" || note "turn in flight (${AGE}s)"
-else ok "turn lock clear"; fi
-
-for f in fonts/GeistVF.woff2 vendor/marked.js app.js; do
-  curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:4519/$f" | grep -q 200 && ok "serves /$f" || bad "missing /$f"
-done
-
-N=$(ls ~/.nibbi/tts-cache 2>/dev/null | wc -l | tr -d " ")
-MB=$(du -sm ~/.nibbi/tts-cache 2>/dev/null | cut -f1)
-note "tts cache: $N clips, ${MB}MB"
-df -h / | awk 'NR==2{print "  disk free: "$4}'
-pgrep -f "Nibbi.app" >/dev/null && ok "desktop app running" || note "desktop app not running — open ~/Applications/Nibbi.app"
-osascript -e 'tell application "System Events" to get name of every login item' 2>/dev/null | grep -q Nibbi && ok "login item" || note "no login item"
+# Read-only diagnostics. No stale-lock deletion, automatic restart, or credential output.
+set -euo pipefail
+exec node --input-type=module - <<'NODE'
+const port = Number(process.env.NIBBI_PORT || 4527);
+try {
+  const response = await fetch('http://127.0.0.1:' + port + '/nibbi/health', { signal: AbortSignal.timeout(3000) });
+  const health = await response.json();
+  if (!response.ok || health.app !== 'nibbi' || health.protocolVersion !== 1 || health.brain !== true) throw new Error('Incompatible backend');
+  console.log('✓ Nibbi ' + health.version + ' · one backend on :' + port);
+  console.log('  Vault: ' + health.status.vault + ' · busy: ' + health.status.busy);
+  console.log('  Pairing: ' + (health.remote ? 'HTTPS enabled' : 'local only'));
+  const snapshot = await (await fetch('http://127.0.0.1:' + port + '/api/snapshot')).json();
+  const review = snapshot.fixers.filter(run => ['failed', 'interrupted', 'staged'].includes(run.status));
+  console.log('  ' + review.length + ' retained runs to review in Settings → Activity');
+} catch (error) { console.error('✗ ' + error.message + '. Check the launchd log and docs/PLATFORM-MIGRATION.md. Do not remove worktrees or owner locks blindly.'); process.exitCode = 1; }
+for (const [name, port] of [['Kokoro', 4521], ['Whisper', 4522]]) {
+  try { const result = await fetch('http://127.0.0.1:' + port + '/health', { signal: AbortSignal.timeout(1000) }); console.log((result.ok ? '✓ ' : '• ') + name + ' optional voice service'); }
+  catch { console.log('• ' + name + ' not running (optional)'); }
+}
+NODE

@@ -1,0 +1,101 @@
+{
+  "checks": [
+    {
+      "name": "All three styles compile and use WebGL"
+    },
+    {
+      "name": "486 poses: bounds, full eye-outline containment, separate eye whites, all actions / energies",
+      "bad": [],
+      "samples": 486,
+      "minFit": 0.9782519842246297,
+      "minEyeMargin": 0.07699687896395739
+    },
+    {
+      "name": "45 high-energy pixel readbacks: visible ink, no edge clipping",
+      "count": 45,
+      "failures": []
+    },
+    {
+      "name": "A repeated cue queues rather than resetting an active gesture"
+    },
+    {
+      "name": "Pause stops animation scheduling"
+    },
+    {
+      "name": "Timeline scrubs and pauses"
+    },
+    {
+      "name": "Loop setting preserves an inspected pause"
+    },
+    {
+      "name": "Half-speed control changes playback"
+    },
+    {
+      "name": "Texture comparison control"
+    },
+    {
+      "name": "Shortlist selection updates"
+    },
+    {
+      "name": "Reduced mode freezes body, shapes, particles, face and texture across times/cues"
+    },
+    {
+      "name": "OS reduced-motion preference honored at load"
+    },
+    {
+      "name": "OS preference change updates policy"
+    },
+    {
+      "name": "Persisted page transition preserves the renderer"
+    },
+    {
+      "name": "Original-engine reference and browser Back remain usable"
+    },
+    {
+      "name": "Jump and shapeshift contact sheets exported"
+    },
+    {
+      "name": "Mobile sticky controls and scrub remain usable at the third card"
+    },
+    {
+      "name": "390px mobile layout: no horizontal overflow or shape clipping",
+      "width": 390,
+      "doc": 390,
+      "styles": [
+        {
+          "id": "elastic",
+          "bounds": true
+        },
+        {
+          "id": "liquid",
+          "bounds": true
+        },
+        {
+          "id": "mischief",
+          "bounds": true
+        }
+      ]
+    },
+    {
+      "name": "768px tablet layout has no horizontal overflow"
+    },
+    {
+      "name": "Forced Canvas2D fallback renders all three at DPR2 without geometry clipping"
+    },
+    {
+      "name": "No page or console errors"
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "[.WebGL-0x104000e0200]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x104000e0200]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x104000e0200]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x104000e0200]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently"
+  ],
+  "environment": "Chrome, SwiftShader (software WebGL), local macOS; not a real-device performance benchmark",
+  "ok": true
+}

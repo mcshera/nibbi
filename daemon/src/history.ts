@@ -1,41 +1,19 @@
-// history.ts — unified conversation log (all channels) at ~/.nibbi/chat-history.jsonl
-import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { ORACLE_HOME } from "./state.js";
-
-export interface ChatEntry { ts: string; channel: string; role: "user" | "oracle"; text: string; costUsd?: number; }
-
-const FILE = join(ORACLE_HOME, "chat-history.jsonl");
-
-export function logChat(entry: ChatEntry): void {
-  mkdirSync(ORACLE_HOME, { recursive: true });
-  appendFileSync(FILE, JSON.stringify(entry) + "\n");
+import { runtime } from './store.js';
+import type { FallbackInfo } from './local-fallback.js';
+export interface ChatEntry { ts: string; channel: string; role: 'user' | 'oracle'; text: string; costUsd?: number; project?: string; runId?: string; source?: 'test'; local?: boolean; localModel?: string; fallback?: FallbackInfo; isError?: boolean }
+type Row = { at: string; channel: string; role: ChatEntry['role']; text: string; metadata: string; project_id?: string };
+const decode = (row: Row): ChatEntry => ({ ts: row.at, channel: row.channel, role: row.role, text: row.text, project: row.project_id, ...JSON.parse(row.metadata) });
+export function logChat(entry: ChatEntry): number {
+  return Number(runtime().db.prepare('INSERT INTO messages(at,project_id,role,channel,text,metadata) VALUES(?,?,?,?,?,?)').run(entry.ts, entry.project ?? null, entry.role, entry.channel, entry.text, JSON.stringify({ costUsd: entry.costUsd, runId: entry.runId, source: entry.source, local: entry.local, localModel: entry.localModel, fallback: entry.fallback, isError: entry.isError })).lastInsertRowid);
 }
-
-function parseAll(): ChatEntry[] {
-  if (!existsSync(FILE)) return [];
-  return readFileSync(FILE, "utf8").trim().split("\n")
-    .map((l) => { try { return JSON.parse(l) as ChatEntry; } catch { return null; } })
-    .filter((e): e is ChatEntry => e !== null);
+export function readChat(n = 80, before?: string, project?: string): ChatEntry[] {
+  return (runtime().db.prepare('SELECT * FROM messages WHERE (? IS NULL OR at<?) AND (? IS NULL OR project_id=?) ORDER BY id DESC LIMIT ?').all(before ?? null, before ?? null, project ?? null, project ?? null, Math.min(1000, Math.max(1, n))) as Row[]).reverse().map(decode);
 }
-
-export function readChat(n = 80, before?: string): ChatEntry[] {
-  const all = parseAll();
-  const upto = before ? all.filter((e) => e.ts < before) : all;
-  return upto.slice(-n);
-}
-
-/** Case-insensitive substring search, newest first. */
 export function searchChat(q: string, limit = 40): ChatEntry[] {
-  const needle = q.toLowerCase();
-  return parseAll().filter((e) => e.text.toLowerCase().includes(needle)).slice(-limit).reverse();
+  return (runtime().db.prepare('SELECT * FROM messages WHERE instr(lower(text),lower(?))>0 ORDER BY id DESC LIMIT ?').all(q, Math.min(100, Math.max(1, limit))) as Row[]).map(decode);
 }
-
-/** A window of entries centered on the message at `ts`. */
 export function readAround(ts: string, n = 50): ChatEntry[] {
-  const all = parseAll();
-  const i = all.findIndex((e) => e.ts === ts);
-  if (i < 0) return all.slice(-n);
-  const half = Math.floor(n / 2);
-  return all.slice(Math.max(0, i - half), i + half);
+  const id = (runtime().db.prepare('SELECT id FROM messages WHERE at=? LIMIT 1').get(ts) as { id: number } | undefined)?.id;
+  if (!id) return readChat(n);
+  return (runtime().db.prepare('SELECT * FROM messages WHERE id>=? ORDER BY id LIMIT ?').all(Math.max(0, id - Math.floor(n / 2)), Math.min(n, 200)) as Row[]).map(decode);
 }

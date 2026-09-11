@@ -1,49 +1,25 @@
-# Fresh-install test protocol
+# Fresh-install acceptance
 
-*Use this on a second Mac (best) or a brand-new macOS user account on this one. The point is to see what a stranger sees.*
+Use a second Mac or a separate macOS user for the real installation check. Never use a real vault as a test fixture.
 
-## Rehearse first (on your main Mac, 2 minutes)
-`npm run test:fresh` clones the committed tree into a throwaway home, runs `install.sh` there, boots the daemon and host on
-spare ports, checks health and cleans up. Green means the laptop run will at least get past step 3. Do this before every
-release. (`scripts/fresh-test.sh --keep` leaves the sandbox for inspection.)
+## Automated rehearsal
 
-## Before you start
-- The Mac has: macOS 13+, internet, and you know your Apple ID (for Xcode CLT) and Claude account.
-- Nothing Nibbi-related on it: no `~/.nibbi`, `~/NibbiVault`, `~/Nibbi-app`, no `com.nibbi.*` in `launchctl list`.
-  (To reset a previous attempt: `bash uninstall.sh --purge && rm -rf ~/NibbiVault ~/NibbiProjects ~/Nibbi-app`.)
-- Have a stopwatch. Note every moment you had to *think*.
+Run `npm ci`, then `npm run test:fresh`. This builds the current checkout and rehearses installer state preparation, vault creation, legacy JSON backup/import and backend restart using explicit temporary directories and a free port. It does not change HOME, launchd, credentials, the installed app, or the real vault. It does not test dependency downloading or GUI installation.
 
-## The run (write down what happened at each step)
-1. **Prereqs** — open Terminal, run `git --version` (accept the Xcode CLT install if asked) and `node -v`.
-   Expected: Node ≥ 22. If not, install from nodejs.org. *Time it.*
-2. **Get Nibbi** — `git clone https://github.com/mcshera/nibbi.git ~/Nibbi-app && cd ~/Nibbi-app`.
-3. **Install** — `bash install.sh`. Expected, in order: ✓ git · ✓ node · Claude Code installed (or found) · state in `~/.nibbi` ·
-   vault created at `~/NibbiVault` · daemon dependencies installed · `com.nibbi.gateway running` · `com.nibbi.host running` ·
-   `brain reachable through the host` · Nibbi.app installed and opened.
-   Red flags: any ✗, `npm ci failed`, "host is up but the brain isn't answering".
-4. **First launch** — macOS may say Nibbi.app "cannot be opened" (ad-hoc signature): right-click → Open. Expected: the
-   ink blot appears, breathes, blinks; the top-right dot is quiet (connected). If the dot says "brain offline", run
-   `~/.nibbi/bin/nibbi-doctor` and read the ✗ line.
-5. **Log in to Claude** — in Terminal run `claude`, log in, quit. (Nibbi's brain uses this login; no keys are stored.)
-6. **First words** — type `hi`. Expected: a reply in Nibbi's voice within ~10 s, steps folding under it. Then type `/`
-   and see the palette; `/help` lists the commands.
-7. **First project** — `/new hello web` → expected: repo at `~/NibbiProjects/hello`, vite scaffold, `npm install` log,
-   `play it` chip → `/play hello` opens a dev server. `/project` shows the card.
-8. **First fixer** — `/fix add a footer with the year to index.html`. Expected: a small coloured Nibbi perches on the
-   pill; a bubble "done and staged … Review it?" within a few minutes; `/diff <id>` shows the change; `approve & merge`
-   merges it. (`/auto hello ship` would have merged it automatically.)
-9. **Voice (optional)** — `bash install.sh --voice`, wait for the models, then `⌥Space`, say "what's new?".
-10. **Come back later** — quit the app, wait 20 min, reopen. Expected: "while you were away" if anything happened; the
-    conversation is still there (it survives restarts for 12 h).
+Also run `npm test`, `npm run typecheck` and `npm run verify`.
 
-## What "good" looks like
-- Step 3 under 3 minutes on a normal connection; step 6 first reply under 15 s.
-- Zero moments where you had to open a file to figure out what to do next.
-- `~/.nibbi/bin/nibbi-doctor` all green (voice lines only if you installed voice).
+## Real release acceptance
 
-## Reporting
-Paste the terminal output of `install.sh` and `nibbi-doctor`, plus your notes, into the Nibbi app on your main Mac:
-"here's the fresh-install log from the laptop: …" — Nibbi files it as issues on the `nibbi` project.
+1. Follow [the migration guide](PLATFORM-MIGRATION.md), or install on an unused account with `bash install.sh`. Expect one backend service, not separate host and gateway owners.
+2. Open the browser URL. Confirm the character, conversation pill and Settings work. The doctor should identify Nibbi protocol version 1.
+3. Install Claude Code, then use Settings → Providers → Sign in with Claude. Complete the official CLI's Terminal/browser flow and use Check connections to confirm subscription sign-in. No API key or token copying is needed. Install the tested Codex CLI and connect it from Settings. Test a small lead turn with each provider; confirm Claude does not switch to API billing if sign-in fails.
+4. Create a disposable project. Configure a meaningful check. Test Claude and Codex independently as fixer, including provider/model selection and a selected skill.
+5. Confirm the lead cannot edit project source or protected vault instructions directly. The fixer must not write outside its worktree, alter Git metadata, publish, or read credential files.
+6. Stage a change, inspect its exact diff, introduce a conflicting owner change and confirm merge refusal. Confirm an unrelated owner commit is preserved during successful integration.
+7. Cancel a lead and a fixer, restart the backend and inspect retained state. Failed verification must not become a successful merge. Try explicit retained-commit verification.
+8. Confirm goals start in stage mode, ship requires explicit selection, schedules start off, and stopping a goal turns auto off.
+9. Build the desktop shell with `npm run deploy`. Check tray, shortcut, microphone permissions, notifications and hiding/reopening the window.
+10. Opt into remote mode. Trust the local CA on a physical phone, pair once, install the PWA, reconnect after the Mac sleeps, and revoke access.
+11. If desired, test optional voice with `bash install.sh --voice` on Apple Silicon with FFmpeg installed.
 
-## Reset and retry
-`bash uninstall.sh --purge && rm -rf ~/NibbiVault ~/NibbiProjects ~/Nibbi-app` — then start from step 2.
+Record failures without pasting keys, tokens or private chat history. Keep disposable test data separate; do not reset by recursively deleting personal state, vaults or worktrees.
