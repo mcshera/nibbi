@@ -77,6 +77,7 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 /* the bubble carries the reply alone: no avatar, no tail. a 6px ink dot tucked in the top-left corner is nibbi's quiet signature */
 .bubble { position: relative; display: inline-block; max-width: 100%; padding: 12px 18px 13px 20px; border-radius: 18px; border-top-left-radius: 10px; background: rgba(255,255,255,.62); border: 1px solid var(--line); box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 8px 24px -18px rgba(21,20,19,.25); }
 .bubble::before { content: ""; position: absolute; left: 7px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+.bubble:has(> .steps:not([hidden]))::before { display: none; }   /* a steps fold carries its own bullet in the same corner: one mark, not two */
 .bubble.live .said:empty::after { content: "•••"; display: inline-block; letter-spacing: .22em; color: var(--ink-2); animation: think 1.2s ease-in-out infinite; font-size: 15px; line-height: 1; padding: 6px 0 2px; }
 .nib.error .bubble { border-color: rgba(181,83,61,.35); }
 .nib.error .bubble::before { background: #b5533d; }
@@ -174,7 +175,7 @@ body.busy .pill { border-color: rgba(21,20,19,.06); }
 /* mode chips: "plan first ×", "Hey Nibbi · listening ×" — one button each, the × is the affordance, the whole chip is the target */
 .modes { display: flex; align-items: center; gap: 4px; flex: none; }
 .modes:empty { display: none; }
-.mode { display: inline-flex; align-items: center; height: 32px; padding: 0; border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer; }
+.mode { display: inline-flex; align-items: center; height: 36px; padding: 0; border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer; }
 .mode-b { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 7px 0 10px; border-radius: 999px; border: 1px solid rgba(21,20,19,.2); background: rgba(21,20,19,.045); font-size: 12.5px; font-weight: 500; line-height: 1; white-space: nowrap; transition: border-color var(--t1), background var(--t1); }
 .mode .w { color: var(--ink-3); font-weight: 450; } .mode .w::before { content: "· "; }
 .mode .x { color: var(--ink-3); font-size: 15px; margin-left: 1px; transition: color var(--t1); }
@@ -186,6 +187,7 @@ body[data-mic="paused"] .mode[data-mode="mic"] .mode-b::before, body[data-mic="s
 /* send: an ink squircle */
 .pill .send { flex: none; width: 44px; height: 44px; border-radius: 14px; border: 0; background: var(--ink); display: grid; place-items: center; padding: 0; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
 .pill .send:hover { transform: scale(1.05); } .pill .send:active { transform: scale(.96); }
+.pill.tall .dock, .pill.tall .send { align-self: flex-end; }   /* a multi-line field: the controls sit on its last line, not floating mid-height */
 .pill .send:disabled { opacity: .35; cursor: default; transform: none; }
 body.busy .pill .send { background: var(--ink-3); }
 body.busy .pill .send svg { display: none; }
@@ -216,7 +218,7 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
   .pill.mic-on { padding-bottom: 34px; }
   .listen { left: 60px; right: 16px; bottom: 8px; font-size: 11px; }
   .dock-menu { left: 0; }
-  .nib { font-size: 16px; } .chips { bottom: 92px; }
+  .nib { font-size: 16px; }   /* .chips keep tracking --feed-bottom here too: a fixed offset hid them behind a taller pill (chips, attachment, listen strip) */
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
@@ -229,7 +231,8 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- agents (fixers) under the pill ---------- */
-.agents { position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--agents-bottom, 130px); z-index: 5; display: flex; gap: 2px; align-items: flex-end; justify-content: center; }
+.agents { position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--agents-bottom, 130px); z-index: 5; display: flex; gap: 2px; align-items: flex-end; justify-content: center; transition: opacity var(--t2); }
+body:has(.pill.dock-open) .agents { opacity: .25; pointer-events: none; }   /* the open panel sits over the fixers' perch; they step back rather than peek out from under it */
 .agent { position: relative; border: 0; background: none; padding: 0 3px; cursor: pointer; animation: arrive var(--t3) var(--ease) both; transition: opacity var(--t2), transform var(--t2) var(--ease); }
 .agent.out { opacity: 0; transform: translateY(6px); }
 .agent .ava { display: block; width: 58px; height: 46px; }

@@ -4,6 +4,7 @@
 body.project-compose-compact #ask, body.project-compose-compact #attach, body.project-compose-compact #modes { display: none; }
 /* compact: the toggle stands in for the field between "+" and send; expanded: it sits at the field's leading edge like a chip */
 body.project-compose-compact .pill { flex-wrap: nowrap; min-height: 64px; padding-block: 7px; }
+body.project-compose-compact .pill.mic-on { padding-bottom: 36px; }   /* the listen strip keeps its own row under the collapsed composer too */
 body.project-compose-compact .project-compose-toggle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
 body.project-view:not(.project-compose-compact) .project-compose-toggle { flex: none; }
 @media (max-width: 640px) {

@@ -72,7 +72,13 @@ composeToggle.onclick = () => { S.projectComposerExpanded = body.classList.conta
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
 planBtn.innerHTML = '<svg class="mi" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="4" cy="4.5" r="1.4" fill="currentColor"/><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="4" cy="13.5" r="1.4" fill="currentColor"/><path d="M8 4.5h6M8 9h6M8 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="mi-label">Plan first</span><span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>';
 micBtn.before(planBtn);   // the menu lists plan first, then Hey Nibbi, then attach
-function placeholderText() { return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? 'Describe the goal — nibbi proposes steps to review before any build starts…' : 'Ask nibbi to build something...'; }
+/* the hints are short enough to stay one line beside a chip on desktop; under 360px the field is ~170px wide, so shorter variants keep the bar from growing at rest */
+const narrowField = matchMedia('(max-width: 360px)');
+function placeholderText() {
+  const n = narrowField.matches;
+  return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? (n ? 'Goal first — nibbi proposes steps…' : 'Describe the goal — nibbi proposes steps first…') : (n ? 'Ask nibbi to build…' : 'Ask nibbi to build something...');
+}
+narrowField.addEventListener('change', () => { ask.placeholder = placeholderText(); autosize(); });
 function setPlanFirst(on) {
   S.planFirst = !!on; planBtn.setAttribute('aria-pressed', String(S.planFirst)); pill.classList.toggle('plan-first', S.planFirst);
   planBtn.title = S.planFirst ? 'Plan first is on — the next message becomes a reviewable plan (click to turn off)' : 'Plan first — propose numbered steps to review before any build starts';
@@ -112,7 +118,14 @@ function closeDock(refocus) {
   if (refocus) dockBtn.focus();
 }
 dockBtn.addEventListener('click', () => { if (dockMenu.open) closeDock(true); else openDock(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dockMenu.open && !e.defaultPrevented) { e.preventDefault(); e.stopImmediatePropagation(); closeDock(true); } }, true);   // Esc closes the panel wherever focus sits (the "+", or body after a WebKit mousedown blur); the sidebar's own Esc listener must not also see it once the panel is gone
 dockMenu.addEventListener('cancel', (e) => { e.preventDefault(); closeDock(true); });
+/* WebKit: buttons are not mouse-focusable and a mousedown on one blurs the active element, so a press on a row (or on the "+") would fire focusout → close before the click lands.
+   keep focus where it is during the press (mousedown preventDefault) and, belt and braces, let focusout stand down while a press inside the dock is in flight; the click decides */
+let dockPress = 0;
+function dockPressed(e) { clearTimeout(dockPress); dockPress = setTimeout(() => { dockPress = 0; }, 700); if (e.type === 'mousedown') e.preventDefault(); }
+for (const el of [dockBtn, dockMenu]) { el.addEventListener('pointerdown', dockPressed); el.addEventListener('mousedown', dockPressed); }
+document.addEventListener('click', () => { clearTimeout(dockPress); dockPress = 0; });   // bubble phase: after the row or the "+" handled the click
 dockMenu.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDock(true); return; }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
@@ -123,7 +136,7 @@ dockMenu.addEventListener('keydown', (e) => {
 });
 /* choosing an item closes the panel: a toggle reports itself as a chip, attach hands over to the file chooser */
 dockMenu.addEventListener('click', (e) => { const item = e.target instanceof Element && e.target.closest('button'); if (!item) return; closeDock(false); if (item !== attachImageBtn) (ask.getClientRects().length ? ask : dockBtn).focus(); });
-dockMenu.addEventListener('focusout', (e) => { const to = e.relatedTarget; if (to instanceof Node && (dockMenu.contains(to) || to === dockBtn)) return; closeDock(false); });
+dockMenu.addEventListener('focusout', (e) => { if (dockPress) return; const to = e.relatedTarget; if (to instanceof Node && (dockMenu.contains(to) || to === dockBtn)) return; closeDock(false); });
 document.addEventListener('pointerdown', (e) => { if (!dockMenu.open || !(e.target instanceof Node)) return; if (dockMenu.contains(e.target) || dockBtn.contains(e.target)) return; closeDock(false); }, true);
 attachImageBtn.addEventListener('click', () => { attachFile.value = ''; attachFile.click(); });
 attachFile.addEventListener('change', () => { for (const f of attachFile.files || []) addImage(f); attachFile.value = ''; ask.focus(); });
@@ -1713,7 +1726,7 @@ function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer 
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
-function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; layout(false); }
+function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
 ask.addEventListener('focus', () => { if (S.projectView) S.projectComposerExpanded = true; layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
@@ -1766,7 +1779,8 @@ function addImage(file) {
 }
 function renderAttach() {
   attachEl.hidden = !pendingImages.length; attachEl.replaceChildren();
-  pendingImages.forEach((im, i) => { const b = document.createElement('button'); b.type = 'button'; const img = document.createElement('img'); img.src = 'data:' + im.media_type + ';base64,' + im.data; b.appendChild(img); b.onclick = () => { pendingImages.splice(i, 1); renderAttach(); }; attachEl.appendChild(b); });
+  pendingImages.forEach((im, i) => { const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', 'Remove attached image ' + (i + 1)); const img = document.createElement('img'); img.src = 'data:' + im.media_type + ';base64,' + im.data; b.appendChild(img); b.onclick = () => { pendingImages.splice(i, 1); renderAttach(); }; attachEl.appendChild(b); });
+  layout(false);   // the strip changes the pill's height (its own row at ≤640px): suggestion chips, feed and fixers re-place above it
 }
 function clearAttach() { pendingImages = []; renderAttach(); }
 document.addEventListener('paste', (e) => { for (const it of e.clipboardData?.items || []) if (it.kind === 'file') addImage(it.getAsFile()); });
