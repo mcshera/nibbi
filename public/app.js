@@ -72,17 +72,23 @@ composeToggle.onclick = () => { S.projectComposerExpanded = body.classList.conta
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
 planBtn.innerHTML = '<svg class="mi" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="4" cy="4.5" r="1.4" fill="currentColor"/><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="4" cy="13.5" r="1.4" fill="currentColor"/><path d="M8 4.5h6M8 9h6M8 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="mi-label">Plan first</span><span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>';
 micBtn.before(planBtn);   // the menu lists plan first, then Hey Nibbi, then attach
-/* the hints stay one line on desktop; under 360px the field is ~170px wide, so shorter variants keep the bar from growing at rest */
-const narrowField = matchMedia('(max-width: 360px)');
+/* the hints stay one line on desktop; on a phone the field is much narrower — measured 242px of text at 390 and 172px at 320 — so the
+   short variants keep the bar one line at rest at every phone width. The breakpoint is the CSS one (640px), not 360: at 390 the long
+   plan-first hint wrapped and took the resting bar from 60px to 70px. "Goal first — steps…" renders 147px, inside the 172px the field has at 320. */
+const narrowField = matchMedia('(max-width: 640px)');
 function placeholderText() {
   const n = narrowField.matches;
-  return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? (n ? 'Goal first — nibbi proposes steps…' : 'Describe the goal — nibbi proposes steps first…') : (n ? 'Ask nibbi to build…' : 'Ask nibbi to build something...');
+  return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? (n ? 'Goal first — steps…' : 'Describe the goal — nibbi proposes steps first…') : (n ? 'Ask nibbi to build…' : 'Ask nibbi to build something...');
 }
 narrowField.addEventListener('change', () => { ask.placeholder = placeholderText(); autosize(); });
 function setPlanFirst(on) {
   S.planFirst = !!on; planBtn.setAttribute('aria-pressed', String(S.planFirst)); pill.classList.toggle('plan-first', S.planFirst);
   planBtn.title = S.planFirst ? 'Plan first is on — the next message becomes a reviewable plan (click to turn off)' : 'Plan first — propose numbered steps to review before any build starts';
   ask.placeholder = placeholderText();
+  /* the dot on the "+" is a pseudo-element and #dock's title only reaches a pointer, so the field itself carries the state for assistive tech:
+     a static visually-hidden description (#plan-first-note), added while plan first is armed and removed when it is off. Description, not name
+     (aria-label="message nibbi" is untouched) and not a live region — a screen reader reads it when focus arrives in the field, not on every toggle. */
+  if (S.planFirst) ask.setAttribute('aria-describedby', 'plan-first-note'); else ask.removeAttribute('aria-describedby');
   syncDockTitle();
   autosize();   // the placeholder changed length: re-fit the field's height (a long hint may wrap) and re-place the feed above the pill
 }

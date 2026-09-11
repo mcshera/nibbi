@@ -45,6 +45,8 @@
     </dialog>
     <div id="attach" class="attach" hidden></div>
     <textarea id="ask" rows="1" placeholder="Ask nibbi to build something..." aria-label="message nibbi" spellcheck="false"></textarea>
+    <!-- the plan-first cue for assistive tech: the dot on the "+" is a pseudo-element and cannot carry a name, so setPlanFirst() points #ask's aria-describedby here while the mode is armed (and drops it when it is off). Static, so it is never announced on its own and never becomes a live region. -->
+    <span id="plan-first-note" class="sr">plan first is on — the next message becomes numbered steps to review before anything is built</span>
     <button id="send" class="send" type="submit" aria-label="send">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 14.5V3.5M9 3.5L4 8.5M9 3.5L14 8.5" stroke="#f5f2ea" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
