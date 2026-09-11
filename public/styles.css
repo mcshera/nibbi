@@ -72,15 +72,14 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 @keyframes leave { to { opacity: 0; transform: translateY(8px); } }
 .you { align-self: flex-end; margin-right: 2px; max-width: 78%; padding: 8px 14px; border-radius: 18px 18px 6px 18px; background: rgba(21,20,19,.06); color: var(--ink-2); font-size: 14.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .you .imgs { display: flex; gap: 6px; margin: 4px 0 6px; } .you .imgs img { height: 64px; border-radius: 8px; }
-.nib { align-self: stretch; color: var(--ink); font-size: 17px; line-height: 1.55; display: flex; align-items: flex-start; gap: 10px; }
-.nib .ava { flex: none; width: 58px; height: 46px; margin: 0 0 0 -8px; }
+.nib { align-self: stretch; color: var(--ink); font-size: 17px; line-height: 1.55; display: flex; align-items: flex-start; }
 .nib .nibbody { flex: 1; min-width: 0; }
-/* the bubble: the small nibbi carries the reply */
-.bubble { position: relative; display: inline-block; max-width: 100%; padding: 12px 18px 13px; border-radius: 20px; border-top-left-radius: 8px; background: rgba(255,255,255,.62); border: 1px solid var(--line); box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 8px 24px -18px rgba(21,20,19,.25); }
-.bubble::before { content: ""; position: absolute; left: -7px; top: 18px; width: 12px; height: 12px; background: #faf8f4; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: rotate(45deg); border-radius: 0 0 0 3px; }
+/* the bubble carries the reply alone: no avatar, no tail. a 6px ink dot tucked in the top-left corner is nibbi's quiet signature */
+.bubble { position: relative; display: inline-block; max-width: 100%; padding: 12px 18px 13px 20px; border-radius: 18px; border-top-left-radius: 10px; background: rgba(255,255,255,.62); border: 1px solid var(--line); box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 8px 24px -18px rgba(21,20,19,.25); }
+.bubble::before { content: ""; position: absolute; left: 7px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
 .bubble.live .said:empty::after { content: "•••"; display: inline-block; letter-spacing: .22em; color: var(--ink-2); animation: think 1.2s ease-in-out infinite; font-size: 15px; line-height: 1; padding: 6px 0 2px; }
 .nib.error .bubble { border-color: rgba(181,83,61,.35); }
-.nib.error .bubble::before { border-color: rgba(181,83,61,.35); }
+.nib.error .bubble::before { background: #b5533d; }
 .bubble .steps { margin: 0 0 8px; }
 .bubble .steps:not(.folded):not([hidden]) + .said:not(:empty) { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
 .bubble .said.plain { font-size: 13.5px; }
@@ -138,11 +137,11 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .chip:hover { background: rgba(21,20,19,.92); color: #f5f2ea; border-color: transparent; }
 .chip.warn { border-color: rgba(181,83,61,.35); }
 
-/* ---------- pill ---------- */
+/* ---------- pill: the ink dock. one "+", one field, one send; modes that are on sit as chips at the field's leading edge ---------- */
 .pill {
   position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); z-index: 6;
   width: min(720px, calc(100vw - 56px)); min-height: var(--pill-h);
-  display: flex; align-items: center; gap: 6px; padding: 10px 10px 10px 18px;
+  display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 12px;
   background: var(--pill-bg); border: 1px solid var(--line); border-radius: 40px;
   box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 12px 34px -18px rgba(21,20,19,.28), 0 2px 8px -4px rgba(21,20,19,.08);
   backdrop-filter: blur(14px) saturate(1.1);
@@ -151,27 +150,53 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .pill:focus-within { box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 16px 40px -18px rgba(21,20,19,.34), 0 0 0 4px rgba(21,20,19,.05); border-color: rgba(21,20,19,.16); }
 body.busy .pill { border-color: rgba(21,20,19,.06); }
 .pill textarea {
-  flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink);
+  flex: 1 1 0px; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink);
   font: inherit; font-size: 19px; line-height: 1.4; padding: 8px 6px; max-height: 38vh; min-height: 40px;
   user-select: text; -webkit-user-select: text; scrollbar-width: none;
 }
 .pill textarea::placeholder { color: #8f8a81; }
-.pill .send { flex: none; width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--ink); display: grid; place-items: center; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
+/* "+": an ink-outlined ring that opens the options panel; filled while the panel is open, the plus turning into a close */
+.pill .dock { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid rgba(21,20,19,.5); background: transparent; color: var(--ink-2); display: grid; place-items: center; padding: 0; cursor: pointer; transition: background var(--t1), color var(--t1), border-color var(--t1); }
+.pill .dock svg { transition: transform var(--t2) var(--ease); }
+.pill .dock:hover { background: rgba(21,20,19,.06); border-color: var(--ink); color: var(--ink); }
+.pill .dock[aria-expanded="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.pill .dock[aria-expanded="true"] svg { transform: rotate(45deg); }
+/* the panel hangs above the "+": three rows, each a real button; toggles carry their own small switch */
+.dock-menu { display: none; position: absolute; inset: auto; left: 4px; bottom: calc(100% + 10px); margin: 0; max-width: none; max-height: none; z-index: 2; width: min(248px, calc(100vw - 40px)); padding: 6px; color: var(--ink); border-radius: 16px; background: #faf8f3; border: 1px solid var(--line); box-shadow: 0 12px 34px -18px rgba(21,20,19,.3), 0 1px 0 rgba(255,255,255,.7) inset; flex-direction: column; gap: 2px; animation: arrive var(--t2) var(--ease) both; }
+.dock-menu[open] { display: flex; }
+.pill.dock-open { z-index: 8; }   /* an open panel paints over transient toasts (z 7) so every row stays clickable on narrow screens */
+.dock-menu .ico, .dock-menu .mitem { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; margin: 0; padding: 0 10px; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font: inherit; font-size: 13.5px; font-weight: 500; line-height: 1; text-align: left; white-space: nowrap; cursor: pointer; opacity: 1; transform: none; transition: background var(--t1), color var(--t1); }
+.dock-menu .ico:hover, .dock-menu .mitem:hover { background: rgba(21,20,19,.06); color: var(--ink); }
+.dock-menu .mi { flex: none; color: var(--ink-3); transition: color var(--t1); }
+.dock-menu .ico:hover .mi, .dock-menu .mitem:hover .mi, .dock-menu .ico[aria-pressed="true"] .mi { color: var(--ink); }
+.dock-menu .mi-label, .dock-menu .mic-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dock-menu .ico:focus-visible, .dock-menu .mitem:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* mode chips: "plan first ×", "Hey Nibbi · listening ×" — one button each, the × is the affordance, the whole chip is the target */
+.modes { display: flex; align-items: center; gap: 4px; flex: none; }
+.modes:empty { display: none; }
+.mode { display: inline-flex; align-items: center; height: 32px; padding: 0; border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer; }
+.mode-b { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 7px 0 10px; border-radius: 999px; border: 1px solid rgba(21,20,19,.2); background: rgba(21,20,19,.045); font-size: 12.5px; font-weight: 500; line-height: 1; white-space: nowrap; transition: border-color var(--t1), background var(--t1); }
+.mode .w { color: var(--ink-3); font-weight: 450; } .mode .w::before { content: "· "; }
+.mode .x { color: var(--ink-3); font-size: 15px; margin-left: 1px; transition: color var(--t1); }
+.mode:hover .mode-b { border-color: var(--ink); background: rgba(21,20,19,.07); } .mode:hover .x { color: var(--ink); }
+.mode:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 999px; }
+.mode[data-mode="mic"] .mode-b::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); flex: none; margin-right: 1px; }
+body[data-mic="listening"] .mode[data-mode="mic"] .mode-b::before { animation: pulse 1.4s ease-in-out infinite; }
+body[data-mic="paused"] .mode[data-mode="mic"] .mode-b::before, body[data-mic="starting"] .mode[data-mode="mic"] .mode-b::before, body[data-mic="transcribing"] .mode[data-mode="mic"] .mode-b::before { opacity: .4; }
+/* send: an ink squircle */
+.pill .send { flex: none; width: 44px; height: 44px; border-radius: 14px; border: 0; background: var(--ink); display: grid; place-items: center; padding: 0; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
 .pill .send:hover { transform: scale(1.05); } .pill .send:active { transform: scale(.96); }
 .pill .send:disabled { opacity: .35; cursor: default; transform: none; }
 body.busy .pill .send { background: var(--ink-3); }
 body.busy .pill .send svg { display: none; }
 body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-radius: 3px; background: #f5f2ea; }
-.pill .ico { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; color: var(--ink-3); display: grid; place-items: center; cursor: pointer; opacity: 0; transform: scale(.8); transition: opacity var(--t2) var(--ease), transform var(--t2) var(--ease), color var(--t1), background var(--t1); margin-left: -10px; }
-.pill:focus-within .ico, .pill.listening .ico { opacity: 1; transform: none; }
-.pill .ico:hover { color: var(--ink); background: rgba(21,20,19,.06); }
-.pill.listening .ico.mic { color: #f5f2ea; background: var(--ink); opacity: 1; transform: none; }
-.pill.listening textarea { opacity: 0; }
-.listen { position: absolute; left: 62px; right: 80px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 12px; color: var(--ink-3); font-size: 17px; pointer-events: none; }
-.listen .bars { display: inline-flex; gap: 3px; align-items: center; height: 22px; }
-.listen .bars i { display: block; width: 3px; height: 6px; border-radius: 2px; background: var(--ink); transform-origin: center; }
+/* while Hey Nibbi is on the bar gains a quiet status strip under the field: bars + the heard phrase */
+.pill.mic-on { padding-bottom: 36px; }
+.listen { position: absolute; left: 62px; right: 24px; bottom: 9px; display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 12px; line-height: 18px; pointer-events: none; }
+.listen .bars { display: inline-flex; gap: 3px; align-items: center; height: 18px; flex: none; }
+.listen .bars i { display: block; width: 2px; height: 5px; border-radius: 2px; background: var(--ink); transform-origin: center; }
 .listen .heard { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.attach { display: flex; gap: 6px; align-items: center; } .attach img { height: 44px; width: 44px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+.attach { display: flex; gap: 6px; align-items: center; flex: none; } .attach img { height: 44px; width: 44px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
 .attach button { position: relative; border: 0; background: none; padding: 0; cursor: pointer; }
 .attach button::after { content: "×"; position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
 
@@ -182,8 +207,15 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 /* ---------- small screens ---------- */
 @media (max-width: 640px) {
   :root { --pill-h: 60px; }
-  .pill { bottom: calc(18px + env(safe-area-inset-bottom)); border-radius: 32px; padding: 6px 6px 6px 12px; width: calc(100vw - 24px); }
-  .pill textarea { font-size: 17px; } .pill .send { width: 44px; height: 44px; }
+  .pill { bottom: calc(18px + env(safe-area-inset-bottom)); border-radius: 30px; padding: 6px 6px 6px 8px; width: calc(100vw - 24px); gap: 6px; flex-wrap: wrap; }
+  .pill textarea { font-size: 17px; padding: 8px 4px; }
+  .pill .dock { width: 44px; height: 44px; }
+  .modes { flex: 1 0 100%; order: -1; flex-wrap: wrap; padding: 2px 4px 0; }   /* chips take their own row above the field so the field keeps its width */
+  .mode { height: 44px; }
+  .pill .attach { flex: 1 0 100%; max-width: 100%; order: -1; overflow-x: auto; padding: 4px 8px 0; }   /* thumbnails take a row of their own above the field too */
+  .pill.mic-on { padding-bottom: 34px; }
+  .listen { left: 60px; right: 16px; bottom: 8px; font-size: 11px; }
+  .dock-menu { left: 0; }
   .nib { font-size: 16px; } .chips { bottom: 92px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -191,7 +223,8 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 }
 
 /* ---------- focus + screen readers ---------- */
-:where(.chip, .send, .ico, .status .row, .steps .fold, .meta button, .status):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 999px; }
+:where(.chip, .status .row, .steps .fold, .meta button, .status):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 999px; }
+.pill .send:focus-visible, .pill .dock:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .pill textarea:focus-visible { outline: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -347,15 +380,9 @@ details.step[open] > summary .l::after { transform: rotate(90deg); }
   .meta { flex-wrap: wrap; row-gap: 0; }
 }
 
-/* plan first: the toggle beside the mic; on, the pill says so */
-.pill .ico.plan { opacity: 1; transform: none; align-self: flex-end; width: 44px; height: 44px; margin: 4px 0 4px -4px; border-radius: 22px; color: var(--ink-3); transition: color var(--t1), background var(--t1); }
-.pill .ico.plan:hover { color: var(--ink); background: rgba(21,20,19,.055); }
-.pill .ico.plan[aria-pressed="true"] { color: var(--paper); background: var(--ink); }
-.pill .ico.plan[aria-pressed="true"]:hover { background: var(--ink-2); }
-.pill .ico.plan:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-.pill.plan-first { border-color: rgba(21,20,19,.22); }
-.pill.plan-first::before { content: "plan first"; position: absolute; top: -9px; left: 22px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); background: var(--paper); padding: 0 6px; border-radius: 6px; }
-@media (max-width: 600px) { .pill .ico.plan { margin: 0; } }
+/* plan first: a row in the dock panel; when on, the "plan first ×" chip at the field's edge says so and the placeholder changes */
+.dock-menu .ico.plan[aria-pressed="true"] { color: var(--ink); }
+.pill.plan-first textarea::placeholder { color: var(--ink-3); }
 /* the send button becomes "steer" while a steerable turn runs and the composer holds text */
 body.busy.steer-ready .pill .send { background: var(--ink); }
 body.busy.steer-ready .pill .send svg { display: block; }

@@ -28,12 +28,24 @@
   <div id="chips" class="chips" aria-label="suggestions"></div>
 
   <form id="pill" class="pill" autocomplete="off">
+    <button id="dock" class="dock" type="button" aria-label="Message options" aria-haspopup="dialog" aria-expanded="false" aria-controls="dock-menu" title="Options — plan first, Hey Nibbi, attach image">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 3.5v11M3.5 9h11" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </button>
+    <dialog id="dock-menu" class="dock-menu" aria-label="Message options">
+      <button id="mic" class="ico mic" type="button" aria-label="Hey Nibbi microphone" aria-pressed="false" aria-describedby="listen" aria-keyshortcuts="Alt+Space" title="Hey Nibbi is off — turn microphone on (⌥ Space)">
+        <svg class="mi" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="6.2" y="2.2" width="5.6" height="9" rx="2.8" stroke="currentColor" stroke-width="1.5"/><path d="M4 8.5a5 5 0 0 0 10 0M9 13.5v2.3M6.8 15.8h4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span class="mic-label">Hey Nibbi</span>
+        <span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>
+      </button>
+      <button id="attach-image" class="mitem" type="button" title="Attach an image to this message">
+        <svg class="mi" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="2.5" y="3.5" width="13" height="11" rx="2.5" stroke="currentColor" stroke-width="1.5"/><circle cx="6.6" cy="7.3" r="1.3" fill="currentColor"/><path d="M3.5 13l3.6-3.4 2.6 2.3 2.4-2.2 3.4 3.3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span class="mi-label">Attach image</span>
+      </button>
+      <input id="attach-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden tabindex="-1" aria-hidden="true">
+    </dialog>
+    <div id="modes" class="modes" role="group" aria-label="modes on"></div>
     <div id="attach" class="attach" hidden></div>
     <textarea id="ask" rows="1" placeholder="Ask nibbi to build something..." aria-label="message nibbi" spellcheck="false"></textarea>
-    <button id="mic" class="ico mic" type="button" aria-label="Hey Nibbi microphone" aria-pressed="false" aria-describedby="listen" aria-keyshortcuts="Alt+Space" title="Hey Nibbi is off — turn microphone on (⌥ Space)">
-      <span class="mic-label">Hey Nibbi</span>
-      <span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>
-    </button>
     <button id="send" class="send" type="submit" aria-label="send">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 14.5V3.5M9 3.5L4 8.5M9 3.5L14 8.5" stroke="#f5f2ea" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
