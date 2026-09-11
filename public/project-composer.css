@@ -1,8 +1,8 @@
 .project-compose-toggle { min-height: 44px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; text-align: left; }
 .project-compose-toggle:hover { color: var(--ink); background: rgba(21,20,19,.04); }
 .project-compose-toggle:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; }
-body.project-compose-compact #ask, body.project-compose-compact #attach, body.project-compose-compact #modes { display: none; }
-/* compact: the toggle stands in for the field between "+" and send; expanded: it sits at the field's leading edge like a chip */
+body.project-compose-compact #ask, body.project-compose-compact #attach { display: none; }
+/* compact: the toggle stands in for the field between "+" and send; expanded: it sits at the field's leading edge */
 body.project-compose-compact .pill { flex-wrap: nowrap; min-height: 64px; padding-block: 7px; }
 body.project-compose-compact .pill.mic-on { padding-bottom: 36px; }   /* the listen strip keeps its own row under the collapsed composer too */
 body.project-compose-compact .project-compose-toggle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }

@@ -138,7 +138,7 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .chip:hover { background: rgba(21,20,19,.92); color: #f5f2ea; border-color: transparent; }
 .chip.warn { border-color: rgba(181,83,61,.35); }
 
-/* ---------- pill: the ink dock. one "+", one field, one send; modes that are on sit as chips at the field's leading edge ---------- */
+/* ---------- pill: the ink dock. one "+", one field, one send; the modes live on the toggles inside the "+" panel ---------- */
 .pill {
   position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); z-index: 6;
   width: min(720px, calc(100vw - 56px)); min-height: var(--pill-h);
@@ -157,7 +157,7 @@ body.busy .pill { border-color: rgba(21,20,19,.06); }
 }
 .pill textarea::placeholder { color: #8f8a81; }
 /* "+": an ink-outlined ring that opens the options panel; filled while the panel is open, the plus turning into a close */
-.pill .dock { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid rgba(21,20,19,.5); background: transparent; color: var(--ink-2); display: grid; place-items: center; padding: 0; cursor: pointer; transition: background var(--t1), color var(--t1), border-color var(--t1); }
+.pill .dock { position: relative; flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid rgba(21,20,19,.5); background: transparent; color: var(--ink-2); display: grid; place-items: center; padding: 0; cursor: pointer; transition: background var(--t1), color var(--t1), border-color var(--t1); }
 .pill .dock svg { transition: transform var(--t2) var(--ease); }
 .pill .dock:hover { background: rgba(21,20,19,.06); border-color: var(--ink); color: var(--ink); }
 .pill .dock[aria-expanded="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
@@ -172,18 +172,13 @@ body.busy .pill { border-color: rgba(21,20,19,.06); }
 .dock-menu .ico:hover .mi, .dock-menu .mitem:hover .mi, .dock-menu .ico[aria-pressed="true"] .mi { color: var(--ink); }
 .dock-menu .mi-label, .dock-menu .mic-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dock-menu .ico:focus-visible, .dock-menu .mitem:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-/* mode chips: "plan first ×", "Hey Nibbi · listening ×" — one button each, the × is the affordance, the whole chip is the target */
-.modes { display: flex; align-items: center; gap: 4px; flex: none; }
-.modes:empty { display: none; }
-.mode { display: inline-flex; align-items: center; height: 36px; padding: 0; border: 0; background: none; font: inherit; color: var(--ink-2); cursor: pointer; }
-.mode-b { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 7px 0 10px; border-radius: 999px; border: 1px solid rgba(21,20,19,.2); background: rgba(21,20,19,.045); font-size: 12.5px; font-weight: 500; line-height: 1; white-space: nowrap; transition: border-color var(--t1), background var(--t1); }
-.mode .w { color: var(--ink-3); font-weight: 450; } .mode .w::before { content: "· "; }
-.mode .x { color: var(--ink-3); font-size: 15px; margin-left: 1px; transition: color var(--t1); }
-.mode:hover .mode-b { border-color: var(--ink); background: rgba(21,20,19,.07); } .mode:hover .x { color: var(--ink); }
-.mode:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 999px; }
-.mode[data-mode="mic"] .mode-b::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); flex: none; margin-right: 1px; }
-body[data-mic="listening"] .mode[data-mode="mic"] .mode-b::before { animation: pulse 1.4s ease-in-out infinite; }
-body[data-mic="paused"] .mode[data-mode="mic"] .mode-b::before, body[data-mic="starting"] .mode[data-mode="mic"] .mode-b::before, body[data-mic="transcribing"] .mode[data-mode="mic"] .mode-b::before { opacity: .4; }
+/* plan first is armed: one 6px ink dot inside the "+". A cue, not a control — a pseudo-element, so it is invisible to assistive tech
+   (#plan-first's aria-pressed in the panel is the accessible truth) and has no hit target of its own; #dock's title names the mode on hover.
+   Tucked into the top-right diagonal (7px in, 8px at ≤640 where the button is 44px): the plus arms and the × they rotate into reach ~5.5px
+   from the centre, the dot's centre sits ~12px out, and the focus ring lives outside the border box — so it collides with neither.
+   Open, the button fills with ink, so the dot inverts to paper and stays visible. */
+.pill.plan-first .dock::after { content: ""; position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); pointer-events: none; }
+.pill.plan-first .dock[aria-expanded="true"]::after { background: var(--paper); }   /* no transition: the swap rides the panel opening, and a half-blended dot on the ink fill reads as dirt */
 /* send: an ink squircle */
 .pill .send { flex: none; width: 44px; height: 44px; border-radius: 14px; border: 0; background: var(--ink); display: grid; place-items: center; padding: 0; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
 .pill .send:hover { transform: scale(1.05); } .pill .send:active { transform: scale(.96); }
@@ -212,13 +207,12 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
   .pill { bottom: calc(18px + env(safe-area-inset-bottom)); border-radius: 30px; padding: 6px 6px 6px 8px; width: calc(100vw - 24px); gap: 6px; flex-wrap: wrap; }
   .pill textarea { font-size: 17px; padding: 8px 4px; }
   .pill .dock { width: 44px; height: 44px; }
-  .modes { flex: 1 0 100%; order: -1; flex-wrap: wrap; padding: 2px 4px 0; }   /* chips take their own row above the field so the field keeps its width */
-  .mode { height: 44px; }
+  .pill.plan-first .dock::after { top: 8px; right: 8px; }   /* the bigger touch target keeps the dot the same distance inside the ring */
   .pill .attach { flex: 1 0 100%; max-width: 100%; order: -1; overflow-x: auto; padding: 4px 8px 0; }   /* thumbnails take a row of their own above the field too */
   .pill.mic-on { padding-bottom: 34px; }
   .listen { left: 60px; right: 16px; bottom: 8px; font-size: 11px; }
   .dock-menu { left: 0; }
-  .nib { font-size: 16px; }   /* .chips keep tracking --feed-bottom here too: a fixed offset hid them behind a taller pill (chips, attachment, listen strip) */
+  .nib { font-size: 16px; }   /* .chips keep tracking --feed-bottom here too: a fixed offset hid them behind a taller pill (attachment row, listen strip) */
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
@@ -383,7 +377,7 @@ details.step[open] > summary .l::after { transform: rotate(90deg); }
   .meta { flex-wrap: wrap; row-gap: 0; }
 }
 
-/* plan first: a row in the dock panel; when on, the "plan first ×" chip at the field's edge says so and the placeholder changes */
+/* plan first: a row in the dock panel; when on, the dot on the "+" and the placeholder say so */
 .dock-menu .ico.plan[aria-pressed="true"] { color: var(--ink); }
 .pill.plan-first textarea::placeholder { color: var(--ink-3); }
 /* the send button becomes "steer" while a steerable turn runs and the composer holds text */

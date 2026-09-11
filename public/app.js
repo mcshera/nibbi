@@ -30,7 +30,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 /* ------------------------------------------------------------------ dom */
 const body = document.body, feed = $('#feed'), pill = $('#pill'), ask = $('#ask'), sendBtn = $('#send'), micBtn = $('#mic'), chipsEl = $('#chips'), attachEl = $('#attach'), listenEl = $('#listen');
-const dockBtn = $('#dock'), dockMenu = $('#dock-menu'), modesEl = $('#modes'), attachImageBtn = $('#attach-image'), attachFile = $('#attach-file');
+const dockBtn = $('#dock'), dockMenu = $('#dock-menu'), attachImageBtn = $('#attach-image'), attachFile = $('#attach-file');
 // The Mac shell overlays its window buttons; ordinary browser layouts need no inset.
 body.classList.toggle('native-mac', (!!window.__TAURI__ || Q.get('app') === '1') && /Mac/.test(navigator.platform));
 const fxCv = $('#fx');
@@ -72,7 +72,7 @@ composeToggle.onclick = () => { S.projectComposerExpanded = body.classList.conta
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
 planBtn.innerHTML = '<svg class="mi" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="4" cy="4.5" r="1.4" fill="currentColor"/><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="4" cy="13.5" r="1.4" fill="currentColor"/><path d="M8 4.5h6M8 9h6M8 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="mi-label">Plan first</span><span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>';
 micBtn.before(planBtn);   // the menu lists plan first, then Hey Nibbi, then attach
-/* the hints are short enough to stay one line beside a chip on desktop; under 360px the field is ~170px wide, so shorter variants keep the bar from growing at rest */
+/* the hints stay one line on desktop; under 360px the field is ~170px wide, so shorter variants keep the bar from growing at rest */
 const narrowField = matchMedia('(max-width: 360px)');
 function placeholderText() {
   const n = narrowField.matches;
@@ -83,27 +83,16 @@ function setPlanFirst(on) {
   S.planFirst = !!on; planBtn.setAttribute('aria-pressed', String(S.planFirst)); pill.classList.toggle('plan-first', S.planFirst);
   planBtn.title = S.planFirst ? 'Plan first is on — the next message becomes a reviewable plan (click to turn off)' : 'Plan first — propose numbered steps to review before any build starts';
   ask.placeholder = placeholderText();
-  syncModes();
+  syncDockTitle();
+  autosize();   // the placeholder changed length: re-fit the field's height (a long hint may wrap) and re-place the feed above the pill
 }
 planBtn.onclick = () => { setPlanFirst(!S.planFirst); ask.focus(); toast(S.planFirst ? 'plan first — the next message becomes a reviewable plan' : 'plan first off', 2200); };
-/* the ink dock: one "+" opens a small panel above it holding the mode toggles and attach; modes that are on show as removable chips at the field's leading edge */
-const MIC_WORD = { starting: 'starting', armed: 'ready', greeting: 'greeting', listening: 'listening', transcribing: 'transcribing', sending: 'answering', paused: 'paused' };
-function modeChip(kind, label, word, off, onOff) {
-  const b = document.createElement('button'); b.type = 'button'; b.className = 'mode'; b.dataset.mode = kind; b.setAttribute('aria-label', off); b.title = off;
-  b.innerHTML = '<span class="mode-b"><span class="l"></span><span class="w"></span><span class="x" aria-hidden="true">×</span></span>';
-  b.querySelector('.l').textContent = label; const w = b.querySelector('.w'); w.textContent = word || ''; w.hidden = !word;
-  b.onclick = onOff; return b;
-}
-function syncModes() {
-  const chips = [];
-  if (S.planFirst) chips.push(modeChip('plan', 'plan first', '', 'Plan first is on — turn off', () => planBtn.click()));
-  if (S.micEnabled) { const word = MIC_WORD[S.micPhase] || ''; chips.push(modeChip('mic', 'Hey Nibbi', word, 'Hey Nibbi is on' + (word ? ' · ' + word : '') + ' — turn off', () => micBtn.click())); }
-  const key = chips.map(c => c.getAttribute('aria-label')).join('|');
-  if (modesEl.dataset.key === key) return;
-  const focused = document.activeElement?.closest?.('#modes .mode')?.dataset.mode;
-  modesEl.dataset.key = key; modesEl.replaceChildren(...chips);
-  if (focused) { const again = modesEl.querySelector('.mode[data-mode="' + focused + '"]'); (again || dockBtn).focus(); }
-  autosize();   // the field's width changed with the chips: re-fit its height (a long placeholder may wrap) and re-place the feed above the pill
+/* the ink dock: one "+" opens a small panel above it holding the mode toggles and attach. A mode that is on takes no room in the bar:
+   Hey Nibbi speaks through the #listen strip, plan first through the placeholder and one CSS dot on the "+" (.pill.plan-first).
+   The "+" keeps its accessible name ("Message options") — only its hover title names what is on; the panel rows carry aria-pressed. */
+function syncDockTitle() {
+  const on = [S.planFirst ? 'plan first' : '', S.micEnabled ? 'Hey Nibbi' : ''].filter(Boolean);
+  dockBtn.title = on.length ? 'Options — ' + on.join(' and ') + (on.length > 1 ? ' are on' : ' is on') : 'Options — plan first, Hey Nibbi, attach image';
 }
 const dockItems = () => [...dockMenu.querySelectorAll('button:not([disabled])')].filter(b => !b.hidden);
 /* a native non-modal <dialog>: the app's other panels are recognised by `dialog[open]` (the sidebar yields Escape to it, global shortcuts stand down) */
@@ -134,7 +123,7 @@ dockMenu.addEventListener('keydown', (e) => {
     items[next].focus();
   }
 });
-/* choosing an item closes the panel: a toggle reports itself as a chip, attach hands over to the file chooser */
+/* choosing an item closes the panel: a toggle keeps its state on its own row, attach hands over to the file chooser */
 dockMenu.addEventListener('click', (e) => { const item = e.target instanceof Element && e.target.closest('button'); if (!item) return; closeDock(false); if (item !== attachImageBtn) (ask.getClientRects().length ? ask : dockBtn).focus(); });
 dockMenu.addEventListener('focusout', (e) => { if (dockPress) return; const to = e.relatedTarget; if (to instanceof Node && (dockMenu.contains(to) || to === dockBtn)) return; closeDock(false); });
 document.addEventListener('pointerdown', (e) => { if (!dockMenu.open || !(e.target instanceof Node)) return; if (dockMenu.contains(e.target) || dockBtn.contains(e.target)) return; closeDock(false); }, true);
@@ -1854,7 +1843,7 @@ function renderVoice() {
   listenEl.hidden = !listening;
   const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: "What's up, Matty?", listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
   $('.heard', listenEl).textContent = labels[phase] || '';
-  syncModes();   // the chip at the field's leading edge carries the live phase word
+  syncDockTitle();   // the listen strip already carries the live phase; the “+” title only has to name the mode
   S.voiceFinishing = phase === 'listening' && S.micCapturing;
   syncSendButton();   // one owner for the send button's label: busy → steer/stop, idle → finish voice/send
   if (phase === 'listening') { nibbi.setMood('listening'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.3, r.top); }
