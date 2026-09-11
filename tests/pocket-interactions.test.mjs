@@ -323,3 +323,56 @@ test('AT zero-detail click activates once with keyboard-equivalent wake, busy an
   const g = fixture({ realDirector: true, wakeOnInteract: true }); g.context.mood = 'sleep';
   fire(g.canvas, 'click', { detail: 0 }); assert.deepEqual(g.ids(), ['wake']); g.api.destroy();
 });
+
+test('pointer focus never shows the ring, even after the window loses and regains focus; keyboard use shows it', () => {
+  const f = fixture(); const ring = f.doc.body.children[0];
+  f.tap(); fire(f.canvas, 'focus'); assert.equal(ring.hidden, true, 'pointer tap keeps the ring hidden');
+  fire(f.canvas, 'blur'); f.canvas.focus(); fire(f.canvas, 'focus'); assert.equal(ring.hidden, true, 'OS window refocus re-fires focus without keyboard intent');
+  f.key('keydown', 'Escape'); assert.equal(ring.hidden, false, 'keyboard interaction earns the ring');
+  fire(f.canvas, 'blur'); assert.equal(ring.hidden, true); f.api.destroy();
+});
+
+test('progress beats map to their clips with authored priorities, energies and cooldowns', () => {
+  const beats = [['delivered', 'double-hop', 2500, .75, 65], ['streak', 'triple-hop', 4000, .8, 72], ['draft', 'peek', 2000, .5, 40], ['attention', 'wiggle', 2000, .5, 40], ['brief', 'stretch', 3000, .4, 40], ['checks', 'puff', 2000, .5, 40]];
+  for (const [name, action, cooldown, energy, priority] of beats) {
+    const f = fixture();
+    assert.equal(f.api.event(name), true, name); assert.deepEqual(f.ids(), [action], name);
+    assert.equal(f.calls[0].options.energy, energy, name); assert.equal(f.calls[0].options.priority, priority, name);
+    assert.equal(f.calls[0].options.interrupt, true, name); assert.equal(f.api.state().lastEvent, name);
+    assert.equal(f.api.event(name), false, `${name} repeats inside its cooldown`);
+    f.tick(cooldown - 1); assert.equal(f.api.event(name), false, `${name} still cooling`);
+    f.tick(1); assert.equal(f.api.event(name), true, `${name} plays again after ${cooldown}ms`);
+    assert.equal(f.calls.length, 2, name); assert.equal(f.interactions(), 0, 'beats are not user interaction');
+    assert.equal(f.timers.size, 0, name); f.api.destroy();
+  }
+  const g = fixture({ realDirector: true });
+  for (const [name, action] of beats) { assert.equal(g.api.event(name), true, `${name} is a real clip`); assert.equal(g.ids().at(-1), action); g.tick(5000); }
+  g.api.destroy();
+});
+
+test('progress beats never celebrate during work; attention may still interrupt it', () => {
+  const f = fixture(); f.context.busy = true;
+  for (const name of ['delivered', 'streak', 'draft', 'brief', 'checks', 'success', 'milestone']) assert.equal(f.api.event(name), false, name);
+  assert.deepEqual(f.ids(), []);
+  assert.equal(f.api.event('attention'), true); assert.deepEqual(f.ids(), ['wiggle']);
+  assert.equal(f.calls[0].options.energy, .5); assert.equal(f.calls[0].options.priority, 40);
+  f.context.busy = false; f.tick(3000);
+  assert.equal(f.api.event('delivered'), true); assert.equal(f.ids().at(-1), 'double-hop');
+  assert.equal(f.timers.size, 0); f.api.destroy();
+  const g = fixture({ realDirector: true }); g.pointer('pointerdown'); g.tick(170); g.context.busy = true;
+  assert.equal(g.api.event('delivered'), false); assert.equal(g.api.state().holding, false, 'a busy beat still cancels a captured hold');
+  assert.equal(g.api.state().pendingTimers, 0); g.api.destroy();
+});
+
+test('streak outranks delivered and delivered outranks ambient hover on the real director', () => {
+  const f = fixture({ realDirector: true });
+  assert.equal(f.api.event('delivered'), true); f.tick(100);
+  assert.equal(f.api.event('streak'), true, 'streak interrupts delivered'); assert.equal(f.director.state().action, 'triple-hop');
+  f.tick(100); assert.equal(f.api.event('delivered'), false, 'delivered cannot cut a running streak'); f.tick(5000);
+  const mouse = x => f.pointer('pointermove', x, 400, { pointerType: 'mouse' });
+  mouse(400); assert.equal(f.ids().at(-1), 'curious'); f.tick(10);
+  assert.equal(f.api.event('delivered'), true); assert.equal(f.director.state().action, 'double-hop');
+  f.tick(100); assert.equal(f.api.event('checks'), false, 'checks (40) cannot cut a celebration'); f.tick(5000);
+  f.director.setMood('error'); assert.equal(f.api.event('delivered'), false, 'native error still wins');
+  assert.equal(f.director.state().action, 'oops'); f.api.destroy();
+});

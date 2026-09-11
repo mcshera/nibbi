@@ -8,7 +8,7 @@ import { config } from './config.js';
 import { canonicalPath } from './paths.js';
 import { git } from './processes.js';
 
-export interface GameCfg { repo: string; install: string; check: string; targetBranch?: string; play?: string; settings?: ProjectSettings; installDomains?: string[] }
+export interface GameCfg { repo: string; install: string; check: string; targetBranch?: string; play?: string; settings?: ProjectSettings; installDomains?: string[]; webDomains?: string[] }
 export const defaultSettings = (): ProjectSettings => ({ lead: { provider: 'claude' }, fixer: { provider: 'claude' } });
 export function games(): Record<string, GameCfg> {
   const store = runtime();

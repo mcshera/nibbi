@@ -3,10 +3,21 @@ import { EventEmitter } from 'node:events';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { safeEnvironment, terminate } from '../processes.js';
-import type { AgentInput, AgentHandle, AgentProvider, AgentResult } from './types.js';
+import type { AgentInput, AgentHandle, AgentProvider, AgentResult, ExecutionEvidence } from './types.js';
+import { ProviderTurnError } from './failure.js';
 
 type ObjectValue = Record<string, unknown>;
-interface RpcMessage { id?: number | string; method?: string; params?: ObjectValue; result?: unknown; error?: { message: string } }
+interface RpcMessage { id?: number | string; method?: string; params?: ObjectValue; result?: unknown; error?: { message: string; code?: number; data?: unknown } }
+export class CodexRpcError extends Error {
+  readonly code?: number;
+  readonly data?: unknown;
+  constructor(error: NonNullable<RpcMessage['error']>) { super(error.message); this.name = 'CodexRpcError'; this.code = error.code; this.data = error.data; }
+}
+interface NativeTurnError { message: string; codexErrorInfo?: unknown; additionalDetails?: unknown }
+interface NativeItem { type?: string; text?: string; name?: string; tool?: string }
+// Validated against offline `codex app-server generate-ts`, v2/ThreadItem.ts.
+// Unknown items fail closed. Reasoning and input/plan markers are not tool attempts.
+const nonActionItems = new Set(['agentMessage', 'reasoning', 'userMessage', 'plan']);
 /** A bounded JSONL transport. Closing rejects every outstanding request; no silent retries. */
 export class CodexRpc extends EventEmitter {
   private child: ChildProcessWithoutNullStreams;
@@ -39,6 +50,7 @@ export class CodexRpc extends EventEmitter {
   private receive(message: RpcMessage): void {
     if (message.method) {
       if (message.id !== undefined) {
+        this.emit('host.request', message.method);
         // Built-in host mutations and escalation are not authorized. Actions use scoped MCP instead.
         if (message.method.endsWith('/requestApproval')) this.send({ id: message.id, result: { decision: 'decline' } });
         else this.send({ id: message.id, error: { code: -32601, message: 'Use the governed Nibbi tools; interactive escalation is not enabled' } });
@@ -46,7 +58,7 @@ export class CodexRpc extends EventEmitter {
     } else if (typeof message.id === 'number') {
       const request = this.requests.get(message.id); if (!request) return;
       this.requests.delete(message.id); clearTimeout(request.timer);
-      if (message.error) request.reject(new Error(message.error.message)); else request.resolve(message.result);
+      if (message.error) request.reject(new CodexRpcError(message.error)); else request.resolve(message.result);
     }
   }
   private send(message: unknown): void { if (!this.closed) this.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...(message as ObjectValue) }) + '\n'); }
@@ -68,6 +80,16 @@ export class CodexRpc extends EventEmitter {
 
 export function startCodex(input: AgentInput): AgentHandle {
   const rpc = new CodexRpc(input.cwd, input.tools.token);
+  const evidence: ExecutionEvidence = { toolAttempted: false, ordinaryTextProduced: false };
+  const attempt = (name: string): void => { evidence.toolAttempted = true; input.onEvent('tool.attempted', { name }); };
+  rpc.on('host.request', attempt); // Count declined approvals and unsupported host actions before replying.
+  const observeItem = (item: NativeItem | undefined, started = false): void => {
+    if (!item?.type || !nonActionItems.has(item.type)) {
+      const name = item?.tool ?? item?.name ?? item?.type ?? 'unknown'; attempt(name);
+      if (started) input.onEvent('tool.started', { name });
+    }
+    if (item?.type === 'agentMessage' && item.text) evidence.ordinaryTextProduced = true;
+  };
   let threadId = '', turnId = '', finished = false;
   const cancel = async (): Promise<void> => {
     if (threadId && turnId && !finished) await rpc.request('turn/interrupt', { threadId, turnId }, 5000).catch(() => undefined);
@@ -101,19 +123,26 @@ export function startCodex(input: AgentInput): AgentHandle {
         approvalPolicy: 'never', sandbox: 'read-only', config: overrides, developerInstructions: input.instructions,
       });
       threadId = thread.thread.id;
-      const out: AgentResult = { text: '', sessionId: threadId, isError: true };
+      const out: AgentResult = { text: '', sessionId: threadId, isError: true, evidence };
       const terminal = new Promise<AgentResult>((resolve, reject) => {
         rpc.once('disconnected', reject);
         rpc.on('notification', (method: string, params: ObjectValue) => {
-          if (params.threadId && params.threadId !== threadId) return;
-          if (method === 'item/agentMessage/delta') input.onEvent('text.delta', { text: String(params.delta ?? '') });
-          const item = params.item as { type?: string; text?: string; name?: string; tool?: string } | undefined;
+          if (finished || (params.threadId && params.threadId !== threadId) || (turnId && params.turnId && params.turnId !== turnId)) return;
+          if (method === 'item/agentMessage/delta' && typeof params.delta === 'string' && params.delta) {
+            evidence.ordinaryTextProduced = true; input.onEvent('text.delta', { text: params.delta });
+          }
+          const item = params.item as NativeItem | undefined;
+          if (method === 'item/completed' || method === 'item/started') observeItem(item, method === 'item/started');
           if (method === 'item/completed' && item?.type === 'agentMessage') out.text += item.text ?? '';
-          if (method === 'item/started' && item?.type !== 'agentMessage') input.onEvent('tool.started', { name: item?.tool ?? item?.type ?? 'tool' });
           if (method === 'thread/tokenUsage/updated') { const usage = params.tokenUsage as { last?: { inputTokens?: number } }; out.ctxTokens = usage?.last?.inputTokens; }
           if (method === 'turn/completed') {
-            const turn = params.turn as { id: string; status: string; error?: { message: string } };
+            const turn = params.turn as { id: string; status: string; error?: NativeTurnError; items?: NativeItem[] };
+            if (turnId && turn.id !== turnId) return;
             turnId = turn.id; out.isError = turn.status !== 'completed';
+            for (const completedItem of turn.items ?? []) observeItem(completedItem);
+            // Exact native v2/CodexErrorInfo.ts discriminant. Not rateLimitExceeded,
+            // sessionBudgetExceeded, HTTP 429, RPC numeric codes, or English messages.
+            if (turn.status === 'failed' && turn.error?.codexErrorInfo === 'usageLimitExceeded') out.usageLimit = { kind: 'usage_limit', provider: 'codex' };
             if (turn.error) out.text += '\n' + turn.error.message;
             finished = true; resolve(out);
           }
@@ -130,7 +159,7 @@ export function startCodex(input: AgentInput): AgentHandle {
       turnId = turn.turn.id;
       const output = await terminal; input.signal.throwIfAborted(); return output;
     } finally { finished = true; input.signal.removeEventListener('abort', cancel); rpc.close(); await rpc.exited; }
-  })();
+  })().catch(error => { throw new ProviderTurnError(error instanceof Error ? error.message : String(error), { evidence, cause: error }); });
   return { result, cancel, steer: async text => {
     if (finished || !threadId || !turnId) throw new Error('Codex turn is not ready for steering');
     await rpc.request('turn/steer', { threadId, expectedTurnId: turnId, input: [{ type: 'text', text, text_elements: [] }] });

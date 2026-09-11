@@ -1,0 +1,55 @@
+{
+  "checks": [
+    {
+      "name": "All techniques mounted at hero/pill/tiny",
+      "loaded": [
+        {
+          "id": "particles",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "softbody",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "svgink",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "brush",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "bead",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        }
+      ]
+    },
+    {
+      "name": "Cued think/work/success/error/sleep across all techniques with screenshots"
+    },
+    {
+      "name": "Frame cost reported",
+      "fps": "6.0 ms/frame all instances"
+    },
+    {
+      "name": "No page errors"
+    },
+    {
+      "name": "Mobile 390 px: no horizontal overflow"
+    }
+  ],
+  "errors": [],
+  "environment": "local Chrome via Playwright with SwiftShader WebGL; not a device benchmark",
+  "failed": false
+}

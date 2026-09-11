@@ -1,0 +1,55 @@
+{
+  "checks": [
+    {
+      "name": "All techniques mounted at hero/pill/tiny",
+      "loaded": [
+        {
+          "id": "sand",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "slime",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "shards",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "puff",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "flipdot",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        }
+      ]
+    },
+    {
+      "name": "Cued think/work/success/error/sleep across all techniques with screenshots"
+    },
+    {
+      "name": "Frame cost reported",
+      "fps": "19.7 ms/frame all instances"
+    },
+    {
+      "name": "No page errors"
+    },
+    {
+      "name": "Mobile 390 px: no horizontal overflow"
+    }
+  ],
+  "errors": [],
+  "environment": "local Chrome via Playwright with SwiftShader WebGL; not a device benchmark",
+  "failed": false
+}

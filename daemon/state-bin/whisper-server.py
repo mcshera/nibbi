@@ -55,7 +55,7 @@ class H(BaseHTTPRequestHandler):
                 try: os.remove(p)
                 except OSError: pass
         body = json.dumps({"heard": text}).encode()
-        sys.stderr.write(f"stt[{'fast' if fast else 'turbo'}] {time.time()-t0:.2f}s: {text[:70]!r}\n"); sys.stderr.flush()
+        sys.stderr.write(f"stt[{'fast' if fast else 'turbo'}] {time.time()-t0:.2f}s\n"); sys.stderr.flush()
         self.send_response(200)
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(body)))

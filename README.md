@@ -48,6 +48,11 @@ Claude API billing is an explicit advanced option only: set `NIBBI_CLAUDE_AUTH=a
 - Stop cancels an active lead turn. `/stop <id>` cancels a fixer. Failed, cancelled and interrupted work is retained.
 - Settings exposes project verification commands, schedules, the vault, protected-file proposals, retained runs and skill review.
 - Vault checkpoints are explicit. Nibbi does not automatically commit your unrelated vault edits.
+- [Personality and response style](docs/PERSONALITY.md) defines the companion voice and natural next-step endings. Existing vault personalities change only through protected-file review; new defaults do not overwrite them.
+
+## Voice
+
+Click the mic once (or press ⌥ Space) to turn on local wake listening. Say **“Hey Nibbi”**; Nibbi replies **“What's up, Matty?”**, then listens for your message. Click again to turn the mic off. See [voice controls, privacy and limits](docs/VOICE-TOGGLE.md).
 
 ## Phone
 

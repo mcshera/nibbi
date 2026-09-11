@@ -1,9 +1,10 @@
 import { runtime } from './store.js';
-export interface ChatEntry { ts: string; channel: string; role: 'user' | 'oracle'; text: string; costUsd?: number; project?: string; runId?: string; source?: 'test' }
+import type { FallbackInfo } from './local-fallback.js';
+export interface ChatEntry { ts: string; channel: string; role: 'user' | 'oracle'; text: string; costUsd?: number; project?: string; runId?: string; source?: 'test'; local?: boolean; localModel?: string; fallback?: FallbackInfo; isError?: boolean }
 type Row = { at: string; channel: string; role: ChatEntry['role']; text: string; metadata: string; project_id?: string };
 const decode = (row: Row): ChatEntry => ({ ts: row.at, channel: row.channel, role: row.role, text: row.text, project: row.project_id, ...JSON.parse(row.metadata) });
-export function logChat(entry: ChatEntry): void {
-  runtime().db.prepare('INSERT INTO messages(at,project_id,role,channel,text,metadata) VALUES(?,?,?,?,?,?)').run(entry.ts, entry.project ?? null, entry.role, entry.channel, entry.text, JSON.stringify({ costUsd: entry.costUsd, runId: entry.runId, source: entry.source }));
+export function logChat(entry: ChatEntry): number {
+  return Number(runtime().db.prepare('INSERT INTO messages(at,project_id,role,channel,text,metadata) VALUES(?,?,?,?,?,?)').run(entry.ts, entry.project ?? null, entry.role, entry.channel, entry.text, JSON.stringify({ costUsd: entry.costUsd, runId: entry.runId, source: entry.source, local: entry.local, localModel: entry.localModel, fallback: entry.fallback, isError: entry.isError })).lastInsertRowid);
 }
 export function readChat(n = 80, before?: string, project?: string): ChatEntry[] {
   return (runtime().db.prepare('SELECT * FROM messages WHERE (? IS NULL OR at<?) AND (? IS NULL OR project_id=?) ORDER BY id DESC LIMIT ?').all(before ?? null, before ?? null, project ?? null, project ?? null, Math.min(1000, Math.max(1, n))) as Row[]).reverse().map(decode);

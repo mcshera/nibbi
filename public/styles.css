@@ -224,8 +224,8 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 .palette .pi.sel, .palette .pi:hover { background: rgba(21,20,19,.06); }
 .diffv { font-size: 12.5px; }
 .diffv .dh { font-family: "Geist Mono", ui-monospace, monospace; color: var(--ink-3); margin-bottom: 6px; }
-.nib .said .diffv .dstat { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; background: rgba(21,20,19,.05); font: 12px/1.5 "Geist Mono", ui-monospace, monospace; color: var(--ink-2); white-space: pre-wrap; }
-.nib .said .diffv .dbody { margin: 0; padding: 10px 12px; border-radius: 12px; background: #fbfaf7; border: 1px solid var(--line); font: 12px/1.5 "Geist Mono", ui-monospace, monospace; color: var(--ink-2); max-height: 380px; overflow: auto; white-space: pre; }
+.nib .said .diffv .dstat, .sbody .diffv .dstat { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; background: rgba(21,20,19,.05); font: 12px/1.5 "Geist Mono", ui-monospace, monospace; color: var(--ink-2); white-space: pre-wrap; }
+.nib .said .diffv .dbody, .sbody .diffv .dbody { margin: 0; padding: 10px 12px; border-radius: 12px; background: #fbfaf7; border: 1px solid var(--line); font: 12px/1.5 "Geist Mono", ui-monospace, monospace; color: var(--ink-2); max-height: 380px; overflow: auto; white-space: pre; }
 .diffv .df { color: var(--ink); font-weight: 600; }
 .diffv .dhunk { color: var(--ink-4); }
 .diffv .ln { display: block; min-height: 1.5em; padding: 0 4px; margin: 0 -4px; }
@@ -266,7 +266,7 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 .diffv .dfile summary::-webkit-details-marker { display: none; }
 .diffv .dfile summary .cnt b { font-weight: 600; } .diffv .pa { color: #2f6b3a; } .diffv .pd { color: #9a3f2c; }
 .diffv .dfile[open] summary { border-bottom: 1px solid var(--line); }
-.nib .said .diffv .dfile .dbody { border: 0; border-radius: 0; max-height: 320px; }
+.nib .said .diffv .dfile .dbody, .sbody .diffv .dfile .dbody { border: 0; border-radius: 0; max-height: 320px; }
 
 /* ---------- project presence (top-left) ---------- */
 .project { position: fixed; top: 16px; left: 20px; z-index: 6; }
@@ -316,3 +316,91 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 .nib .said .tblwrap { overflow-x: auto; max-width: 100%; margin: .4em 0 .8em; }
 .meta time { color: var(--ink-3); }
 .palette .pi.hist { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; white-space: normal; } .palette .pi.hist .t { color: var(--ink-2); font-size: 12.5px; }
+
+/* ---------- harness: tool steps as <details>, plan review, plan-first, steering, guide ---------- */
+/* a tool step keeps the old row as its summary; the body hangs under the dot with the exact name, input, verdict and diff */
+details.step { display: block; padding: 0; }
+details.step > summary { display: flex; align-items: center; gap: 10px; padding: 3px 0; list-style: none; cursor: pointer; border-radius: 6px; }
+details.step > summary::-webkit-details-marker { display: none; }
+details.step > summary:hover .l, details.step[open] > summary .l { color: var(--ink-2); }
+details.step > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+details.step > summary .l::after { content: "›"; display: inline-block; margin-left: 6px; color: var(--ink-4); transition: transform var(--t2) var(--ease); }
+details.step[open] > summary .l::after { transform: rotate(90deg); }
+.step.fail > summary .l, .step.fail.steer > summary .l { color: #9a3f2c; }
+.step .sbody { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 2px 0 8px 3px; padding: 2px 0 2px 14px; border-left: 1px solid var(--line); font-size: 12px; color: var(--ink-3); user-select: text; -webkit-user-select: text; }
+.step .shead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.step .sname { font: 500 12px/1.6 "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); background: rgba(21,20,19,.05); padding: 0 6px; border-radius: 6px; overflow-wrap: anywhere; }
+.step .skind { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-4); }
+.step .sin { margin: 0; padding: 8px 10px; border-radius: 10px; background: rgba(21,20,19,.04); font: 11.5px/1.5 "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; max-height: 14em; overflow: auto; }
+.step .sres { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.step .sverdict { color: var(--ink-2); overflow-wrap: anywhere; }
+.step .sres.fail .sverdict { color: #9a3f2c; }
+.step.steer .b { border-radius: 2px; background: var(--ink-2); }
+.step.steer.live .b { background: var(--ink); }
+.sbody .diffv { font-size: 12px; max-width: 100%; min-width: 0; }
+.sbody .diffv .dh { margin-bottom: 4px; overflow-wrap: anywhere; }
+@media (pointer: coarse) { details.step > summary { min-height: 44px; } }
+/* phones: every control in the composer and under a reply is a 44px target */
+@media (max-width: 640px) {
+  details.step > summary, .steps .fold, .turn .acts .chip, .meta button, .planr .acts .chip { min-height: 44px; }
+  .turn .acts .chip { display: inline-flex; align-items: center; }
+  .meta { flex-wrap: wrap; row-gap: 0; }
+}
+
+/* plan first: the toggle beside the mic; on, the pill says so */
+.pill .ico.plan { opacity: 1; transform: none; align-self: flex-end; width: 44px; height: 44px; margin: 4px 0 4px -4px; border-radius: 22px; color: var(--ink-3); transition: color var(--t1), background var(--t1); }
+.pill .ico.plan:hover { color: var(--ink); background: rgba(21,20,19,.055); }
+.pill .ico.plan[aria-pressed="true"] { color: var(--paper); background: var(--ink); }
+.pill .ico.plan[aria-pressed="true"]:hover { background: var(--ink-2); }
+.pill .ico.plan:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pill.plan-first { border-color: rgba(21,20,19,.22); }
+.pill.plan-first::before { content: "plan first"; position: absolute; top: -9px; left: 22px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); background: var(--paper); padding: 0 6px; border-radius: 6px; }
+@media (max-width: 600px) { .pill .ico.plan { margin: 0; } }
+/* the send button becomes "steer" while a steerable turn runs and the composer holds text */
+body.busy.steer-ready .pill .send { background: var(--ink); }
+body.busy.steer-ready .pill .send svg { display: block; }
+body.busy.steer-ready .pill .send::after { display: none; }
+
+/* plan review card: summary, numbered steps, warnings, expiry, approve / adjust / cancel */
+.planr { margin: 10px 0 2px; padding: 12px 14px 10px; border: 1px solid rgba(21,20,19,.16); border-radius: 14px; background: rgba(250,248,243,.7); font-size: 14px; line-height: 1.5; min-width: 0; }
+.planr .prh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.planr .prh b { font-size: 14.5px; }
+.planr .prs { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.planr[data-state="executed"] .prs { color: #2f6b3a; border-color: rgba(76,140,86,.4); }
+.planr[data-state="executing"] .prs { animation: pulse 1.4s ease-in-out infinite; }
+.planr:is([data-state="failed"], [data-state="changed"], [data-state="expired"], [data-state="cancelled"], [data-state="interrupted"]) .prs { color: #9a3f2c; border-color: rgba(181,83,61,.35); }
+.planr .prx { margin-left: auto; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.planr .prsum { margin: 0 0 8px; color: var(--ink-2); }
+.planr .prsteps { margin: 6px 0 8px; padding-left: 1.5em; }
+.planr .prsteps li { margin: 0 0 10px; }
+.planr .prsteps li::marker { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.planr .prsteps li > b, .planr .prsteps li > span { display: block; overflow-wrap: anywhere; }
+.planr .pt { font-weight: 600; }
+.planr .pl { font-size: 12.5px; color: var(--ink-2); }
+.planr .pl.unlinked { color: var(--ink-4); font-style: italic; }
+.planr .pm { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.planr .pc { margin-top: 2px; font-size: 13px; color: var(--ink-2); white-space: pre-wrap; }
+.planr .prwarn { margin: 6px 0 8px; padding: 8px 10px 8px 26px; border-radius: 10px; background: rgba(181,83,61,.07); color: #7a3a2e; font-size: 12.5px; }
+.planr .prwarn li { margin: 2px 0; }
+.planr .prerr { margin: 6px 0 0; color: #9a3f2c; font-size: 13px; overflow-wrap: anywhere; }
+.planr .acts { margin: 8px 0 0; }
+.planr .acts .chip:disabled { opacity: .4; cursor: default; }
+.planr .acts .chip:disabled:hover { background: rgba(250,248,243,.7); color: var(--ink-2); border-color: var(--line); }
+.turn.plan .bubble { border-color: rgba(21,20,19,.18); }
+.bubble:has(.planr) { display: block; }
+
+/* guide a live build from its agent card */
+.agent .card .guide { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); cursor: default; }
+.agent .card .guide .grow { display: flex; align-items: flex-end; gap: 6px; }
+.agent .card .guide textarea { flex: 1; min-width: 0; min-height: 44px; resize: none; font: inherit; font-size: 12.5px; line-height: 1.4; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.7); color: var(--ink); user-select: text; -webkit-user-select: text; }
+.agent .card .guide textarea::placeholder { color: #8f8a81; }
+.agent .card .guide textarea:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.agent .card .guide .chip { min-height: 44px; padding: 6px 12px; }
+.agent .card .guide .chip:disabled { opacity: .45; cursor: default; }
+.agent .card .guide .gres { font-size: 11.5px; color: var(--ink-3); white-space: pre-wrap; word-break: break-word; }
+.agent .card .guide .gres.fail { color: #9a3f2c; }
+/* phones: a 260px card centred on a 44px agent hangs off the screen edge, hiding the Guide box; the agents row is a transformed ancestor, so a fixed card is positioned relative to it and sits centred above the row instead */
+@media (max-width: 640px) {
+  .agent { animation-fill-mode: none; }   /* the filled arrive transform (identity matrix) would otherwise make the agent, not the row, the card's containing block */
+  .agent .card { position: fixed; left: 50%; bottom: calc(100% + 6px); width: min(260px, calc(100vw - 24px)); }
+}

@@ -6,6 +6,8 @@ export interface AgentInput {
   sessionId?: string; images?: { media_type: string; data: string }[]; signal: AbortSignal;
   onEvent: (type: string, payload: Record<string, unknown>) => void;
 }
-export interface AgentResult { text: string; sessionId?: string; costUsd?: number; ctxTokens?: number; isError: boolean }
+export interface UsageLimit { kind: "usage_limit"; provider: ProviderId; resetAtMs?: number }
+export interface ExecutionEvidence { toolAttempted: boolean; ordinaryTextProduced: boolean }
+export interface AgentResult { usageLimit?: UsageLimit; evidence?: ExecutionEvidence; text: string; sessionId?: string; costUsd?: number; ctxTokens?: number; isError: boolean }
 export interface AgentHandle { result: Promise<AgentResult>; steer: (text: string) => Promise<void>; cancel: () => Promise<void> }
 export interface AgentProvider { id: ProviderId; capabilities: ProviderCapabilities; start: (input: AgentInput) => AgentHandle }

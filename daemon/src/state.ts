@@ -10,6 +10,7 @@ export interface GatewayState {
   modelOverride?: string | null;
   ctxTokens?: number; // last turn's full prompt size ≈ live context
   rateLimit?: { status: string; utilization?: number; resetsAt?: number; type?: string };
+  lastReply?: { local: boolean; localModel?: string; primaryProvider: string; at: string; isError: boolean };
 }
 
 export function loadState(): GatewayState {

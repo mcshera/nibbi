@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, appendFileSync, openSync, readSync, closeSync, fstatSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { config } from './config.js';
 import { games } from './projects.js';
@@ -7,8 +7,28 @@ import { scopedPath } from './paths.js';
 export const VAULT = config.vaultDir;
 export const PROTECTED = ['SOUL.md', 'AGENTS.md'];
 const read = (name: string): string => { const path = scopedPath(VAULT, name); return existsSync(path) ? readFileSync(path, 'utf8').slice(0, 40_000) : ''; };
+/** LOCAL admits complete bounded files or refuses; it never inherits the legacy slice. */
+const readLocalProfile = (name: string): string => {
+  let fd: number;
+  try { fd = openSync(scopedPath(VAULT, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !PROTECTED.includes(name)) return '';
+    throw new Error('Local canonical profile could not be read safely: ' + name);
+  }
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error('Local canonical profile is not a regular file: ' + name);
+    const bytes = Buffer.alloc(40_001); let length = 0;
+    while (length < bytes.length) {
+      const count = readSync(fd, bytes, length, bytes.length - length, null);
+      if (!count) break; length += count;
+    }
+    if (length > 40_000) throw new Error('Local canonical profile exceeds the 40,000-byte file limit: ' + name + '. No generation was sent.');
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length)); }
+    catch { throw new Error('Local canonical profile is not valid UTF-8: ' + name); }
+  } finally { closeSync(fd); }
+};
 /** Rebuilt every turn. Host/provider configuration is not imported from vault instructions. */
-export function buildSystemPrompt(): string {
+export function buildSystemPrompt(options: { strictLocal?: boolean } = {}): string {
   const date = new Date().toLocaleDateString('en-CA');
   const playtest = loadState().playtestGame;
   return [
@@ -20,7 +40,7 @@ export function buildSystemPrompt(): string {
     'Never write credentials or secrets into the vault, transcript, or skills.',
     'For voice requests, optionally start with »voice: and one short spoken sentence, followed by a newline and the written reply.',
     'REGISTERED PROJECTS:\n' + Object.entries(games()).map(([name, project]) => name + ' → ' + project.repo).join('\n'),
-    ...['SOUL.md', 'AGENTS.md', 'MEMORY.md', 'index.md', 'journal/' + date + '.md'].map(name => 'VAULT ' + name + ':\n' + read(name)),
+    ...['SOUL.md', 'AGENTS.md', 'MEMORY.md', 'index.md', 'journal/' + date + '.md'].map(name => 'VAULT ' + name + ':\n' + (options.strictLocal ? readLocalProfile(name) : read(name))),
     playtest ? 'PLAYTEST MODE: ' + playtest + '. Capture observations in its playtest log, triage issues, and keep acknowledgements brief.' : '',
     'Now: ' + new Date().toString(),
   ].join('\n\n');

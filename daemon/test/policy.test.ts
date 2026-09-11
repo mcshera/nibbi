@@ -34,3 +34,16 @@ test('lead cannot turn a read permission into a system action or unknown MCP mut
   const hook = await policyHook(scope)({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push' }, tool_use_id: '1', session_id: 's', transcript_path: '', cwd: tmpdir() }, '1', { signal: new AbortController().signal });
   assert.equal((hook as any).hookSpecificOutput.permissionDecision, 'deny');
 });
+
+
+test('provider-native web tools are denied so the governed web tools are the only path', () => {
+  for (const role of ['lead', 'fixer'] as const) {
+    const scope: ToolScope = { role, cwd: '/tmp/nibbi-policy-web', readableRoots: ['/tmp/nibbi-policy-web'], writableRoots: ['/tmp/nibbi-policy-web'] };
+    for (const tool of ['WebSearch', 'WebFetch']) {
+      const decision = decideTool(scope, tool, { url: 'https://example.com', query: 'anything' });
+      assert.equal(decision.allowed, false, role + ' ' + tool);
+      assert.match(decision.reason ?? '', /governed web_search and web_fetch tools/);
+    }
+    assert.equal(decideTool(scope, 'TodoWrite', {}).allowed, true);
+  }
+});

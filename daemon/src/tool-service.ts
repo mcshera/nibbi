@@ -1,4 +1,4 @@
-import { createServer, type Server as HttpServer, type ServerResponse } from 'node:http';
+import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, mkdirSync, writeFileSync, statSync, renameSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
@@ -12,49 +12,69 @@ import { sandboxCommand } from './sandbox.js';
 
 export interface GovernedTool { name: string; description: string; inputSchema: Record<string, unknown>; call: (args: Record<string, unknown>, signal: AbortSignal) => Promise<unknown> }
 export interface ToolLease { url: string; token: string; names: string[]; close: () => Promise<void> }
-type Lease = { tools: GovernedTool[]; signal: AbortSignal; transports: Set<StreamableHTTPServerTransport>; pending: Set<Promise<unknown>>; responses: Set<ServerResponse>; abort: AbortController };
+export interface ToolCallInfo { name: string; args: Record<string, unknown> }
+export interface ToolResultInfo { name: string; ok: boolean; result?: unknown; error?: string; elapsedMs: number; bytes: number }
+/** Synchronous transcript hooks. onAttempt fires first for every request; onCall/onResult always arrive as a pair, including for unknown or unauthorized tools (ok:false). args and result are raw (pass them through boundedInput/summarizeResult before storing). A throwing hook never breaks the call. */
+export interface LeaseOptions { onAttempt?: (name: string) => void; onCall?: (info: ToolCallInfo) => void; onResult?: (info: ToolResultInfo) => void }
+export type Lease = LeaseOptions & { tools: GovernedTool[]; signal: AbortSignal; transports: Set<StreamableHTTPServerTransport>; pending: Set<Promise<unknown>>; responses: Set<ServerResponse>; abort: AbortController };
+const hook = (run: () => void): void => { try { run(); } catch { /* transcript hooks never break the tool call */ } };
 const leases = new Map<string, Lease>();
 let server: HttpServer | undefined, port = 0;
 let starting: Promise<void> | undefined;
 
+/** The live lease behind a lease token, or undefined once it has closed. Callers authenticate before asking. */
+export function leaseFor(token: string): Lease | undefined { const lease = leases.get(token); return lease && !lease.signal.aborted ? lease : undefined; }
+/** Serve one already-authenticated Streamable HTTP request (a single JSON-RPC message body) against a lease. Stateless: every request gets its own Server and transport. */
+export async function serveLease(lease: Lease, req: IncomingMessage, res: ServerResponse, body: Buffer): Promise<void> {
+  lease.responses.add(res); res.on('close', () => lease.responses.delete(res));
+  const mcp = new Server({ name: 'nibbi', version: '0.8.0' }, { capabilities: { tools: {} } });
+  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: lease.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema: inputSchema as { type: 'object' } })) }));
+  mcp.setRequestHandler(CallToolRequestSchema, async request => {
+    const name = request.params.name, args = request.params.arguments ?? {}, started = Date.now();
+    hook(() => lease.onAttempt?.(name)); // Includes unknown/denied tools, before permission checks.
+    hook(() => lease.onCall?.({ name, args }));
+    try {
+      lease.signal.throwIfAborted();
+      const tool = lease.tools.find(tool => tool.name === name);
+      if (!tool) throw new Error('Tool is not authorized for this run');
+      const pending = tool.call(args, lease.signal); lease.pending.add(pending);
+      let result: unknown; try { result = await pending; } finally { lease.pending.delete(pending); }
+      const text = typeof result === 'string' ? result : JSON.stringify(result) ?? 'null';
+      hook(() => lease.onResult?.({ name, ok: true, result, elapsedMs: Date.now() - started, bytes: Buffer.byteLength(text) }));
+      return { content: [{ type: 'text', text }] };
+    } catch (error) {
+      const text = (error as Error).message;
+      hook(() => lease.onResult?.({ name, ok: false, error: text, elapsedMs: Date.now() - started, bytes: Buffer.byteLength(text) }));
+      return { isError: true, content: [{ type: 'text', text }] };
+    }
+  });
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  lease.transports.add(transport);
+  res.on('close', () => { lease.transports.delete(transport); void transport.close(); void mcp.close(); });
+  await mcp.connect(transport);
+  await transport.handleRequest(req, res, JSON.parse(body.toString('utf8')));
+}
 async function start(): Promise<void> {
   if (starting) return starting;
   starting = new Promise((done, reject) => {
     server = createServer((req, res) => { void (async () => {
-      const lease = leases.get(String(req.headers.authorization ?? '').replace(/^Bearer /, ''));
-      if (!lease || lease.signal.aborted || req.headers.origin) { res.writeHead(403).end(); return; }
+      const lease = leaseFor(String(req.headers.authorization ?? '').replace(/^Bearer /, ''));
+      if (!lease || req.headers.origin) { res.writeHead(403).end(); return; }
       if (req.method !== 'POST') { res.writeHead(405).end(); return; }
-      lease.responses.add(res); res.on('close', () => lease.responses.delete(res));
       const chunks: Buffer[] = []; let size = 0;
       for await (const chunk of req) { size += chunk.length; if (size > 2_000_000) { res.writeHead(413).end(); return; } chunks.push(chunk); }
-      const mcp = new Server({ name: 'nibbi', version: '0.8.0' }, { capabilities: { tools: {} } });
-      mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: lease.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema: inputSchema as { type: 'object' } })) }));
-      mcp.setRequestHandler(CallToolRequestSchema, async request => {
-        try {
-          lease.signal.throwIfAborted();
-          const tool = lease.tools.find(tool => tool.name === request.params.name);
-          if (!tool) throw new Error('Tool is not authorized for this run');
-          const pending = tool.call(request.params.arguments ?? {}, lease.signal); lease.pending.add(pending);
-          let result: unknown; try { result = await pending; } finally { lease.pending.delete(pending); }
-          return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] };
-        } catch (error) { return { isError: true, content: [{ type: 'text', text: (error as Error).message }] }; }
-      });
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-      lease.transports.add(transport);
-      res.on('close', () => { lease.transports.delete(transport); void transport.close(); void mcp.close(); });
-      await mcp.connect(transport);
-      await transport.handleRequest(req, res, JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      await serveLease(lease, req, res, Buffer.concat(chunks));
     })().catch(() => { if (!res.headersSent) res.writeHead(400); res.end(); }); });
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => { const address = server!.address(); port = typeof address === 'object' && address ? address.port : 0; done(); });
   });
   return starting;
 }
-export async function leaseTools(tools: GovernedTool[], signal: AbortSignal): Promise<ToolLease> {
+export async function leaseTools(tools: GovernedTool[], signal: AbortSignal, options: LeaseOptions = {}): Promise<ToolLease> {
   await start(); signal.throwIfAborted();
   const token = randomBytes(32).toString('hex');
   const abort = new AbortController();
-  const lease: Lease = { tools, signal: AbortSignal.any([signal, abort.signal]), transports: new Set(), pending: new Set(), responses: new Set(), abort }; leases.set(token, lease);
+  const lease: Lease = { ...options, tools, signal: AbortSignal.any([signal, abort.signal]), transports: new Set(), pending: new Set(), responses: new Set(), abort }; leases.set(token, lease);
   const close = async (): Promise<void> => { leases.delete(token); abort.abort(new Error('Provider tool phase finished')); signal.removeEventListener('abort', close); for (const response of lease.responses) response.destroy(); await Promise.allSettled([...lease.pending, ...[...lease.transports].map(transport => transport.close())]); };
   signal.addEventListener('abort', close, { once: true });
   return { url: `http://127.0.0.1:${port}/mcp`, token, names: tools.map(tool => tool.name), close };

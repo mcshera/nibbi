@@ -111,3 +111,29 @@ test('roadmap identities distinguish duplicates and preserve explicit IDs', () =
   const tasks = parseRoadmap('- [ ] Same\n- [ ] Same\n- [ ] Changed wording <!-- nibbi-task:stable -->');
   assert.notEqual(tasks[0].id, tasks[1].id); assert.equal(tasks[2].id, 'stable');
 });
+
+test('captured issue flows through its linked plan task, staged review and verified merge without early completion', async () => {
+  const { projectSection, projectCommand } = await import('../src/project-workspace.js');
+  const { randomUUID } = await import('node:crypto');
+  const project = 'workspace-merge'; await createProject(project); updateProject(project, { check: 'test -f change.txt' });
+  const act = (action: string, args: Record<string, unknown> = {}) => projectCommand({ project, action, expectedRevision: projectSection(project, action.startsWith('issue.') ? 'issues' : 'plans').revision, idempotencyKey: randomUUID(), ...args });
+  const issue = await act('issue.create', { title: 'Capture the observed problem', description: 'A reproducible fixture problem.' });
+  assert.equal(issue.ok, true); if (!issue.ok) return;
+  const planned = await act('issue.plan', { id: issue.itemId, planRevision: projectSection(project, 'plans').revision });
+  assert.equal(planned.ok, true); if (!planned.ok) return;
+  const restore = fake();
+  try {
+    const dispatched = await act('task.build', { id: planned.itemId }); assert.equal(dispatched.ok, true); if (!dispatched.ok) return;
+    const run = dispatched.run as import('../src/fixer.js').Fixer; await fixer.waitForFixer(run.id);
+    const staged = runtime().get<import('../src/fixer.js').Fixer>('fixers', run.id)!;
+    assert.equal(staged.status, 'staged'); assert.equal(staged.verification?.status, 'passed');
+    assert.equal(staged.taskId, planned.itemId); assert.deepEqual(staged.issueIds, [issue.itemId]);
+    assert.equal(projectSection(project, 'plans').items[0].done, false);
+    assert.equal(projectSection(project, 'issues').items[0].done, false);
+    await fixer.approveFixer(run.id);
+    assert.equal(runtime().get<import('../src/fixer.js').Fixer>('fixers', run.id)?.status, 'merged');
+    assert.equal(projectSection(project, 'plans').items[0].done, true);
+    assert.equal(projectSection(project, 'issues').items[0].done, true);
+    assert.equal(projectSection(project, 'issues').items[0].linkedBuilds[0].status, 'merged');
+  } finally { restore(); }
+});

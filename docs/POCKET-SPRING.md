@@ -1,6 +1,6 @@
 # Pocket spring: Nibbi’s animation set
 
-Implemented in the actual app and built locally. See [the acceptance record](POCKET-SPRING-RESULTS.md) and [browser QA](POCKET-QA.md). No deployment was performed.
+Implemented in the actual app. The installed Mac app was updated and reopened on 2026-09-05; see [the installation record](POCKET-INSTALLATION.md). The backend was not restarted or migrated. See [implementation acceptance](POCKET-SPRING-RESULTS.md) and [browser QA](POCKET-QA.md).
 
 ## The experience
 

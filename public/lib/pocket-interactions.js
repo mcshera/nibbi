@@ -19,7 +19,7 @@ export function installPocketInteractions({ nibbi, canvas, getContext = () => ({
   function hideFocus() { focusRing.hidden = true; if (focusFrame) win.cancelAnimationFrame(focusFrame); focusFrame = 0; }
   function drawFocus() {
     focusFrame = 0;
-    if (destroyed || doc.hidden || pointerFocus || doc.activeElement !== canvas) { hideFocus(); return; }
+    if (destroyed || doc.hidden || pointerFocus || doc.activeElement !== canvas || !keyboardFocused()) { hideFocus(); return; }
     const s = nibbi.state?.() || {}, b = s.geometry?.bodyBounds || s.bounds;
     const r = s.r || 40;
     const box = b || { left: s.x - r, right: s.x + r, top: s.y - r, bottom: s.y + r };
@@ -27,6 +27,8 @@ export function installPocketInteractions({ nibbi, canvas, getContext = () => ({
     Object.assign(focusRing.style, { left: `${box.left - 8}px`, top: `${box.top - 8}px`, width: `${box.right - box.left + 16}px`, height: `${box.bottom - box.top + 16}px` });
     focusFrame = win.requestAnimationFrame(drawFocus);
   }
+  // Pointer focus never earns the ring, and a window losing then regaining OS focus re-fires focus on the same canvas.
+  function keyboardFocused() { try { return canvas.matches(':focus-visible'); } catch { return true; } }
   function showFocus() { if (!focusFrame) drawFocus(); }
   let reduced = false, destroyed = false, press = null, combo = 0, lastTap = -Infinity;
   let lastEvent = null, lastAction = null, lastDirect = -Infinity, successIndex = 0, milestoneIndex = 0;
@@ -209,20 +211,24 @@ export function installPocketInteractions({ nibbi, canvas, getContext = () => ({
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.key === ' ' && press?.keyboard) finish({ pointerId: null });
   }
+  // Progress beats (delivered, streak, draft, brief, checks) are reactions to backend-verified events, never predictions.
   const semantic = {
     greet: ['hello', 10000, .7], focus: ['listen', 1800, .3], typing: ['think', 5000, .25],
     attach: ['curious', 1500, .65], send: ['nod', 900, .4], tidy: ['bow', 1800, .7], wake: ['wake', 2500, .7],
+    delivered: ['double-hop', 2500, .75], streak: ['triple-hop', 4000, .8], draft: ['peek', 2000, .5],
+    attention: ['wiggle', 2000, .5], brief: ['stretch', 3000, .4], checks: ['puff', 2000, .5],
   };
+  const priorities = { send: 85, streak: 72, milestone: 70, delivered: 65, success: 60 };
   function event(name) {
     if (blocked() || !Object.hasOwn(semantic, name) && name !== 'success' && name !== 'milestone') return false;
     lastEvent = name;
     if (press && (context().busy || name === 'tidy')) cancel();
-    // Completions cannot celebrate during work; the parent is the source of actual success.
-    if (context().busy && ['success', 'milestone', 'tidy', 'greet', 'wake'].includes(name)) return false;
+    // Completions cannot celebrate during work; the parent is the source of actual success. Attention may interrupt work.
+    if (context().busy && ['success', 'milestone', 'tidy', 'greet', 'wake', 'delivered', 'streak', 'draft', 'brief', 'checks'].includes(name)) return false;
     let spec = semantic[name];
     if (name === 'success') spec = [['proud', 'ta-da', 'star'][successIndex % 3], 1600, .8];
     if (name === 'milestone') spec = [['star', 'ta-da'][milestoneIndex % 2], 2000, .85];
-    const accepted = play(spec[0], { key: `event:${name}`, cooldown: spec[1], energy: spec[2], priority: name === 'send' ? 85 : name === 'milestone' ? 70 : name === 'success' ? 60 : 40 });
+    const accepted = play(spec[0], { key: `event:${name}`, cooldown: spec[1], energy: spec[2], priority: priorities[name] ?? 40 });
     if (accepted && name === 'success') successIndex++;
     if (accepted && name === 'milestone') milestoneIndex++;
     return accepted;
@@ -243,7 +249,7 @@ export function installPocketInteractions({ nibbi, canvas, getContext = () => ({
   listen(canvas, 'keydown', keyDown);
   listen(canvas, 'keyup', keyUp);
   listen(canvas, 'focus', showFocus);
-  listen(canvas, 'blur', () => { pointerFocus = false; hideFocus(); cancel(); });
+  listen(canvas, 'blur', () => { hideFocus(); cancel(); });
   listen(win, 'blur', () => { hideFocus(); cancel(); });
   listen(doc, 'visibilitychange', () => { if (doc.hidden) { hideFocus(); cancel(); } else showFocus(); });
   // AT activates role=button with a zero-detail click. Pointer click/dblclick never duplicate gestures.
