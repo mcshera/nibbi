@@ -1,4 +1,6 @@
-/** Live, modeless margin controls. Authority stays with the caller. */
+/** Live, modeless margin controls. Authority stays with the caller.
+    update(model) reads {projects, projectsLoaded, activeProject, view, busy, settings, progress?}; progress is
+    {today:{deliveries}, week:{deliveries}, streak, available} from verified merges, or undefined when not available. */
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const glyphs = {
   sidebar: ['M4 4h16v16H4z', 'M9 4v16'],
@@ -23,6 +25,16 @@ function progress(project) {
   if (total === null || raw === null) return { label: 'Progress not available', fraction: null };
   const done = Math.min(raw, total);
   return { label: `${done} of ${total} complete`, fraction: total > 0 ? done / total : null };
+}
+/** Companion progress line. Reports what merged; never proposes what to do next. */
+export function progressLine(progress) {
+  const today = progress && progress.available !== false ? count(progress.today?.deliveries) : null;
+  if (today === null) return 'Progress not available';
+  const week = count(progress.week?.deliveries) ?? 0, streak = count(progress.streak) ?? 0;
+  const parts = [today === 0 ? 'Nothing merged yet today' : `${today} merged today`];
+  if (week > 0) parts.push(`${week} this week`);
+  if (streak > 0) parts.push(`${streak}-day streak`);
+  return parts.join(' · ');
 }
 function node(tag, className, value) {
   const el = document.createElement(tag);
@@ -180,7 +192,10 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   const add = bind(button('', 'margin-project margin-new', newProject), 'newProject');
   add.append(icon('plus'), node('span', 'margin-project-name', 'New project'));
   const projectsTitle = node('h2', 'sidebar-section-title', 'Projects');
-  left.append(add, projectsTitle, list, empty, globalError);
+  const progressStatus = node('p', 'margin-muted sidebar-progress', progressLine(undefined));
+  progressStatus.id = 'sidebar-progress'; progressStatus.setAttribute('role', 'status');
+  progressStatus.style.margin = '-4px 12px 10px';
+  left.append(add, projectsTitle, progressStatus, list, empty, globalError);
 
   const settings = makeCard('Settings', 'right');
   const metadata = node('dl', 'margin-metadata');
@@ -356,6 +371,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     }
     empty.hidden = seen.size > 0;
     empty.textContent = next.projectsLoaded === false ? 'Loading projects…' : 'No projects yet. Create one to get started.';
+    const line = progressLine(model.progress);
+    if (progressStatus.textContent !== line) progressStatus.textContent = line;
     const s = model.settings;
     for (const [key, el] of Object.entries(meta)) el.textContent = text(s[key], 'Not available');
     for (const [action, pref] of Object.entries(prefs)) {

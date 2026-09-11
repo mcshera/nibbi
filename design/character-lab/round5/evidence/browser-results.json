@@ -1,0 +1,58 @@
+{
+  "checks": [
+    {
+      "name": "All versions mounted at hero/pill/tiny",
+      "loaded": [
+        {
+          "id": "regard",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "keel",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "tide",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "contour",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        },
+        {
+          "id": "pebble",
+          "hero": true,
+          "pill": true,
+          "tiny": true
+        }
+      ]
+    },
+    {
+      "name": "Cued listen/think/work/success/error/sleep across all versions with screenshots"
+    },
+    {
+      "name": "Composer drives the beat: focus → listen, enter → think → reply"
+    },
+    {
+      "name": "Frame cost reported",
+      "fps": ""
+    },
+    {
+      "name": "No page errors"
+    },
+    {
+      "name": "Mobile 390 px: no horizontal overflow"
+    }
+  ],
+  "errors": [],
+  "environment": "local Chrome via Playwright with software rendering; not a device benchmark",
+  "failed": false
+}

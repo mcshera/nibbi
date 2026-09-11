@@ -138,6 +138,39 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 }
 @media (prefers-reduced-motion: reduce) { .project-action:active:not(:disabled) { transform: none; } }
 
+/* Builds → Log: the run's event trail as rows; tool calls read like the chat transcript's steps (label, exact name, input, verdict, diff). */
+.project-log { list-style: none; margin: 0 0 12px; padding: 0; max-height: min(560px, 60vh); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; background: rgba(21,20,19,.03); }
+.project-log-entry { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; min-width: 0; }
+.project-log-entry:last-child { border-bottom: 0; }
+.project-log-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+.project-log-kind { flex: none; align-self: center; font: 500 10.5px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); padding: 0 6px; border-radius: 4px; background: rgba(21,20,19,.06); white-space: nowrap; }
+.project-log-entry[data-ok="true"] .project-log-kind { color: #365342; background: rgba(76,140,86,.12); }
+.project-log-entry[data-ok="false"] .project-log-kind { color: #873f35; background: rgba(181,83,61,.12); }
+.project-log-label { font-weight: 550; }
+.project-log-name { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); overflow-wrap: anywhere; }
+.project-log-verdict { font-size: 12px; color: var(--ink-3); }
+.project-log-entry[data-ok="false"] .project-log-verdict { color: #873f35; }
+.project-log-text { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.project-log-meta, .project-log-result { color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; margin: 0; }
+.project-log-result { color: var(--ink-2); white-space: pre-wrap; margin: 0 0 8px; }
+.project-log-entry[data-ok="false"] .project-log-result { color: #873f35; }
+.project-log-time { margin-left: auto; color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.project-log-detail { margin-top: 2px; }
+.project-log-detail > summary { min-height: 44px; display: flex; align-items: center; font-size: 12px; color: var(--ink-3); padding: 6px 0; list-style: none; }
+.project-log-detail > summary::before { content: ''; width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); margin-right: 10px; flex: none; }
+.project-log-detail[open] > summary::before { transform: rotate(45deg) translateY(-2px); }
+.project-log-detail .project-evidence-code { max-height: 240px; margin: 0 0 8px; }
+.project-workspace .diffv { font-size: 12px; max-width: 100%; min-width: 0; }
+.project-workspace .diffv .dh { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-3); margin-bottom: 6px; overflow-wrap: anywhere; }
+.project-workspace .diffv .dstat { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(21,20,19,.045); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); white-space: pre-wrap; }
+.project-workspace .diffv .dbody { margin: 0; padding: 10px 12px; background: #fbfaf7; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); max-height: 320px; overflow: auto; white-space: pre; }
+.project-workspace .diffv .dfile { margin-bottom: 8px; }
+@media (max-width: 540px) {
+  .project-log { max-height: min(560px, 55vh); }
+  .project-log-entry { padding-inline: 10px; }
+  .project-log-time { flex-basis: 100%; margin-left: 0; }
+}
+
 /* Repository facts and reviewed GitHub operations remain part of the paper workspace. */
 .project-build-branch { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
 .project-build-delivery { font-size: 12px; }

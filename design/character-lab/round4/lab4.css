@@ -1,0 +1,17 @@
+.stage.live{border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper);position:relative;display:flex;justify-content:center}
+.stage.live .host{cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none}.stage.live .host:active{cursor:grabbing}
+.stage.live .host > canvas,.stage.live .host > svg{display:block}
+.size .host{border:1px solid var(--line);border-radius:4px;background:var(--paper);overflow:hidden}
+.technique{margin:0;font-size:12px;color:var(--muted);line-height:1.45}.technique .control-label{margin-right:6px}
+.touch-hint{color:var(--green)}
+#fps{color:var(--muted);margin-left:auto}
+.study .study-name{font-size:22px}
+
+.fun summary{color:var(--green)}.fun ul,.risks ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.5}
+
+/* round-4 shell fixes (review items 10 + also) */
+.masthead .links{display:flex;flex-wrap:wrap;gap:8px 16px}.masthead .links a{white-space:nowrap}
+.masthead .wordmark{white-space:nowrap}
+@media (max-width:600px){.masthead{flex-wrap:wrap;height:auto;padding:10px 0;row-gap:6px}.masthead .links{flex-basis:100%;order:3;gap:6px 14px}.masthead .edition{order:2}}
+.technique{min-height:54px}
+.study-tagline{min-height:5.6em}

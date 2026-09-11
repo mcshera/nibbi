@@ -2,6 +2,25 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
+import {progressLine} from '../public/lib/margin-ui.js';
+
+test('progress line reports verified merges without proposing a next goal', () => {
+  assert.equal(progressLine(undefined), 'Progress not available');
+  assert.equal(progressLine(null), 'Progress not available');
+  assert.equal(progressLine({available: false}), 'Progress not available');
+  assert.equal(progressLine({available: false, today: {deliveries: 4}, week: {deliveries: 9}, streak: 2}), 'Progress not available', 'unavailable wins over stale numbers');
+  assert.equal(progressLine({available: true}), 'Progress not available', 'no counts is not zero progress');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}), 'Nothing merged yet today');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 3}, streak: 0}), 'Nothing merged yet today · 3 this week');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 1}, streak: 1}), 'Nothing merged yet today · 1 this week · 1-day streak');
+  assert.equal(progressLine({available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}), '2 merged today · 5 this week · 3-day streak');
+  assert.equal(progressLine({available: true, today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}), '1 merged today · 1 this week · 1-day streak');
+  assert.equal(progressLine({today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}), '1 merged today · 1 this week · 1-day streak', 'available defaults to true when counts exist');
+  assert.equal(progressLine({available: true, today: {deliveries: 2.7}, week: {deliveries: 'five'}, streak: -1}), '2 merged today', 'non-counts are dropped, not invented');
+  for (const progress of [undefined, {available: true, today: {deliveries: 0}}, {available: true, today: {deliveries: 3}, week: {deliveries: 3}, streak: 4}]) {
+    assert.doesNotMatch(progressLine(progress), /next milestone|keep going|next target|one more|remind/i);
+  }
+});
 
 // Isolated browser contract test: no app/backend/provider network access.
 test('sidebar preserves live authority, drafts, focus, and responsive controls', {timeout: 60000}, async () => {
@@ -31,6 +50,25 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false', 'desktop starts expanded');
     assert.equal(await page.locator('#workspace-sidebar').getAttribute('role'), 'complementary');
     assert.equal(await page.locator('#project-rail img').count(), 0);
+    const progress = page.locator('#project-rail #sidebar-progress');
+    assert.equal(await progress.count(), 1, 'one companion progress line in the projects rail');
+    assert.equal(await progress.getAttribute('role'), 'status');
+    assert.ok(await progress.evaluate(el => el.classList.contains('margin-muted')), 'quiet muted style');
+    assert.equal(await progress.innerText(), 'Progress not available', 'no progress in the model reads as unavailable, not zero');
+    assert.ok(await progress.evaluate(el => el.compareDocumentPosition(document.querySelector('.margin-project-list')) & Node.DOCUMENT_POSITION_FOLLOWING), 'line sits above the project list');
+    await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}; ui.update(model);});
+    assert.equal(await progress.innerText(), 'Nothing merged yet today');
+    await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 0}, week: {deliveries: 4}, streak: 0}; ui.update(model);});
+    assert.equal(await progress.innerText(), 'Nothing merged yet today · 4 this week');
+    await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}; ui.update(model);});
+    assert.equal(await progress.innerText(), '2 merged today · 5 this week · 3-day streak');
+    await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}; ui.update(model);});
+    assert.equal(await progress.innerText(), '1 merged today · 1 this week · 1-day streak');
+    await page.evaluate(() => {model.progress = {available: false}; ui.update(model);});
+    assert.equal(await progress.innerText(), 'Progress not available');
+    await page.evaluate(() => {delete model.progress; ui.update(model);});
+    assert.equal(await progress.innerText(), 'Progress not available');
+    assert.deepEqual(await page.evaluate(() => calls), [], 'progress rendering dispatches nothing');
     const card = page.locator('.margin-card:not([hidden])');
     const row = id => page.locator(`#project-rail .margin-project[data-project-id="${id}"]`);
     const options = id => page.locator('.project-group').filter({has:page.locator(`.margin-project[data-project-id="${id}"]`)}).locator('.project-options');

@@ -19,6 +19,8 @@ import { allowedPreviewActions, previewStatus } from './previews.js';
 import { beginAttempt, recordAttempt, type BuildAttempt } from './build-attempt-records.js';
 import { connectionFor } from './github-repositories.js';
 import { isGithubBuild, reserveBuildBinding, prepareBuildBinding, githubBuildSummary } from './github-builds.js';
+import { boundedInput, summarizeResult, diffFor } from './tool-transcript.js';
+import { recordDelivery } from './progress.js';
 export { games, mergeTarget, registerProject, createProject, type GameCfg } from './projects.js';
 export { previewStart, previewStop, playStart, playStop, playStatus } from './previews.js';
 
@@ -145,6 +147,7 @@ export function allowedRunActions(f: Fixer): string[] {
   const actions: string[] = [], running = live.has(f.id) || deliveryLeases.has(f.id);
   const cfg = runtime().get<Record<string, GameCfg>>('config', 'projects')?.[f.game] ?? runtime().get<Record<string, GameCfg>>('legacy', 'games.json')?.[f.game];
   if (running || f.status === 'queued') actions.push('run.stop');
+  if (isSteerable(f.id)) actions.push('run.steer');
   if (!running && ['failed', 'cancelled', 'interrupted', 'discarded', 'merged', 'superseded'].includes(f.status)) actions.push('run.retry');
   if (!running && ['done', 'staged', 'failed', 'interrupted'].includes(f.status) && hasCheck(cfg?.check) && existsSync(f.worktree)) actions.push('run.verify');
   if (!running && !['merged', 'discarded', 'superseded', 'queued'].includes(f.status)) actions.push('run.discard');
@@ -222,7 +225,11 @@ async function executeFixer(f: Fixer, control: { abort: AbortController; handle?
     const catalog = skillCatalog(); const skills = (f.skillRefs ?? []).map(ref => catalog.resolve(ref));
     const nativeSkills = catalog.materialize(f.attemptId ?? f.id, skills);
     const scope = { role: 'fixer' as const, cwd: f.worktree, readableRoots: [f.worktree, cfg.repo, nativeSkills.root], writableRoots: [f.worktree] };
-    lease = await leaseTools(fileTools(scope, signal), signal);
+    const lastArgs = new Map<string, Record<string, unknown>>();
+    lease = await leaseTools(fileTools(scope, signal), signal, {
+      onCall: info => { lastArgs.set(info.name, info.args); event('tool.started', { name: info.name, source: 'governed', input: boundedInput(info.args) }); },
+      onResult: info => { const args = lastArgs.get(info.name) ?? {}; const diff = info.ok ? diffFor(info.name, args) : undefined; event('tool.finished', { name: info.name, source: 'governed', ok: info.ok, summary: info.ok ? summarizeResult(info.name, args, info.result) : String(info.error ?? 'failed').slice(0, 300), ...(info.ok ? {} : { error: String(info.error ?? 'failed').slice(0, 300) }), bytes: info.bytes, elapsedMs: info.elapsedMs, ...(diff ? { diff } : {}) }); },
+    });
     f.status = 'running'; save(f);
     control.handle = providerFor(f.provider ?? 'claude').start({
       runId: f.attemptId ?? f.id, role: 'fixer', provider: f.provider ?? 'claude', model: f.model, cwd: f.worktree, signal, skills, nativeSkills, tools: lease,
@@ -294,6 +301,7 @@ export async function reconcileFixers(): Promise<void> {
         await git(f.repo, 'merge-base', '--is-ancestor', f.mergeIntent.candidate, f.targetBranch);
         f.status = 'merged'; f.endedAt = new Date().toISOString(); save(f);
         try { completeTask(f.game, f.taskId); completeLinkedIssues(f.game, f.issueIds); } catch { /* Preserve successful Git outcome. */ }
+        noteDelivery(f);
         runtime().emit({ type: 'run.merge_recovered', runId: f.id, projectId: f.game, payload: { candidate: f.mergeIntent.candidate } });
       } catch {
         runtime().emit({ type: 'run.merge_interrupted', runId: f.id, projectId: f.game, payload: { message: 'No completed merge found. Retained work needs review.' } });
@@ -304,6 +312,10 @@ export async function reconcileFixers(): Promise<void> {
 export async function shutdownFixers(): Promise<void> { shuttingDown = true; for (const control of [...live.values(), ...deliveryLeases.values()]) control.abort.abort(new Error('Backend shutdown')); await Promise.all([...live.values(), ...deliveryLeases.values()].map(control => control.done)); }
 export async function waitForFixer(id: string): Promise<void> { await live.get(id)?.done; }
 
+/** Progress is a rollup of the verified merge; a failure to record it never undoes the merge. */
+function noteDelivery(f: Fixer): void {
+  try { recordDelivery({ run: f }); } catch (error) { runtime().emit({ type: 'progress.record_failed', runId: f.id, projectId: f.game, payload: { message: (error as Error).message } }); }
+}
 export type IntegrateResult = { ok: boolean; reason?: 'conflict' | 'checkfail' | 'gone' | 'unverified' | 'busy' | 'changed'; detail?: string };
 export async function integrate(input: Fixer): Promise<IntegrateResult> {
   if (isGithubBuild(input.id) || input.workflowMode === 'github') return { ok: false, reason: 'unverified', detail: 'This Build uses GitHub. Review and merge its PR; local integration cannot complete it.' };
@@ -332,6 +344,7 @@ export async function integrate(input: Fixer): Promise<IntegrateResult> {
       await git(cfg.repo, 'merge', '--ff-only', candidate);
       f.status = 'merged'; f.endedAt = new Date().toISOString(); save(f);
       try { completeTask(f.game, f.taskId); completeLinkedIssues(f.game, f.issueIds); } catch (error) { runtime().emit({ type: 'roadmap.update_failed', runId: f.id, projectId: f.game, payload: { message: (error as Error).message } }); }
+      noteDelivery(f);
       // No forced cleanup: the original evidence branch/worktree remains recoverable.
       await git(cfg.repo, 'worktree', 'remove', integration).catch(() => undefined);
       return { ok: true };

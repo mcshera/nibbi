@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { AgentRole, ProviderId, SkillDescriptor, SkillRef } from '@nibbi/contracts';
 import { RuntimeStore, runtime } from './store.js';
 import { scopedPath } from './paths.js';
+import { mcpToolNames } from './mcp-clients.js';
 
 const Frontmatter = z.object({
   name: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64),
@@ -92,7 +93,7 @@ export class SkillCatalog {
       for (const dependency of skill.dependencies) {
         const [kind, name] = dependency.split(':');
         const available = kind === 'bin' ? (process.env.PATH ?? '').split(':').some(path => { try { accessSync(join(path, name), constants.X_OK); return true; } catch { return false; } })
-          : ['read_file', 'list_files', 'write_file', 'edit_file', ...(role === 'fixer' ? ['shell'] : ['dispatch_fixer', 'list_fixers', 'steer_fixer'])].includes(name);
+          : ['read_file', 'list_files', 'write_file', 'edit_file', ...(role === 'fixer' ? ['shell'] : ['dispatch_fixer', 'list_fixers', 'steer_fixer', 'web_search', 'web_fetch', ...mcpToolNames(this.store)])].includes(name);
         if (!available) throw new Error(`Skill ${skill.name} requires unavailable dependency ${dependency}; loading it cannot install or authorize that dependency`);
       }
       return skill;

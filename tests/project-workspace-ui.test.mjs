@@ -36,12 +36,14 @@ async function harness(browser, viewport) {
   });
   await page.goto('https://workspace.test/');
   await page.evaluate(async data => {
-    window.sections = structuredClone(data); window.calls = []; window.failRead = false; window.conflict = false; window.readCount = 0;
+    window.sections = structuredClone(data); window.calls = []; window.failRead = false; window.conflict = false; window.readCount = 0; window.logEntries = [{ text: 'Seedlings now fit.' }];
     const { installProjectWorkspace } = await import('/lib/project-workspace.js');
     const load = async ({ project, section }) => { window.readCount++; if (window.failRead) throw new Error('Fixture is disconnected.'); return structuredClone({ ...window.sections[section], project }); };
-    window.workspace = installProjectWorkspace({ load, onNavigate: (project, section) => workspace.open({ project, section }), onData: () => {}, onAction: async (name, project, value) => {
+    // the app's renderDiff is a DOM card; the stub keeps its contract ({diff, branch, target} → node) so the Log tab can be checked without the app
+    const renderDiff = d => { const pre = document.createElement('pre'); pre.className = 'diffv'; pre.dataset.branch = d.branch || ''; pre.dataset.target = d.target ?? ''; pre.textContent = d.diff; return pre; };
+    window.workspace = installProjectWorkspace({ load, renderDiff, onNavigate: (project, section) => workspace.open({ project, section }), onData: () => {}, onAction: async (name, project, value) => {
       calls.push({ name, project, value });
-      if (name === 'buildEvidence') return value.kind === 'log' ? { entries: [{ text: 'Seedlings now fit.' }] } : value.kind === 'changes' ? { diff: '-old\n+new' } : { verification: { status: 'passed', command: 'npm test', detail: '8 checks passed.' } };
+      if (name === 'buildEvidence') return value.kind === 'log' ? { entries: structuredClone(window.logEntries) } : value.kind === 'changes' ? { diff: '-old\n+new' } : { verification: { status: 'passed', command: 'npm test', detail: '8 checks passed.' } };
       if (name === 'buildCommand') return { ok: true, text: 'Build updated.' };
       if (name === 'projectCommand') {
         if (window.conflict) { const error = new Error('The document changed.'); error.code = 'REVISION_CONFLICT'; throw error; }
@@ -202,6 +204,61 @@ test('section controls and inline evidence fit narrow and short reading windows'
           const out = resolve('output/playwright/project-workspace'); mkdirSync(out, { recursive: true });
           await page.screenshot({ path: resolve(out, `${section}-${viewport.width}x${viewport.height}.png`) });
         }
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    }
+  } finally { await browser.close(); }
+});
+
+test('Builds Log tab renders the event trail as rows: tool labels, exact names, verdicts and a diff card', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    for (const viewport of [{ width: 1180, height: 712 }, { width: 390, height: 844 }]) {
+      const { page, context, errors, open } = await harness(browser, viewport);
+      try {
+        await page.evaluate(() => { window.logEntries = [
+          { ts: '2026-09-10T10:00:00.000Z', kind: 'run.updated', text: 'running' },
+          { ts: '2026-09-10T10:00:01.000Z', kind: 'tool.started', name: 'edit_file', phase: 'started', source: 'governed', input: { path: 'garden.txt', oldText: 'old', newText: 'new' }, attemptId: 'attempt-1' },
+          { ts: '2026-09-10T10:00:02.000Z', kind: 'tool.finished', name: 'edit_file', phase: 'finished', source: 'governed', ok: true, summary: 'Replaced 1 match in garden.txt', bytes: 1229, elapsedMs: 420, diff: 'diff --git a/garden.txt b/garden.txt\n-old\n+new\n', attemptId: 'attempt-1' },
+          { ts: '2026-09-10T10:00:03.000Z', kind: 'tool.started', name: 'Read', phase: 'started', source: 'native' },
+          { ts: '2026-09-10T10:00:04.000Z', kind: 'tool.finished', name: 'web_fetch', phase: 'finished', source: 'governed', ok: false, error: 'Host evil.example is not in the allowlist', elapsedMs: 12 },
+          { ts: '2026-09-10T10:00:05.000Z', kind: 'process.output', text: 'npm test — 42 passing' },
+        ]; });
+        await open('builds');
+        await page.locator('[data-build-id="run-active"] > summary').click();
+        await page.locator('[data-build-id="run-active"]').getByRole('button', { name: 'Log', exact: true }).click();
+        const log = page.locator('[data-build-id="run-active"] .project-log'); await log.waitFor();
+        assert.equal(await page.evaluate(() => calls.filter(call => call.name === 'buildEvidence' && call.value.kind === 'log').length), 1);
+        const rows = await log.locator('.project-log-entry').evaluateAll(els => els.map(el => ({ kind: el.dataset.kind, phase: el.dataset.phase || '', ok: el.dataset.ok || '', badge: el.querySelector('.project-log-kind')?.textContent, label: el.querySelector('.project-log-label')?.textContent || '', name: el.querySelector('.project-log-name')?.textContent || '', meta: el.querySelector('.project-log-meta')?.textContent || '', text: el.querySelector('.project-log-text')?.textContent || '' })));
+        assert.equal(rows.length, 6);
+        assert.deepEqual(rows[0], { kind: 'run.updated', phase: '', ok: '', badge: 'run', label: '', name: '', meta: '', text: 'running' });
+        assert.deepEqual(rows[1], { kind: 'tool.started', phase: 'started', ok: '', badge: 'file', label: 'editing', name: 'edit_file', meta: 'garden.txt', text: '' });
+        assert.deepEqual([rows[2].phase, rows[2].ok, rows[2].meta], ['finished', 'true', 'Replaced 1 match in garden.txt · 0.4s · 1.2 KB']);
+        assert.deepEqual([rows[3].badge, rows[3].label, rows[3].name, rows[3].meta], ['native', 'reading', 'Read', '']);
+        assert.deepEqual([rows[4].badge, rows[4].label, rows[4].ok, rows[4].meta], ['web', 'reading a page', 'false', 'Host evil.example is not in the allowlist · 0.0s']);
+        assert.deepEqual([rows[5].badge, rows[5].text], ['output', 'npm test — 42 passing']);
+        // the finished edit carries a diff card headed by the path its started row named, with no target arrow
+        const diff = log.locator('.project-log-entry').nth(2).locator('.project-log-detail .diffv');
+        assert.equal(await diff.count(), 1);
+        assert.deepEqual(await diff.evaluate(el => [el.dataset.branch, el.dataset.target, el.textContent]), ['garden.txt', '', 'diff --git a/garden.txt b/garden.txt\n-old\n+new\n']);
+        assert.equal(await log.locator('.project-log-entry').nth(2).locator('.project-log-detail > summary').innerText(), 'result · diff');
+        // the bounded input stays folded until asked for
+        const detail = log.locator('.project-log-entry').nth(1).locator('.project-log-detail');
+        assert.equal(await detail.locator('> summary').innerText(), 'input');
+        assert.equal(await detail.locator('.project-evidence-code').isVisible(), false);
+        await detail.locator('> summary').click();
+        assert.match(await detail.locator('.project-evidence-code').innerText(), /"oldText": "old"/);
+        assert.equal(await log.locator('.project-log-entry').nth(3).locator('.project-log-detail').count(), 0, 'name-only native rows have nothing to expand');
+        assert.equal(await page.evaluate(() => { const body = document.querySelector('.project-workspace-body'); return body.scrollWidth <= body.clientWidth && document.documentElement.scrollWidth <= innerWidth; }), true, 'log rows must not widen the workspace');
+        const out = resolve('output/playwright/project-workspace'); mkdirSync(out, { recursive: true });
+        await page.screenshot({ path: resolve(out, `log-${viewport.width}x${viewport.height}.png`) });
+        // string logs keep the plain block
+        await page.evaluate(() => { window.logEntries = 'plain text log'; });
+        await page.locator('[data-build-id="run-active"]').getByRole('button', { name: 'Summary', exact: true }).click();
+        await page.locator('[data-build-id="run-active"]').getByRole('button', { name: 'Log', exact: true }).click();
+        const plain = page.locator('[data-build-id="run-active"] .project-evidence-panel > .project-evidence-code'); await plain.waitFor();
+        assert.equal(await plain.innerText(), 'plain text log');
+        assert.equal(await page.locator('[data-build-id="run-active"] .project-log').count(), 0);
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     }

@@ -4,7 +4,8 @@ import { mkdtempSync, readFileSync, rmSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { startCodex } from '../src/providers/codex.js';
+import { startCodex, CodexRpcError } from '../src/providers/codex.js';
+import { ProviderTurnError } from '../src/providers/failure.js';
 import type { AgentInput } from '../src/providers/types.js';
 
 const directory = mkdtempSync(join(tmpdir(), 'nibbi-codex-contract-'));
@@ -58,4 +59,28 @@ test('Codex steering targets the active turn and cancellation shuts down the tra
   await result;
   assert.equal(run.messages().find(message => message.method === 'turn/steer')!.params.expectedTurnId, 'turn-test');
   assert.ok(run.messages().some(message => message.method === 'turn/interrupt'));
+});
+
+test('Codex exact native quota discriminant, not rate/budget/auth/HTTP/text, authorizes classification', async () => {
+  for (const scenario of ['quota-clean', 'quota-rate', 'quota-budget', 'quota-auth', 'quota-429', 'quota-english', 'quota-interrupted', 'quota-success']) {
+    const result = await setup(scenario).handle.result;
+    assert.equal(result.usageLimit?.kind, scenario === 'quota-clean' ? 'usage_limit' : undefined, scenario);
+    assert.deepEqual(result.evidence, { toolAttempted: false, ordinaryTextProduced: false });
+  }
+});
+test('Codex evidence counts approvals, unknown/native/completed actions and text but not reasoning', async () => {
+  for (const scenario of ['quota-approval', 'quota-tool', 'quota-unknown', 'quota-terminal-tool', 'quota-reasoning', 'quota-text']) {
+    const run = setup(scenario), result = await run.handle.result;
+    assert.equal(result.evidence?.toolAttempted, !['quota-reasoning', 'quota-text'].includes(scenario), scenario);
+    assert.equal(result.evidence?.ordinaryTextProduced, scenario === 'quota-text', scenario);
+    if (scenario === 'quota-reasoning') assert.ok(!run.events.includes('tool.started'));
+    if (result.evidence?.toolAttempted) assert.ok(run.events.includes('tool.attempted'));
+  }
+});
+test('Codex RPC code and data survive as cause, without treating unvalidated RPC errors as terminal quota', async () => {
+  await assert.rejects(setup('quota-rpc').handle.result, error => {
+    assert.ok(error instanceof ProviderTurnError); assert.equal(error.usageLimit, undefined);
+    assert.ok(error.cause instanceof CodexRpcError); assert.equal(error.cause.code, -32000);
+    assert.deepEqual(error.cause.data, { codexErrorInfo: 'usageLimitExceeded' }); return true;
+  });
 });

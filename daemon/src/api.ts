@@ -7,10 +7,10 @@ import { json, jsonBody, body, sse, HttpError, loopback } from './http.js';
 import { runtime } from './store.js';
 import { config } from './config.js';
 import { status, snapshot, autoView, projectsView, milestones, runEvents, artifacts } from './read-models.js';
-import { listFixers, getFixerDiff, buildReport, playStatus } from './fixer.js';
+import { listFixers, getFixerDiff, buildReport, playStatus, allowedRunActions } from './fixer.js';
 import { games, updateProject } from './projects.js';
 import { readChat, readAround, searchChat } from './history.js';
-import { runTurn, setMasterModel } from './session.js';
+import { runTurn, setMasterModel, type TurnOptions } from './session.js';
 import { handleCommand } from './commands.js';
 import { goals, schedules } from './scheduler.js';
 import { skillCatalog, packageFiles } from './skills.js';
@@ -30,10 +30,16 @@ import { listProposals, inspectProposal } from './proposals.js';
 import { githubProjectView, githubBuildView, githubBuildSummary, githubPrDraft } from './github-builds.js';
 import { localChangesView } from './build-attempts.js';
 import { projectSection, projectSummaries, projectCommand } from './project-workspace.js';
+import { webStatus } from './web-tools.js';
+import { mcpServers, mcpHealthAll } from './mcp-clients.js';
+import { proposePlan, inspectProposal as inspectPlan, listProposals as listPlans } from './plan-proposals.js';
+import { progressSummary } from './progress.js';
+import { mcpTokensView, mcpServerHealthSummary } from './mcp-server.js';
 
 const notify = (text: string): Promise<void> => notifyOwner(null, text);
 const aliases: Record<string, string> = { '/api/fix': 'run.dispatch', '/api/fix-queue': 'run.queue', '/api/fix-unqueue': 'run.stop', '/api/fix-requeue': 'run.retry', '/api/fixer-stop': 'run.stop', '/api/fixer-discard': 'run.discard', '/api/fixer-merge': 'run.merge', '/api/fixer-steer': 'run.steer', '/api/group-merge': 'group.merge', '/api/group-stop': 'group.stop', '/api/agents-stop-all': 'runs.stop', '/api/auto': 'auto.set', '/nibbi/goal': 'goal.set' };
 const ownerOnly = (req: IncomingMessage): void => { if (!loopback(req)) throw new HttpError(403, 'Manage host settings on the Mac'); };
+const publicProposal = (proposal: import('./plan-proposals.js').Proposal): Record<string, unknown> => ({ id: proposal.id, project: proposal.project, state: proposal.state, summary: proposal.summary, rationale: (proposal as unknown as { rationale?: string }).rationale, review: proposal.review, fingerprint: proposal.fingerprint, createdAt: proposal.createdAt, expiresAt: proposal.expiresAt, executedAt: proposal.executedAt, results: proposal.results, error: proposal.error });
 export async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const path = url.pathname, q = url.searchParams, method = req.method;
   if (!path.startsWith('/api/') && !path.startsWith('/nibbi/')) return false;
@@ -44,7 +50,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     json(res, result.ok ? 200 : ['REVISION_CONFLICT', 'CONFLICT', 'IN_PROGRESS'].includes(result.error.code) ? 409 : 400, result); return true;
   }
   if (path === '/api/commands' && method === 'POST') {
-    const input = await jsonBody(req); if (input.name === 'github.connect' || input.name === 'github.prepare' && (input.args as Record<string, unknown> | undefined)?.operation === 'github.connect') ownerOnly(req); if (/^(skills\.(import|review)|project\.(commands|settings|register|create|scaffold)|schedule\.|proposal\.|vault\.)/.test(String(input.name))) ownerOnly(req);
+    const input = await jsonBody(req); if (input.name === 'github.connect' || input.name === 'github.prepare' && (input.args as Record<string, unknown> | undefined)?.operation === 'github.connect') ownerOnly(req); if (/^(skills\.(import|review)|project\.(commands|settings|register|create|scaffold)|schedule\.|proposal\.|web\.|mcp\.|vault\.)/.test(String(input.name))) ownerOnly(req);
     const result = await executeCommand(input, notify); json(res, result.ok ? 200 : result.error.code === 'in_progress' ? 409 : 400, result); return true;
   }
   if (method === 'POST' && aliases[path]) {
@@ -57,7 +63,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     json(res, result.ok ? 200 : 400, result.ok ? { ...(result.data as object), ok: true } : { error: result.error.message }); return true;
   }
   if (path === '/api/send' && method === 'POST') {
-    const input = z.object({ message: z.string().max(100_000).default(''), project: z.string().optional(), stream: z.boolean().default(false), historySource: z.literal('test').optional(), images: z.array(z.object({ media_type: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), data: z.string().max(8_000_000) })).max(4).optional() }).parse(await jsonBody(req));
+    const input = z.object({ message: z.string().max(100_000).default(''), project: z.string().optional(), stream: z.boolean().default(false), mode: z.enum(['chat', 'plan']).optional(), historySource: z.literal('test').optional(), images: z.array(z.object({ media_type: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), data: z.string().max(8_000_000) })).max(4).optional() }).parse(await jsonBody(req));
     if (input.historySource !== undefined) ownerOnly(req);
     if (!input.message.trim() && !input.images?.length) throw new HttpError(400, 'Empty message');
     const key = String(req.headers['idempotency-key'] ?? randomUUID()); const claim = runtime().claimCommand(key, input);
@@ -68,7 +74,17 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     const send = input.stream ? sse(res) : undefined; const ping = send ? setInterval(() => { if (!res.destroyed) res.write(': ping\n\n'); }, 15_000) : undefined;
     try {
       const cmd = await handleCommand(input.message, notify, { project: input.project, idempotencyKey: key + ':slash' });
-      const result = cmd.handled ? { text: cmd.reply ?? 'ok', isError: cmd.ok === false } : await runTurn(input.message || '(image)', undefined, 'app', undefined, text => send?.('delta', { t: text }), name => send?.('tool', { name }), input.images, true, { project: input.project, historySource: input.historySource, onStart: runId => send?.('start', { runId }) });
+      const toolFrame = (payload: Record<string, unknown>): void => { const { type, ...rest } = payload; send?.('tool', { ...rest, phase: type === 'tool.finished' ? 'finished' : 'started', at: Date.now() }); };
+      const turnOptions: TurnOptions = { historySource: input.historySource, onStart: (runId: string) => send?.('start', { runId }), onReady: (runId: string, info: { steerable: boolean }) => send?.('ready', { runId, ...info }), onToolEvent: toolFrame };
+      // Local-fallback frames exist only where that feature is compiled in; assigning keeps this file identical across builds.
+      Object.assign(turnOptions, { onFallback: (info: unknown) => send?.('fallback', info as Record<string, unknown>) });
+      let result: Record<string, unknown>;
+      if (cmd.handled) result = { text: cmd.reply ?? 'ok', isError: cmd.ok === false };
+      else if (input.mode === 'plan') {
+        if (!input.project || input.project === 'vault') throw new HttpError(400, 'Plan mode needs a registered project');
+        const planned = await proposePlan(input.project, input.message || '(image)', { runTurn, channel: 'app', onDelta: text => send?.('delta', { t: text }), images: input.images, turnOptions });
+        result = { ...planned.result, proposal: publicProposal(planned.proposal) };
+      } else result = { ...await runTurn(input.message || '(image)', undefined, 'app', undefined, text => send?.('delta', { t: text }), undefined, input.images, true, { project: input.project, ...turnOptions }) };
       runtime().finishCommand(key, result);
       if (send) { send('done', result); res.end(); } else json(res, result.isError ? 409 : 200, result);
     } catch (error) {
@@ -133,9 +149,9 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     case '/api/project-summaries': json(res, 200, projectSummaries((q.get('projects') ?? '').split(',').filter(Boolean))); break;
     case '/api/snapshot': json(res, 200, snapshot()); break;
     case '/api/status': json(res, 200, status()); break;
-    case '/nibbi/health': json(res, 200, { app: 'nibbi', version: '0.8.0', protocolVersion: 1, brain: true, status: status(), tls: process.env.NIBBI_REMOTE === '1', remote: process.env.NIBBI_REMOTE === '1', setup: `https://${lanAddress()}:${config.port + 1}/`, gateway: 'local backend' }); break;
+    case '/nibbi/health': json(res, 200, { app: 'nibbi', version: '0.8.0', protocolVersion: 1, brain: true, status: status(), mcp: mcpServerHealthSummary(), tls: process.env.NIBBI_REMOTE === '1', remote: process.env.NIBBI_REMOTE === '1', setup: `https://${lanAddress()}:${config.port + 1}/`, gateway: 'local backend' }); break;
     case '/api/projects': json(res, 200, await projectsView()); break;
-    case '/api/fixers': json(res, 200, listFixers().reverse().map(run => ({ ...run, github: githubBuildSummary(run.id) })));  break;
+    case '/api/fixers': json(res, 200, listFixers().reverse().map(run => ({ ...run, github: githubBuildSummary(run.id), allowedActions: allowedRunActions(run) })));  break;
     case '/api/fixer-diff': json(res, 200, await getFixerDiff(q.get('id') ?? '')); break;
     case '/api/fixer-log': { const id = q.get('id') ?? ''; json(res, 200, { fixer: (() => { const run=listFixers().find(run=>run.id===id);return run ? {...run,github:githubBuildSummary(run.id)} : undefined; })(), entries: runEvents(id, q.get('attemptId') ?? undefined) }); break; }
     case '/api/fixer-tail': json(res, 200, { lines: runEvents(q.get('id') ?? '', q.get('attemptId') ?? undefined).slice(-5).map(event => event.text) }); break;
@@ -146,7 +162,12 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     case '/api/skills': json(res, 200, { skills: skillCatalog().list(), settings: runtime().get('skill-settings', (q.get('project') ?? 'vault') + ':' + (q.get('role') ?? 'lead')) ?? [] }); break;
     case '/api/skills/content': { const skill = skillCatalog().resolve({ id: q.get('id') ?? '', revision: q.get('revision') ?? '' }, true); const file = scopedPath(skill.path, q.get('file') ?? 'SKILL.md'); if (statSync(file).size > 1_000_000) throw new HttpError(413, 'Inspect large or binary assets locally before approval'); json(res, 200, { skill, content: readFileSync(file, 'utf8'), files: packageFiles(skill.path) }); break; }
     case '/api/providers': ownerOnly(req); json(res, 200, await providerStatus()); break;
+    case '/api/mcp/tokens': ownerOnly(req); json(res, 200, mcpTokensView()); break;
+    case '/api/mcp': ownerOnly(req); json(res, 200, { servers: mcpServers().map(server => ({ ...server, env: Object.fromEntries(Object.keys(server.env ?? {}).map(key => [key, '(set)'])) })), health: mcpHealthAll() }); break;
+    case '/api/plans': json(res, 200, q.has('id') ? publicProposal(inspectPlan(q.get('id')!)) : listPlans(q.get('project') ?? undefined).map(publicProposal)); break;
+    case '/api/web': ownerOnly(req); json(res, 200, await webStatus(q.get('project') ?? undefined)); break;
     case '/api/milestones': json(res, 200, milestones(q.get('project') ?? '')); break;
+    case '/api/progress': json(res, 200, progressSummary()); break;
     case '/api/build-report': json(res, 200, { text: buildReport(Math.max(1, Math.min(720, Number(q.get('hours')) || 24))) }); break;
     case '/api/artifacts': json(res, 200, artifacts(q.get('project') ?? '')); break;
     case '/api/growth': json(res, 200, runtime().replay(0, 5000).filter(event => event.type.startsWith('skill.')).reverse().map(event => ({ hash: String(event.payload.revision ?? '').slice(0, 8), at: event.at, msg: event.type + ': ' + event.payload.id }))); break;

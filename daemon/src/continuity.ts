@@ -11,7 +11,7 @@ const CHANNELS = ['app', 'cli', 'telegram', 'goal'];
 const SYNTHETIC_PREFIXES = ['[installation check 1/2', '[installation check 2/2', '[installation check]',
   '[host watchdog]', '[nibbi watchdog]', '[watchdog]', '[synthetic test]', '[smoke test]', 'supplied synthetic fixture facts ('];
 const NONHUMAN_SOURCES = ['auto', 'cron', 'heartbeat', 'system', 'background', 'test', 'synthetic', 'watchdog', 'installation-check'];
-type Scope = { kind: 'vault' | 'project'; projectId: string | null };
+type Scope = { kind: 'vault' | 'project'; projectId: string | null; channel?: string };
 type TimeStatus = 'valid' | 'invalid' | 'future';
 type Message = { id: number; at: string | null; timestampStatus: TimeStatus; role: 'user' | 'assistant';
   channel: string; text: string; truncated: boolean; textOffset: number; matchOffset: number | null; matchLength: number | null;
@@ -31,11 +31,12 @@ function scopeFor(project: string | undefined): Scope {
   return { kind: 'project', projectId: project };
 }
 function scoped(alias: string, scope: Scope): string {
-  return scope.kind === 'vault' ? `(${alias}.project_id IS NULL OR ${alias}.project_id='vault')` : `${alias}.project_id=@project`;
+  const project = scope.kind === 'vault' ? `(${alias}.project_id IS NULL OR ${alias}.project_id='vault')` : `${alias}.project_id=@project`;
+  return project + (scope.channel ? ` AND ${alias}.channel=@selectedChannel` : '');
 }
 const placeholders = (values: string[], prefix: string): string => values.map((_, i) => `@${prefix}${i}`).join(',');
 function bindings(scope: Scope): Record<string, string> {
-  return Object.fromEntries([...(scope.kind === 'project' ? [['project', scope.projectId!]] : []),
+  return Object.fromEntries([...(scope.kind === 'project' ? [['project', scope.projectId!]] : []), ...(scope.channel ? [['selectedChannel', scope.channel]] : []),
     ...CHANNELS.map((value, i) => [`channel${i}`, value]), ...SYNTHETIC_PREFIXES.map((value, i) => [`prefix${i}`, value]),
     ...NONHUMAN_SOURCES.map((value, i) => [`source${i}`, value])]);
 }
@@ -96,7 +97,7 @@ function previousUser(scope: Scope, now: number, store: RuntimeStore) {
 }
 function cutoff(scope: Scope, store: RuntimeStore): number {
   return (store.db.prepare(`SELECT COALESCE(MAX(m.id),0) AS id FROM messages m WHERE ${scoped('m', scope)}`)
-    .get(scope.kind === 'project' ? { project: scope.projectId } : {}) as { id: number }).id;
+    .get({ ...(scope.kind === 'project' ? { project: scope.projectId } : {}), ...(scope.channel ? { selectedChannel: scope.channel } : {}) }) as { id: number }).id;
 }
 function page(scope: Scope, input: Input, now: number, store: RuntimeStore, messageChars: number) {
   const cutoffId = input.cutoffId ?? cutoff(scope, store);
@@ -187,9 +188,10 @@ function finalize<T extends { messages: Message[]; hasMore: boolean; searchPrefi
  * Invalid/future contact timestamps produce elapsedMs:null, never a guessed elapsed interval.
  * maxMessages:0 is contact-only: messagesOmitted:true, no message scan or pagination claim.
  */
-export function continuitySnapshot(project: string | undefined, opts: { now?: Date; maxMessages?: number } = {}, store: RuntimeStore = runtime()) {
+export function continuitySnapshot(project: string | undefined, opts: { now?: Date; maxMessages?: number; channel?: 'app' | 'cli' | 'telegram' | 'goal' } = {}, store: RuntimeStore = runtime()) {
   const scope = scopeFor(project);
-  const parsed = z.object({ now: z.date().optional(), maxMessages: z.number().int().min(0).max(CONTINUITY_LIMITS.snapshotMessages).optional() }).strict().parse(opts);
+  const parsed = z.object({ now: z.date().optional(), maxMessages: z.number().int().min(0).max(CONTINUITY_LIMITS.snapshotMessages).optional(), channel: z.enum(['app', 'cli', 'telegram', 'goal']).optional() }).strict().parse(opts);
+  if (parsed.channel) scope.channel = parsed.channel;
   const now = parsed.now ?? new Date();
   return store.db.transaction(() => finalize({ ...envelope(scope, now), previousUser: previousUser(scope, now.getTime(), store),
     ...page(scope, { limit: parsed.maxMessages ?? 3 }, now.getTime(), store, 800) }, CONTINUITY_LIMITS.snapshotBytes))();

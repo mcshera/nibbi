@@ -50,7 +50,8 @@ export function decideTool(scope: ToolScope, tool: string, input: Record<string,
   }
   if (tool === 'Skill') return (scope.skillNames ?? []).includes(String(input.skill ?? ''))
     ? { allowed: true } : deny('Skill is not enabled for this run');
-  if (['TodoWrite', 'WebSearch', 'WebFetch'].includes(tool)) return { allowed: true };
+  if (tool === 'TodoWrite') return { allowed: true };
+  if (tool === 'WebSearch' || tool === 'WebFetch') return deny('Web access goes through the governed web_search and web_fetch tools');
   if ((scope.tools ?? []).includes(tool)) return { allowed: true };
   return deny("Tool '" + tool + "' is not enabled for this run");
 }

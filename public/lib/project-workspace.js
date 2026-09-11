@@ -1,6 +1,7 @@
 import { loadProjectSection } from './project-data.js';
 import { describeProjectSection, buildStatusLabel, verificationLabel, buildGroup as groupForStatus, buildMatchesFilter, buildListGroup } from './project-summary.js';
 import { createGithubPanel, githubDeliveryLabel } from './github-ui.js';
+import { describeToolEvent, inputLine } from './transcript.js';
 
 const labels = { builds: 'Builds', issues: 'Issues', plans: 'Plans' };
 const viewLabels = {...labels, repository:'Repository & GitHub'};
@@ -17,6 +18,12 @@ const itemKey = item => item.id || `line-${item.line}`;
 const sectionKey = selection => `${selection.project}\u0000${selection.section}`;
 const pendingBuild = item => (item.linkedBuilds || []).some(run => ['active', 'review'].includes(buildGroup(run)));
 const taskState = item => done(item) ? 'Completed' : (item.linkedBuilds || []).some(run => buildGroup(run) === 'review') ? 'Awaiting review' : (item.linkedBuilds || []).some(run => buildGroup(run) === 'active') ? 'Building' : 'Planned';
+const timeLabel = value => { const date = new Date(value || ''); return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }); };
+const LOG_INPUT_MAX = 2048;
+const clipText = (value, max) => { const text = String(value ?? ''); return text.length > max ? text.slice(0, max - 1) + '…' : text; };
+const boundedInput = input => { if (input == null) return ''; if (typeof input !== 'object') return clipText(input, LOG_INPUT_MAX); let json = ''; try { json = Object.keys(input).length > 1 ? JSON.stringify(input, null, 1) : ''; } catch { json = ''; } return clipText(json || inputLine(input), LOG_INPUT_MAX); };
+const logKindLabel = { 'tool.attempted': 'attempt', 'process.output': 'output', 'text.delta': 'text', 'run.updated': 'run', 'run.started': 'run', 'run.finished': 'run', 'turn.steered': 'steer', 'run.steered': 'steer', 'verification.finished': 'checks', 'web.searched': 'web', 'web.fetched': 'web', 'mcp.called': 'mcp' };
+const entryText = entry => { const text = entry.text ?? entry.message ?? entry.content; if (text != null && text !== '') return String(text); try { return JSON.stringify(entry); } catch { return ''; } };
 const commandLabels = { 'run.stop': 'Stop build', 'run.retry': 'Start replacement build', 'run.verify': 'Verify', 'run.discard': 'Discard', 'run.steer': 'Guide build', 'preview.start': 'Preview', 'preview.stop': 'Stop preview', 'run.merge': 'Merge locally' };
 
 /** Section views retain their own drafts, filters and reading position. The app owns commands. */
@@ -276,6 +283,47 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     const groups = new Map(); for (const item of items) { const heading = view.grouped ? item.heading || 'Other issues' : ''; if (!groups.has(heading)) groups.set(heading, []); groups.get(heading).push(item); }
     for (const [heading, records] of groups) { if (heading) results.append(node('h2', 'project-group-title', `${heading} · ${records.length}`)); for (const item of records) results.append(issueRow(item)); }
   }
+  /** The Log tab shows the run's event trail as rows: tool calls carry their friendly label, exact name, bounded input, verdict and diff (the chat transcript's shape); other events keep their text. */
+  function logList(entries) {
+    const list = node('ol', 'project-log'), inputs = new Map();   // a finished row borrows its started row's path for the diff card head
+    for (const entry of entries) {
+      if (entry == null) continue;
+      const li = node('li', 'project-log-entry'), head = node('div', 'project-log-head');
+      if (typeof entry !== 'object') { li.dataset.kind = 'text'; head.append(node('span', 'project-log-kind', 'log'), node('span', 'project-log-text', String(entry))); li.append(head); list.append(li); continue; }
+      const kind = String(entry.kind || entry.type || ''), tool = /^tool\.(started|finished)$/.test(kind) || (entry.phase === 'started' || entry.phase === 'finished');
+      li.dataset.kind = kind || 'entry';
+      const time = node('time', 'project-log-time', timeLabel(entry.ts || entry.timestamp || entry.at)); if (entry.ts) time.dateTime = String(entry.ts);
+      if (tool) {
+        const ev = describeToolEvent({ ...entry, phase: entry.phase || (kind === 'tool.finished' ? 'finished' : 'started') });
+        li.dataset.phase = ev.phase; if (ev.phase === 'finished') li.dataset.ok = String(ev.ok);
+        const badge = node('span', 'project-log-kind', ev.kind); badge.title = kind || ('tool.' + ev.phase);
+        head.append(badge, node('span', 'project-log-label', ev.label), node('code', 'project-log-name', ev.name || ''));
+        if (ev.phase === 'started') { if (ev.input !== undefined) inputs.set(ev.name, ev.input); }
+        else head.append(node('span', 'project-log-verdict', ev.ok ? 'ok' : 'failed'));
+        head.append(time); li.append(head);
+        const meta = [ev.detail ? clipText(ev.detail.replace(/\s+/g, ' '), 140) : '', ev.elapsedLabel, ev.bytesLabel].filter(Boolean).join(' · ');
+        if (meta) li.append(node('div', 'project-log-meta', meta));
+        const input = ev.phase === 'started' ? boundedInput(ev.input) : '', result = ev.phase === 'finished' ? ev.detail : '';
+        const diff = ev.phase === 'finished' && ev.diff ? ev.diff : '';
+        if (input || result || diff) {
+          const detail = node('details', 'project-log-detail'); detail.append(node('summary', '', [input ? 'input' : '', result ? (ev.ok ? 'result' : 'error') : '', diff ? 'diff' : ''].filter(Boolean).join(' · ')));
+          if (input) detail.append(node('pre', 'project-evidence-code', input));
+          if (result) detail.append(node('p', 'project-log-result', result));
+          if (diff) {
+            const started = inputs.get(ev.name), path = started && typeof started === 'object' && typeof started.path === 'string' ? started.path : '';
+            const rendered = renderDiff ? renderDiff({ diff, branch: path || ev.name, target: '' }) : null;
+            detail.append(rendered && typeof rendered !== 'string' ? rendered : node('pre', 'project-evidence-code', diff));
+          }
+          li.append(detail);
+        }
+      } else {
+        head.append(node('span', 'project-log-kind', logKindLabel[kind] || (kind ? kind.split('.').pop() : 'log')), node('span', 'project-log-text', entryText(entry)), time);
+        li.append(head);
+      }
+      list.append(li);
+    }
+    return list;
+  }
   function buildEvidence(run, detail) {
     const view = getView(), key = run.id, active = view.evidence.get(key) || { kind: 'summary' };
     const tabs = node('div', 'project-evidence-tabs'); tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', `Evidence for ${run.title || run.id}`);
@@ -307,8 +355,9 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
         else panel.append(node('pre', 'project-evidence-code', diff || 'No diff is available for this build.'));
       } else {
         const entries = evidence.entries || evidence.data?.entries || evidence.log;
-        const text = typeof evidence === 'string' ? evidence : typeof entries === 'string' ? entries : Array.isArray(entries) ? entries.map(entry => typeof entry === 'string' ? entry : [entry.timestamp || entry.at || entry.time, entry.text || entry.message || entry.content || JSON.stringify(entry)].filter(Boolean).join(' ')).join('\n') : evidence.text || '';
-        panel.append(node('pre', 'project-evidence-code', text || 'No log entries have been reported.'));
+        if (typeof evidence === 'string' || typeof entries === 'string') panel.append(node('pre', 'project-evidence-code', typeof evidence === 'string' ? evidence : entries));
+        else if (Array.isArray(entries) && entries.length) panel.append(logList(entries));
+        else panel.append(node('pre', 'project-evidence-code', evidence.text || 'No log entries have been reported.'));
       }
     };
     const select = async (kind, force = false) => {

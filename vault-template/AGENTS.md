@@ -11,7 +11,7 @@
 | index.md | Nibbi | catalog of every page; UPDATE ON EVERY WRITE |
 | log.md | Nibbi | append-only: `## [YYYY-MM-DD HH:MM] <op> | <summary>` |
 | inbox/ | both | zero-friction capture; consolidation empties it nightly |
-| journal/YYYY-MM-DD.md | Nibbi | day log: events, decisions, mood, open loops |
+| journal/YYYY-MM-DD.md | Nibbi | day log: relevant events, decisions, open loops; sensitive personal notes only with permission |
 | games/<game>/ | Nibbi | design.md, rules.md, balance.md, ideas.md, issues.md, playtests/ |
 | projects/<name>/ | Nibbi | same discipline as games |
 | skills/<name>/SKILL.md | Nibbi (validated) | procedures that proved reusable; dry-run before commit |
@@ -28,7 +28,7 @@
 index.md + grep are the retrieval system. No embeddings until this provably fails.
 
 ## 4. Core operations
-- **Capture**: anything from {{OWNER}} → inbox/ or journal, timestamped, verbatim-ish.
+- **Capture**: relevant durable preferences, decisions, and explicitly requested notes → inbox/ or journal, timestamped. Do not capture every disclosure. Ask before storing sensitive personal details, honor "do not save", and distinguish facts from interpretations. Do not infer or file a mood, diagnosis, or relationship profile as fact. Chat-history retention is separate; do not claim this rule disables it. The same consent limits apply during consolidation and self-review.
 - **Consolidate** (nightly): inbox + transcripts → wiki/journal/MEMORY deltas; empty inbox; lint lite.
 - **Playtest** (see games/): live log → triage → issues.md → fix branches → outcomes linked back.
 

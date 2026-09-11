@@ -72,7 +72,22 @@
 .platform-panel .platform-project { margin: 0 0 14px; color: var(--ink-3, #6f6b65); }
 .platform-panel .platform-project select { display: block; width: 100%; margin-top: 6px; color: var(--ink-2, #3a3835); }
 .platform-panel .platform-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
-.platform-panel .platform-roles > :only-child, .platform-panel .platform-commands { grid-column: 1 / -1; }
+.platform-panel .platform-roles > :only-child, .platform-panel .platform-commands, .platform-panel .platform-web, .platform-panel .platform-mcp-server, .platform-panel .platform-mcp-form { grid-column: 1 / -1; }
+.platform-panel .platform-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.platform-panel .platform-mcp-form fieldset label { display: block; margin: 4px 0; }
+/* Nibbi-as-a-server: token table scrolls sideways on its own, checkbox rows stay tappable, the one-time reveal reads as a single selectable block. */
+.platform-panel .platform-check { display: flex; align-items: center; gap: 2px; margin: 6px 0; }
+.platform-panel .platform-table { overflow-x: auto; margin: 8px 0 12px; }
+.platform-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.platform-panel th, .platform-panel td { text-align: left; vertical-align: middle; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line, rgba(21, 20, 19, .10)); white-space: nowrap; }
+.platform-panel th { color: var(--ink, #151413); font-weight: 600; }
+.platform-panel td small { display: block; }
+.platform-panel td button { margin: 0; }
+.platform-panel .platform-snippet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0 4px; }
+.platform-panel .platform-snippet-head button { margin: 0; }
+.platform-panel .platform-snippets pre { margin: 0 0 6px; max-height: none; }
+.platform-panel .platform-reveal:empty { display: none; }
+.platform-panel .platform-reveal > pre { font-size: 13px; user-select: all; -webkit-user-select: all; }
 .platform-panel .platform-connections { border-top: 1px solid var(--line, rgba(21, 20, 19, .10)); padding-top: 14px; margin-bottom: 12px; }
 .platform-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; background: rgba(21, 20, 19, .035); padding: 14px; border: 1px solid var(--line, rgba(21, 20, 19, .10)); border-radius: 12px; max-height: 45vh; overflow: auto; font: 12px/1.65 'Geist Mono', ui-monospace, monospace; }
 .platform-panel small { display: block; color: var(--ink-3, #6f6b65); font-size: 12px; overflow-wrap: anywhere; }
@@ -90,7 +105,9 @@
 @media (max-width: 520px) {
   .platform-panel { width: calc(100vw - 20px); max-width: calc(100vw - 20px); max-height: calc(100dvh - 20px); padding: 14px; }
   .platform-panel fieldset { padding: 12px; }
-  .platform-panel button, .platform-panel select { min-height: 40px; }
+  .platform-panel button, .platform-panel select { min-height: 44px; }
   .platform-panel input:not([type=checkbox]), .platform-panel textarea { font-size: 16px; }
+  .platform-panel .platform-check { min-height: 44px; margin: 0; }
+  .platform-panel .platform-check input[type=checkbox] { width: 22px; height: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .platform-panel button { transition: none; } }

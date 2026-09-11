@@ -20,3 +20,15 @@ test('skills pin revisions, require review, and reject configuration and symlink
     writeFileSync(join(imported.path, 'SKILL.md'), 'tampered'); assert.throws(() => catalog.resolve(imported), /changed/);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test('web tool dependencies resolve for the lead and never for a fixer', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nibbi-skills-web-')); const store = new RuntimeStore(join(dir, 'state')); const catalog = new SkillCatalog(store);
+  try {
+    const make = (name: string, roles: string): string => { const skillDir = join(dir, name); mkdirSync(skillDir); writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: ' + name + '\ndescription: Looks things up before acting.\nmetadata:\n  nibbi:\n    providers: [claude, codex]\n    roles: [' + roles + ']\n    dependencies: [tool:web_fetch]\n---\nRead the docs page first.\n'); return skillDir; };
+    const lead = catalog.import(make('docs-first', 'lead'), 'curated'); catalog.enable('demo', 'lead', [{ id: lead.id, revision: lead.revision }]);
+    assert.equal(catalog.selected('demo', 'lead', 'claude')[0]?.name, 'docs-first');
+    const fixer = catalog.import(make('docs-first-fixer', 'fixer'), 'curated'); catalog.enable('demo', 'fixer', [{ id: fixer.id, revision: fixer.revision }]);
+    assert.throws(() => catalog.selected('demo', 'fixer', 'claude'), /unavailable dependency tool:web_fetch/);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

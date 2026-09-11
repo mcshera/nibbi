@@ -11,10 +11,13 @@ import { installProjectWorkspace } from './lib/project-workspace.js';
 import { projectCommand, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { createProjectSummaryStore, describeProjectSection } from './lib/project-summary.js';
 import { marginMetadata } from './lib/margin-metadata.js';
+import { localReplyMetadata, localReplyLabel, updateLocalReply, settleLocalReply, rateLimitNotice } from './lib/local-fallback.js';
 import { installPocketInteractions } from './lib/pocket-interactions.js';
 import { createClient, parseSse, subscribeEvents, requestId } from './lib/client.ts';
 import { platformPanel } from './lib/platform.ts';
 import { escapeHtml, md, parseActs, firstSentences, stripMd, TOOL_LABEL, toolLabel, humanError, questionActs, relTime, parseDiff } from './lib/text.js';
+import { describeToolEvent, stepSummaryLine, elapsedLabel, inputLine } from './lib/transcript.js';
+import { narrate, deliveryTransition, deliveryContext, streakIncrease, runStatusChange } from './lib/narration.js';
 /* app.js — Nibbi: the surface. One character, one pill, and UI that only shows up when it's needed. */
 (() => {
 'use strict';
@@ -50,7 +53,9 @@ const S = {
   status: null,            // last /api/status
   fixers: [],              // last /api/fixers
   voiceOn: LS.get('voice', !!window.__TAURI__),
-  micEnabled: false, micPhase: 'off', micCapturing: false,
+  micEnabled: false, micPhase: 'off', micCapturing: false, voiceFinishing: false,
+  planFirst: false,        // composer toggle: the next message becomes a reviewable plan
+  activeRunId: null, steerable: false, liveTurn: null,
   lastActivity: performance.now(),
   restTimer: 0, sleepTimer: 0, chipTimer: 0,
   abort: null,
@@ -62,6 +67,18 @@ const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: id
 const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: closeProjectView, onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
 const composeToggle = document.createElement('button'); composeToggle.type = 'button'; composeToggle.id = 'project-compose-toggle'; composeToggle.className = 'project-compose-toggle'; composeToggle.hidden = true; composeToggle.setAttribute('aria-controls', 'ask attach'); pill.prepend(composeToggle);
 composeToggle.onclick = () => { S.projectComposerExpanded = body.classList.contains('project-compose-compact'); layout(false); if (S.projectComposerExpanded) ask.focus(); };
+/* "Plan first": the next message becomes a reviewable plan (numbered steps → approve → builds) instead of a chat turn */
+const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
+planBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="4" cy="4.5" r="1.4" fill="currentColor"/><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="4" cy="13.5" r="1.4" fill="currentColor"/><path d="M8 4.5h6M8 9h6M8 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+pill.insertBefore(planBtn, micBtn);
+function placeholderText() { return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? 'Describe the goal — nibbi proposes steps to review before any build starts…' : 'Ask nibbi to build something...'; }
+function setPlanFirst(on) {
+  S.planFirst = !!on; planBtn.setAttribute('aria-pressed', String(S.planFirst)); pill.classList.toggle('plan-first', S.planFirst);
+  planBtn.title = S.planFirst ? 'Plan first is on — the next message becomes a reviewable plan (click to turn off)' : 'Plan first — propose numbered steps to review before any build starts';
+  ask.placeholder = placeholderText();
+}
+planBtn.onclick = () => { setPlanFirst(!S.planFirst); ask.focus(); toast(S.planFirst ? 'plan first — the next message becomes a reviewable plan' : 'plan first off', 2200); };
+setPlanFirst(false);
 function watchProjectSummaries() { projectSummaries.watch([...new Set([...visibleProjectIds, ...(S.projectView ? [S.projectView.project] : [])])]); }
 function syncProjectComposer() {
   const available = !!S.projectView && innerHeight < 600;
@@ -184,35 +201,89 @@ function newTurn(text, images, at) {
   const said = document.createElement('div'); said.className = 'said';
   const meta = document.createElement('div'); meta.className = 'meta';
   const bubble = document.createElement('div'); bubble.className = 'bubble live';
-  bubble.append(steps, said);
+  const provenance = document.createElement('div'); provenance.className = 'meta local-provenance'; provenance.style.opacity = '1'; provenance.hidden = true; provenance.setAttribute('aria-live', 'polite');
+  bubble.append(provenance, steps, said);
   nibBody.append(bubble, meta);
   nib.append(ava, nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
   feed.appendChild(turn); S.stick = true; scrollFeed(true);
-  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false };
+  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null };
   S.turns.push(T);
   return T;
 }
-function addStep(T, label, kind) {
-  const last = T.liveStep;
-  if (last && last.label === label && !last.fixed) { last.n++; last.el.querySelector('.n').textContent = '×' + last.n; return last; }
+/* ---- steps: the live tool transcript. A plain step is one row; a tool step is a <details> whose summary keeps the friendly label
+   and whose body shows the exact name, kind, bounded input and — once the finished frame lands — the verdict, elapsed, bytes and diff. */
+const STEP_INPUT_MAX = 2048;
+const clipText = (s, max) => { const t = String(s ?? ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
+function boundedInput(input) {
+  if (input == null) return '';
+  if (typeof input !== 'object') return clipText(input, STEP_INPUT_MAX);
+  let json = ''; try { json = Object.keys(input).length > 1 ? JSON.stringify(input, null, 1) : ''; } catch { json = ''; }
+  return clipText(json || inputLine(input), STEP_INPUT_MAX);
+}
+function stepEl(label, kind, ev) {
+  const row = '<span class="b"></span><span class="l"></span><span class="n"></span><span class="t"></span>';
+  if (!ev) { const el = document.createElement('div'); el.className = 'step live' + (kind ? ' ' + kind : ''); el.innerHTML = row; el.querySelector('.l').textContent = label; return el; }
+  const el = document.createElement('details'); el.className = 'step live' + (kind ? ' ' + kind : ''); el.dataset.kind = ev.kind || 'native';
+  const sum = document.createElement('summary'); sum.innerHTML = row; sum.querySelector('.l').textContent = label; sum.title = ev.name && ev.name !== label ? ev.name : '';
+  const bodyEl = document.createElement('div'); bodyEl.className = 'sbody';
+  const head = document.createElement('div'); head.className = 'shead'; head.innerHTML = '<code class="sname"></code><span class="skind"></span>';
+  head.querySelector('.sname').textContent = ev.name || label; head.querySelector('.skind').textContent = ev.kind || 'native';
+  bodyEl.appendChild(head);
+  const inputText = boundedInput(ev.input);
+  if (inputText) { const pre = document.createElement('pre'); pre.className = 'sin'; pre.textContent = inputText; bodyEl.appendChild(pre); }
+  const res = document.createElement('div'); res.className = 'sres'; res.hidden = true; bodyEl.appendChild(res);
+  el.append(sum, bodyEl);
+  return el;
+}
+function stepRecord(el, label, kind, ev) {
+  return { el, label, n: 1, at: performance.now(), fixed: kind === 'fixer', governed: !!ev && ev.source !== 'native', name: ev ? ev.name || '' : '', kind: ev ? ev.kind || '' : (kind || ''), source: ev ? ev.source || '' : '', input: ev ? ev.input : undefined, ok: null, elapsedMs: null, detail: '', diff: '', bytesLabel: '', finished: false };
+}
+/* ev (optional) is a describeToolEvent result: governed steps never coalesce; identical native/plain labels still fold into ×N */
+function addStep(T, label, kind, ev) {
+  const last = T.liveStep, native = !ev || ev.source === 'native';
+  if (last && last.label === label && !last.fixed && !last.governed && !last.finished && native) { last.n++; last.el.querySelector('.n').textContent = '×' + last.n; return last; }
   if (last) markStep(last, 'done');
-  const el = document.createElement('div'); el.className = 'step live' + (kind ? ' ' + kind : '');
-  el.innerHTML = '<span class="b"></span><span class="l"></span><span class="n"></span><span class="t"></span>';
-  el.querySelector('.l').textContent = label;
+  const el = stepEl(label, kind, ev);
   T.steps.hidden = false; T.steps.insertBefore(el, T.fold);
-  const st = { el, label, n: 1, at: performance.now(), fixed: kind === 'fixer' };
+  const st = stepRecord(el, label, kind, ev);
   T.stepsList.push(st); T.liveStep = st;
   return st;
 }
-function markStep(st, state) { st.el.classList.remove('live'); st.el.classList.add(state); const dt = (performance.now() - st.at) / 1000; if (dt > 1.5) st.el.querySelector('.t').textContent = dt < 60 ? dt.toFixed(0) + 's' : (dt / 60).toFixed(1) + 'm'; }
+/* a step that must not disturb the live one (guidance sent mid-turn) */
+function insertStep(T, ev) {
+  const el = stepEl(ev.label, ev.kind === 'steer' ? 'steer' : null, ev);
+  T.steps.hidden = false; T.steps.insertBefore(el, T.fold);
+  const st = stepRecord(el, ev.label, null, ev); T.stepsList.push(st); return st;
+}
+function markStep(st, state) { st.el.classList.remove('live', 'done', 'fail'); st.el.classList.add(state); if (state === 'fail') st.ok = false; else if (state === 'done' && st.ok === null) st.ok = true; const dt = (performance.now() - st.at) / 1000; if (dt > 1.5) st.el.querySelector('.t').textContent = dt < 60 ? dt.toFixed(0) + 's' : (dt / 60).toFixed(1) + 'm'; }
+function fillStepResult(st) {
+  const res = st.el.querySelector('.sres'); if (!res) return;
+  res.replaceChildren(); res.hidden = false; res.classList.toggle('fail', st.ok === false);
+  const line = document.createElement('div'); line.className = 'sverdict';
+  line.textContent = [st.detail || (st.ok === false ? 'failed' : 'done'), st.elapsedMs != null ? elapsedLabel(st.elapsedMs) : '', st.bytesLabel].filter(Boolean).join(' · ');
+  res.appendChild(line);
+  if (st.diff) res.appendChild(renderDiff({ diff: st.diff, branch: (st.input && typeof st.input === 'object' && typeof st.input.path === 'string' && st.input.path) || st.path || st.name, target: '' }));
+}
+/* the finished frame lands on the last live step with the same name (fallback: the live step) */
+function finishToolStep(T, ev) {
+  const st = [...T.stepsList].reverse().find((s) => !s.finished && s.name && s.name === ev.name) || (T.liveStep && !T.liveStep.finished ? T.liveStep : null);
+  if (!st) return null;
+  st.finished = true; st.ok = !!ev.ok; st.elapsedMs = ev.elapsedMs; st.detail = ev.detail || ''; st.diff = ev.diff || ''; st.bytesLabel = ev.bytesLabel || '';
+  markStep(st, st.ok ? 'done' : 'fail');
+  if (ev.elapsedLabel) st.el.querySelector('.t').textContent = ev.elapsedLabel;
+  fillStepResult(st);
+  if (T.liveStep === st) T.liveStep = null;
+  return st;
+}
 function finishSteps(T, ok) {
   if (T.liveStep) { markStep(T.liveStep, ok ? 'done' : 'fail'); T.liveStep = null; }
   if (!T.stepsList.length) return;
-  const secs = Math.round((performance.now() - T.startedAt) / 1000);
-  const n = T.stepsList.reduce((a, s) => a + s.n, 0);
-  T.fold.querySelector('.l').innerHTML = escapeHtml((ok ? '' : 'stopped after ') + n + ' step' + (n === 1 ? '' : 's') + ' · ' + (secs < 60 ? secs + 's' : (secs / 60).toFixed(1) + 'm')) + ' — <u>show</u>';
-  T.steps.classList.add('folded');
+  const rows = T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s));
+  const line = (ok ? '' : 'stopped after ') + stepSummaryLine(rows, performance.now() - T.startedAt);
+  T.stepLine = line;
+  T.fold.querySelector('.l').innerHTML = escapeHtml(line) + ' — <u>show</u>';
+  T.steps.classList.add('folded');   // the screen reader hears T.stepLine once, composed into the reply's announcement by the caller; individual tool frames are never announced
 }
 function setSaid(T, text, live) {
   T.acc = text;
@@ -222,11 +293,12 @@ function setSaid(T, text, live) {
   else { if (T.raf) { clearTimeout(T.raf); T.raf = 0; } T.said.replaceChildren(renderMd(clean)); }
 }
 function setMeta(T, r) {
+  updateLocalReply(T, r);
   const bits = [];
   T.at = T.at || Date.now(); const tm = document.createElement('time'); tm.dateTime = new Date(T.at).toISOString(); tm.title = new Date(T.at).toLocaleString(); tm.textContent = relTime(T.at); T.timeEl = tm;
   bits.push('');
   if (r && r.costUsd !== undefined) { bits.push('$' + r.costUsd.toFixed(3)); T.cost = r.costUsd; } else if (r && r.runId) bits.push('cost unavailable');
-  if (r && r.local) bits.push('local model');
+  // Local provenance lives above the reply, including while tokens stream.
   if (r && r.raw) bits.push(String(r.raw).replace(/^\s*error:\s*/i, '').slice(0, 90));
   T.meta.textContent = bits.filter(Boolean).join(' · '); T.meta.prepend(tm, document.createTextNode(bits.filter(Boolean).length ? ' · ' : ''));
   const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; ask.focus(); autosize(); };
@@ -244,7 +316,7 @@ function addActs(T, acts, opts) {
     else c.onclick = () => a.run();
     w.appendChild(c);
   }
-  T.body.appendChild(w);
+  (opts && opts.into || T.body).appendChild(w);
 }
 
 let tidied = null;
@@ -264,22 +336,42 @@ let toastT = 0;
 function toast(msg, ms, act) { try { if (typeof clientLog === 'function') clientLog('toast', msg); } catch { /* early */ } const t = $('#toast'); t.textContent = msg; if (act) { const b = document.createElement('button'); b.type = 'button'; b.textContent = act.label; b.onclick = () => { act.run(); t.hidden = true; }; t.append(' ', b); } t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || 1800); }
 
 /* ------------------------------------------------------------------ brain client */
-async function* sseTurn(message, images, signal) {
-  const response = await fetch('/api/send', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': requestId() }, body: JSON.stringify({ message, project: activeProject(), stream: true, images }), signal });
+async function* sseTurn(message, images, signal, mode) {
+  const response = await fetch('/api/send', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': requestId() }, body: JSON.stringify({ message, project: activeProject(), stream: true, images, ...(mode === 'plan' ? { mode: 'plan' } : {}) }), signal });
+  if (response.ok && response.headers.get('content-type')?.includes('application/json')) { yield { ...(await response.json()), ev: 'done' }; return; }
   yield* parseSse(response);
 }
 
 /* a scripted brain so the choreography can be seen without the gateway */
-async function* demoTurn(message, _images, signal) {
+async function* demoTurn(message, _images, signal, mode) {
   const m = message.toLowerCase();
   const wait = async (ms) => { await sleep(ms); if (signal.aborted) throw new DOMException('aborted', 'AbortError'); };
   const words = (s) => s.match(/\S+\s*/g) || [];
   async function* say(text) { for (const w of words(text)) { await wait(28 + Math.random() * 60); yield { ev: 'delta', t: w }; } }
+  /* governed calls arrive as a started/finished pair; native provider tools stay name-only */
+  const governed = (name, input) => ({ ev: 'tool', name, phase: 'started', source: 'governed', input, at: Date.now() });
+  const finished = (name, extra) => ({ ev: 'tool', name, phase: 'finished', source: 'governed', ok: true, at: Date.now(), ...extra });
   await wait(700);
+  if (mode === 'plan') {
+    yield governed('read_roadmap', { project: 'shipless' }); await wait(700); yield finished('read_roadmap', { summary: '3 milestones · 5 open tasks', bytes: 2210, elapsedMs: 690 });
+    const rationale = 'M2 is the bottleneck: nothing downstream can be balanced until cards exist as data and a simulator can play them. Two independent steps, each testable on its own.';
+    yield* say(rationale);
+    const now = Date.now();
+    yield { ev: 'done', text: rationale, costUsd: 0.006, isError: false, proposal: { id: 'plan-demo', project: 'shipless', state: 'prepared', summary: 'Card data as JSON, then a random-policy simulator over it', rationale, review: { summary: 'Card data as JSON, then a random-policy simulator over it', steps: [
+      { n: 1, title: 'Card and component data as JSON', task: { id: 't-card-json', text: 'Card/component data as JSON', milestone: 'M2: Simulation' }, issueIds: [], context: 'Start from design.md; one file per card set under data/.', dependsOn: [] },
+      { n: 2, title: 'Random-policy simulator plays a full game', task: null, issueIds: ['issue-9'], context: 'src/sim.js reads the JSON and plays 1000 games with random policies; report win rates.', dependsOn: [1] },
+    ], warnings: ['Step 2: taskId "t-sim" is not in the roadmap; the step keeps its text without a pinned task'], roadmapRevision: 'demo' }, fingerprint: 'demo-fingerprint', createdAt: now, expiresAt: now + 30 * 60000 } };
+    return;
+  }
   if (/\berror\b|\bbreak\b/.test(m)) { yield { ev: 'tool', name: 'Bash' }; await wait(900); yield { ev: 'done', text: 'error: Failed to authenticate: OAuth session expired and could not be refreshed', isError: true, costUsd: 0 }; return; }
   if (/fix|bug|build|make|add|change|ship/.test(m)) {
-    yield { ev: 'tool', name: 'Read' }; await wait(650); yield { ev: 'tool', name: 'Read' }; await wait(500); yield { ev: 'tool', name: 'Grep' }; await wait(800);
-    yield* say('Found it. '); yield { ev: 'tool', name: 'Edit' }; await wait(900); yield { ev: 'tool', name: 'Bash' }; await wait(1400);
+    yield governed('read_file', { path: 'src/session.ts' }); await wait(650); yield finished('read_file', { summary: 'Read 4.1 KB from src/session.ts', bytes: 4198, elapsedMs: 640 });
+    yield governed('read_file', { path: 'src/webapp.ts' }); await wait(500); yield finished('read_file', { summary: 'Read 2.8 KB from src/webapp.ts', bytes: 2867, elapsedMs: 480 });
+    yield { ev: 'tool', name: 'Grep' }; await wait(800);
+    yield* say('Found it. ');
+    yield governed('edit_file', { path: 'src/session.ts', oldText: 'const lock = new TurnLock();', newText: 'const lock = new TurnLock({ clearOnAbort: true });' }); await wait(900);
+    yield finished('edit_file', { summary: 'Replaced 1 match in src/session.ts', bytes: 4231, elapsedMs: 880, diff: 'diff --git a/src/session.ts b/src/session.ts\n--- a/src/session.ts\n+++ b/src/session.ts\n@@ -41,7 +41,7 @@ export async function runTurn(input) {\n   const control = active.get(id);\n-  const lock = new TurnLock();\n+  const lock = new TurnLock({ clearOnAbort: true });\n   control.abort.signal.addEventListener(\'abort\', () => lock.release());\n' });
+    yield governed('shell', { command: 'npm test' }); await wait(1400); yield finished('shell', { summary: 'exit 0 · 42 passing', bytes: 1802, elapsedMs: 1380 });
     yield* say('Two files touched, tests still green.\n\n');
     yield* say('- `session.ts` — the turn lock now clears on abort\n- `webapp.ts` — the stream sends a `done` even when the model bails\n\n');
     yield* say('Want me to stage it as a fix so you can review the diff, or ship it straight to `main`?');
@@ -319,7 +411,7 @@ async function localTurn(userText, fn, opts) {
   if (!ok) T.nib.classList.add('error');
   if (out.acts && out.acts.length) addActs(T, out.acts);
   S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1400 : 2600); syncMargins();
-  $('#sr').textContent = stripMd(out.text || ''); scheduleIdleTimers(); refreshStatus();
+  $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + stripMd(out.text || ''); scheduleIdleTimers(); refreshStatus();
   return T;
 }
 
@@ -360,9 +452,11 @@ function renderPlan(proj, ms, done, total, auto, next) {
 function renderDiff(d) {
   const wrap = document.createElement('div'); wrap.className = 'diffv';
   const head = document.createElement('div'); head.className = 'dh';
-  head.textContent = (d.game ? d.game + ' · ' : '') + d.branch + ' → ' + d.target;
-  const stat = document.createElement('pre'); stat.className = 'dstat'; stat.textContent = (d.diffstat || '').trim() || '(no changes yet)';
+  head.textContent = (d.game ? d.game + ' · ' : '') + (d.branch || '') + (d.target ? ' → ' + d.target : '');   // no target (tool diff card) → no arrow
   const files = parseDiff(d.diff);
+  const counted = files.filter((f) => f.lines.length);
+  const stat = document.createElement('pre'); stat.className = 'dstat';
+  stat.textContent = (d.diffstat || '').trim() || (counted.length ? counted.length + ' file' + (counted.length === 1 ? '' : 's') + ' changed, +' + counted.reduce((a, f) => a + f.add, 0) + ' −' + counted.reduce((a, f) => a + f.del, 0) : '(no changes yet)');
   const many = files.length > 3;
   const body = document.createElement('div'); body.className = 'dfiles';
   for (const f of files) {
@@ -392,6 +486,7 @@ const COMMANDS = [
   { cmd: '/fixers', args: '', desc: 'list recent fixers', local: false },
   { cmd: '/review', args: '[project|all]', desc: 'walk staged fixers: j/k next/prev · a approve · x discard · p preview', local: true },
   { cmd: '/plan', args: '[project] | edit <instruction>', desc: 'milestones, progress and what auto is doing; `edit` asks nibbi to rewrite the plan', local: true },
+  { cmd: '/plan propose', args: '<text>', desc: 'plan first: nibbi proposes numbered steps you review and approve before any build starts', local: true },
   { cmd: '/auto', args: '<project> <off|suggest|stage|ship|pause|resume>', desc: 'steer autonomy for a project', local: true },
   { cmd: '/goal', args: '<text> | stop', desc: 'run the active project toward a goal for as long as it takes (stage mode, verified changes and explicit merge approval)', local: true },
   { cmd: '/play', args: '<project> [stop|status]', desc: 'launch the project\'s dev server and open it', local: true },
@@ -518,7 +613,8 @@ async function runLocalCommand(name, arg, opts) {
     case 'steer': { const m = arg.match(/^(\S+)\s+([\s\S]+)$/); return localTurn('/steer ' + arg, async () => { if (!m) return { ok: false, text: '`/steer <fixer-id> <note>`' }; const r = await api.post('/api/fixer-steer', { id: m[1], text: m[2] }); return { text: r.text || 'sent' }; }); }
     case 'stop': return localTurn('/stop ' + arg, async () => { if (!arg) return { ok: false, text: '`/stop <fixer-id>`' }; const r = await api.post('/api/fixer-stop', { id: arg }); refreshStatus(); return { text: r.text || 'stopped' }; });
     case 'log': return localTurn('/log ' + arg, async () => { if (!arg) return { ok: false, text: '`/log <fixer-id>`' }; const r = await api.get('/api/fixer-log?id=' + encodeURIComponent(arg)); const es = (r.entries || []).slice(-14); const f = fixerById(arg); const shots = f ? await fixerShots(f) : []; setTimeout(() => { const t = S.turns[S.turns.length - 1]; const row = shotsRow(shots); if (t && row) t.said.appendChild(row); }, 0); return { text: (f ? '**' + md.esc(fixerTitle(f)) + '** · ' + f.status + '\n\n' : '') + (es.length ? es.map((e) => (e.kind === 'tool' ? '› ' : e.kind === 'assistant' ? '' : '· ') + e.text.slice(0, 220)).join('\n') : '_no log yet_'), acts: f ? fixerActs(f) : [] }; }, opts);
-    case 'plan': { const em = arg.match(/^edit\s+([\s\S]+)$/i); if (em) { send('Rewrite plans/' + activeProject() + '.md in the vault: ' + em[1] + '. Keep the milestone/checkbox format, keep completed items checked, and reply with a 3-line summary of what changed.'); return; } }
+    case 'plan': { const em = arg.match(/^edit\s+([\s\S]+)$/i); if (em) { send('Rewrite plans/' + activeProject() + '.md in the vault: ' + em[1] + '. Keep the milestone/checkbox format, keep completed items checked, and reply with a 3-line summary of what changed.'); return; }
+      const pm = arg.match(/^propose(?:\s+([\s\S]+))?$/i); if (pm) { if (!pm[1] || !pm[1].trim()) return localTurn('/plan propose', async () => ({ ok: false, text: 'Tell me what to plan: `/plan propose <text>` — I answer with numbered steps you approve before any build starts.' })); await send(pm[1].trim(), [], { mode: 'plan' }); return; } }
       return localTurn('/plan' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = arg || activeProject(); const st = addStep(T, 'reading plans/' + proj + '.md');
       const ms = await api.get('/api/milestones?project=' + encodeURIComponent(proj)); markStep(st, 'done');
@@ -561,13 +657,13 @@ async function runLocalCommand(name, arg, opts) {
         if (ts - lastTs > 3600000) { const sep = document.createElement('div'); sep.className = 'when'; const d = new Date(ts); const sameDay = d.toDateString() === new Date().toDateString(); sep.textContent = (sameDay ? 'today' : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })) + ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); feed.appendChild(sep); }
         lastTs = ts;
         if (m.role === 'user') { T = newTurn(m.text.replace(/^(🖼️\s*)+/, '')); T.plain = m.text.trim().startsWith('/'); T.bubble.classList.remove('live'); T.restored = true; T.said.textContent = ''; T.el.removeAttribute('aria-busy'); }
-        else { if (!T || T.said.textContent || T.acc) { T = newTurn(null); T.bubble.classList.remove('live'); T.restored = true; } setSaid(T, m.text, false); T.done = true; T.meta.textContent = new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + (m.costUsd ? ' · $' + m.costUsd.toFixed(3) : ''); T.acc = m.text; }
+        else { if (!T || T.said.textContent || T.acc) { T = newTurn(null); T.bubble.classList.remove('live'); T.restored = true; } updateLocalReply(T, m); setSaid(T, m.text, false); T.done = true; T.meta.textContent = new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + (m.costUsd ? ' · $' + m.costUsd.toFixed(3) : ''); T.acc = m.text; }
       }
       for (const t of S.turns) if (t.restored && !t.done) { t.said.textContent = ''; t.done = true; }
       S.stick = true; scrollFeed(true); nibbi.lookFree(); scheduleIdleTimers();
       return;
     }
-    case 'history': return localTurn('/history ' + arg, async () => { if (!arg) return { ok: false, text: '`/history <query>`' }; const r = await api.get('/api/history?q=' + encodeURIComponent(arg) + '&n=8'); const items = Array.isArray(r) ? r : (r.items || []); if (!items.length) return { text: 'Nothing about "' + md.esc(arg) + '" in the log.' }; return { text: items.slice(0, 8).map((e) => '**' + (e.role === 'user' ? 'you' : NAME) + '** · ' + new Date(e.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '\n' + String(e.text || '').replace(/\s+/g, ' ').slice(0, 220)).join('\n\n') }; });
+    case 'history': return localTurn('/history ' + arg, async () => { if (!arg) return { ok: false, text: '`/history <query>`' }; const r = await api.get('/api/history?q=' + encodeURIComponent(arg) + '&n=8'); const items = Array.isArray(r) ? r : (r.items || []); if (!items.length) return { text: 'Nothing about "' + md.esc(arg) + '" in the log.' }; return { text: items.slice(0, 8).map((e) => '**' + (e.role === 'user' ? 'you' : NAME) + '**' + (e.role !== 'user' && localReplyLabel(e) ? ' · ' + md.esc(localReplyLabel(e)) : '') + ' · ' + new Date(e.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '\n' + String(e.text || '').replace(/\s+/g, ' ').slice(0, 220)).join('\n\n') }; });
     case 'vault': return localTurn('/vault ' + arg, async () => { if (!arg) return { ok: false, text: '`/vault <path>` — e.g. `/vault plans/battalion.md`' }; const r = await api.get('/api/vault?p=' + encodeURIComponent(arg)); return { text: '`' + md.esc(arg) + '`\n\n' + String(r.content || '').slice(0, 6000), acts: [{ label: 'ask nibbi to change it', run: () => { ask.value = 'In ' + arg + ', '; ask.focus(); autosize(); } }] }; });
     case 'journal': return localTurn('/journal' + (arg ? ' ' + arg : ''), async () => { const day = arg || new Date().toLocaleDateString('en-CA'); const r = await api.get('/api/vault?p=' + encodeURIComponent('journal/' + day + '.md')); const c = String(r.content || ''); if (!c || c === '(missing)') return { text: 'No journal page for **' + day + '** yet.', acts: [{ label: 'what happened today?', run: () => send('what happened today? give me the short version, then write the journal page') }] }; return { text: '`journal/' + day + '.md`\n\n' + c.slice(0, 6000), acts: [{ label: 'yesterday', run: () => { const d = new Date(day); d.setDate(d.getDate() - 1); send('/journal ' + d.toLocaleDateString('en-CA')); } }] }; });
     case 'report': return localTurn('/report' + (arg ? ' ' + arg : ''), async () => { const r = await api.get('/api/build-report?hours=' + (Number(arg) || 24)); return { text: r.text || '_nothing to report_' }; });
@@ -668,10 +764,26 @@ function connectEvents() {
       if (/^(run\.updated|vault\.updated|roadmap\.|project\.|goal\.|github\.|build\.)/.test(event.type)) scheduleProjectRefresh(event.projectId || event.payload?.run?.game || event.payload?.project);
       if (event.type === 'run.updated') {
         const run = event.payload.run; if (!run) return; if (run.status === 'done') run.status = 'staged';
+        // A record without a GitHub summary keeps the last known one, so the next summary still compares against real history.
+        const previous = fixerById(run.id); if (run.github === undefined && previous?.github) run.github = previous.github;
         S.fixers = [...(S.fixers || []).filter((f) => f.id !== run.id), run];
         renderAgents(S.fixers, S.auto); renderProject(); refreshBadge();
         const ev = { ...run, id: run.id, kind: 'fixer', project: run.game, to: run.status, ts: event.at };
-        if (!evReady) evReplay.push(ev); else if (['staged', 'failed', 'merged', 'interrupted', 'cancelled'].includes(run.status)) postFixerBubble(run);
+        // Binding refreshes re-emit the record with its current status every minute; only a status change is news. The replay buffer keeps every record for the away summary.
+        if (!evReady) evReplay.push(ev); else if (runStatusChange(previous, run)) postFixerBubble(run);
+        // GitHub delivery transitions (draft PR up, a check failed, remote commits, merged) come from two successive summaries, never from run intent.
+        const transition = evReady ? deliveryTransition(previous?.github, run.github) : null;
+        // The completion record follows with status merged: one merged bubble either way, and a Build that already merged locally is not narrated twice.
+        if (transition === 'merged') { if (runStatusChange(previous, { status: 'merged' })) postFixerBubble({ ...run, status: 'merged' }); }
+        else if (transition) postNarration(transition, deliveryContext(transition, run), run.id + ':' + transition);
+      } else if (event.type === 'progress.updated') {
+        const previous = S.progress, summary = event.payload?.summary;
+        if (summary && typeof summary === 'object') { S.progress = summary; syncMargins(); }
+        const days = evReady ? streakIncrease(previous, summary) : null;
+        if (days) postNarration('streak', { days }, 'streak:' + (event.payload?.day || days));
+      } else if (event.type === 'milestone.completed') {
+        const p = event.payload || {}; if (!evReady || !p.name) return;
+        postNarration('milestone', { milestone: p.name, project: p.project, total: p.total }, (p.project || '') + ':' + (p.milestoneId || p.name) + ':milestone');
       } else if (event.type === 'process.output' || event.type === 'tool.started') {
         const a = agentEls.get(event.runId); if (a) { const tail = a.card.querySelector('.tail'); if (tail) tail.textContent = String(event.payload.text || event.payload.name || '').slice(-400); }
         queueProjectActivity(event.projectId || S.fixers.find(run => run.id === event.runId)?.game);
@@ -695,20 +807,40 @@ async function onFixerEvent(ev) {
   renderAgents(S.fixers, S.auto); renderProject(); refreshBadge();
   if (document.hidden) notify('nibbi · ' + (ev.to === 'staged' ? 'ready to review' : ev.to), (ev.title || ev.id) + ' — ' + ev.to + ' on ' + ev.project);
 }
+// Announced run statuses (id → status) and narration keys (key → kind), bounded so a long-lived window cannot grow it without limit.
+const bubbledRunStatus = new Map(), BUBBLE_MEMORY = 500;
+function rememberBubble(key, value) { bubbledRunStatus.delete(key); bubbledRunStatus.set(key, value); while (bubbledRunStatus.size > BUBBLE_MEMORY) bubbledRunStatus.delete(bubbledRunStatus.keys().next().value); }
 function postFixerBubble(f) {
   if (S.busy) { setTimeout(() => postFixerBubble(f), 3000); return; }
+  // Several backend records emit run.updated for one transition; announce each run status once.
+  if (bubbledRunStatus.get(f.id) === f.status) return; rememberBubble(f.id, f.status);
   setMode('talk'); body.classList.remove('rest');
   const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
   const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
   const cost = (f.costUsd ? ' · $' + Number(f.costUsd).toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
   const mode = githubBuild(f) ? 'github' : autoOf(f.game || f.project).mode;
-  const text = f.status === 'staged' ? (mode === 'ship' ? 'Fixer **' + title + '** finished on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Ship mode: it merges itself once you\'ve been quiet a few minutes (isolated integration → checks → target). I\'ll say when it lands.' : 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?') : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**' + cost + (mode === 'ship' ? ' — on its own.' : '.') : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '') + (/maximum number of turns/i.test(String(f.summary || '')) ? ' Work is preserved; inspect it before an explicit retry.' : '');
+  const merged = f.status === 'merged' ? narrate('merged', deliveryContext('merged', f)) : null;   // authored line: what merged, where; no next goal
+  const text = f.status === 'staged' ? (mode === 'ship' ? 'Fixer **' + title + '** finished on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Ship mode: it merges itself once you\'ve been quiet a few minutes (isolated integration → checks → target). I\'ll say when it lands.' : 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?') : merged ? merged.text : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '') + (/maximum number of turns/i.test(String(f.summary || '')) ? ' Work is preserved; inspect it before an explicit retry.' : '');
   setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
   addActs(T, (f.status === 'staged' && mode === 'ship') ? fixerActs(f).filter((a) => !/approve/.test(a.label)) : fixerActs(f), { sticky: true }); T.fixerId = f.id; if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
   const a = agentEls.get(f.id); if (a) { const r = a.canvas.getBoundingClientRect(); nibbi.lookAt(r.left + r.width / 2, r.top); setTimeout(() => nibbi.lookFree(), 1800); nibbi.splash(AGENT_INK[hashId(f.id) % AGENT_INK.length], f.status === 'merged' ? 8 : 4); }
-  nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); if (f.status !== 'failed') interactions.event(f.status === 'merged' ? 'milestone' : 'success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
+  nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); if (f.status !== 'failed') interactions.event(merged ? 'delivered' : 'success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
   sound(f.status === 'failed' ? 'error' : 'land');
-  $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(stripMd(text));
+  $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(merged ? merged.voice : stripMd(text));
+}
+/* Authored progress narration. Each line reports one verified event once; wins wait for a quiet moment like postFixerBubble, while a failed check or an outside push may interrupt. */
+const NARRATION_BEAT = { 'draft-pr': 'draft', 'checks-failed': 'checks', 'remote-changed': 'attention', milestone: 'milestone', streak: 'streak' };
+function postNarration(kind, ctx, key) {
+  if (bubbledRunStatus.has(key)) return;
+  if (S.busy && kind !== 'checks-failed' && kind !== 'remote-changed') { setTimeout(() => postNarration(kind, ctx, key), 3000); return; }
+  rememberBubble(key, kind);
+  const { text, voice } = narrate(kind, ctx);
+  setMode('talk'); body.classList.remove('rest');
+  const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
+  setSaid(T, text, false); setMeta(T, {}); T.done = true; if (kind === 'checks-failed') T.nib.classList.add('error');
+  const beat = NARRATION_BEAT[kind]; if (beat) interactions.event(beat);
+  if (kind === 'milestone' || kind === 'streak') { nibbi.setMood('happy'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600); if (kind === 'milestone') sound('land'); }
+  $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(voice);
 }
 function postAwayBubble(evs) {
   const latest = new Map(); for (const e of evs) latest.set(e.id, e);   // one line per fixer: its latest state
@@ -843,7 +975,7 @@ let histTimer = 0;
 function updatePalette() {
   const v = ask.value; const m = v.match(/^\/(\S*)$/);
   const hm = v.match(/^\/history\s+(.{2,})$/i);
-  if (hm) { clearTimeout(histTimer); histTimer = setTimeout(async () => { try { const items = await api.get('/api/history?q=' + encodeURIComponent(hm[1]) + '&n=5'); const list = (Array.isArray(items) ? items : []).slice(0, 5); if (!list.length || !/^\/history\s/.test(ask.value)) { paletteEl.hidden = true; return; } palItems = []; paletteEl.replaceChildren(...list.map((e) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'pi hist'; b.innerHTML = '<span class="c">' + escapeHtml(e.role === 'user' ? 'you' : NAME) + '</span><span class="d">' + escapeHtml(relTime(Date.parse(e.ts))) + '</span><span class="t">' + escapeHtml(String(e.text || '').replace(/\s+/g, ' ').slice(0, 110)) + '</span>'; b.onmousedown = (ev) => { ev.preventDefault(); ask.value = ''; autosize(); paletteEl.hidden = true; localTurn('/history ' + hm[1], async () => ({ text: '**' + (e.role === 'user' ? 'you' : NAME) + '** · ' + new Date(e.ts).toLocaleString() + '\n\n' + String(e.text || '').slice(0, 1500) })); }; return b; })); const r = pill.getBoundingClientRect(); paletteEl.style.bottom = (innerHeight - r.top + 10) + 'px'; paletteEl.style.width = r.width + 'px'; paletteEl.hidden = false; } catch { /* offline */ } }, 220); return; }
+  if (hm) { clearTimeout(histTimer); histTimer = setTimeout(async () => { try { const items = await api.get('/api/history?q=' + encodeURIComponent(hm[1]) + '&n=5'); const list = (Array.isArray(items) ? items : []).slice(0, 5); if (!list.length || !/^\/history\s/.test(ask.value)) { paletteEl.hidden = true; return; } palItems = []; paletteEl.replaceChildren(...list.map((e) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'pi hist'; b.innerHTML = '<span class="c">' + escapeHtml((e.role === 'user' ? 'you' : NAME) + (e.role !== 'user' && localReplyLabel(e) ? ' · ' + localReplyLabel(e) : '')) + '</span><span class="d">' + escapeHtml(relTime(Date.parse(e.ts))) + '</span><span class="t">' + escapeHtml(String(e.text || '').replace(/\s+/g, ' ').slice(0, 110)) + '</span>'; b.onmousedown = (ev) => { ev.preventDefault(); ask.value = ''; autosize(); paletteEl.hidden = true; localTurn('/history ' + hm[1], async () => ({ text: '**' + (e.role === 'user' ? 'you' : NAME) + '**' + (e.role !== 'user' && localReplyLabel(e) ? ' · ' + md.esc(localReplyLabel(e)) : '') + ' · ' + new Date(e.ts).toLocaleString() + '\n\n' + String(e.text || '').slice(0, 1500) })); }; return b; })); const r = pill.getBoundingClientRect(); paletteEl.style.bottom = (innerHeight - r.top + 10) + 'px'; paletteEl.style.width = r.width + 'px'; paletteEl.hidden = false; } catch { /* offline */ } }, 220); return; }
   if (!m) { paletteEl.hidden = true; palItems = []; return; }
   const q = m[1].toLowerCase();
   palItems = COMMANDS.filter((c) => !c.hidden && (c.cmd.slice(1).startsWith(q) || c.desc.toLowerCase().includes(q))).slice(0, 7);
@@ -894,7 +1026,7 @@ async function playFlow(project, action) {
   else if (!ok) acts.push({ label: 'try again', run: () => send('/play ' + project) });
   addActs(T, acts, { sticky: !!url });
   S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1500 : 2600); syncMargins();
-  $('#sr').textContent = stripMd(text); scheduleIdleTimers();
+  $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + stripMd(text); scheduleIdleTimers();
 }
 function launchActsFor(text) {
   const names = (S.projects || []).map((p) => p.name);
@@ -907,8 +1039,22 @@ function launchActsFor(text) {
 
 /* ------------------------------------------------------------------ the turn choreography */
 let pendingImages = [];
-async function send(text, images) {
-  text = (text || '').trim(); images = images || [];
+const registeredProject = () => { const p = activeProject(); return p && p !== 'vault' && (S.projects || []).some((x) => x.name === p && x.kind !== 'brain') ? p : null; };
+/* the send button's meaning follows the turn: steer while a steerable turn runs, stop otherwise, finish-voice/send when idle */
+function syncSendButton() {
+  if (S.busy) {
+    const steer = !!(S.activeRunId && S.steerable && ask.value.trim());   // the label names what pressing it does: guidance only with text, otherwise stop
+    sendBtn.setAttribute('aria-label', steer ? 'steer' : 'stop watching');
+    sendBtn.title = steer ? 'Send this as guidance to the running turn' : S.activeRunId && S.steerable ? 'Stop watching this turn — type to steer it instead' : 'Stop watching this turn';
+    body.classList.toggle('steer-ready', steer);
+    return;
+  }
+  body.classList.remove('steer-ready');
+  sendBtn.setAttribute('aria-label', S.voiceFinishing ? 'Finish voice message' : 'send');
+  sendBtn.title = S.voiceFinishing ? 'Finish this voice message now' : 'Send message';
+}
+async function send(text, images, opts) {
+  text = (text || '').trim(); images = images || []; opts = opts || {};
   if (!text && !images.length) return;
   if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
   if (S.projectView) closeProjectView(false);
@@ -919,11 +1065,15 @@ async function send(text, images) {
   if (pm) { await playFlow(pm[1].toLowerCase(), (pm[2] || 'start').toLowerCase()); return; }
   const cm = text.match(/^\/(\w+)\s*([\s\S]*)$/);
   if (cm && COMMANDS.some((c) => c.cmd === '/' + cm[1].toLowerCase() && c.local)) { await runLocalCommand(cm[1].toLowerCase(), cm[2].trim()); return; }
-  S.busy = true; body.classList.add('busy'); sendBtn.setAttribute('aria-label', 'stop watching'); syncMargins();
+  const mode = opts.mode === 'plan' || (S.planFirst && !isCommand) ? 'plan' : 'chat';   // plan mode: the brain proposes steps; nothing is dispatched until you approve
+  if (mode === 'plan' && !S.demo && !registeredProject()) { toast('Pick a project first'); return; }
+  if (mode === 'plan' && S.planFirst) setPlanFirst(false);
+  S.busy = true; body.classList.add('busy'); S.activeRunId = null; S.steerable = false; syncSendButton(); syncMargins();
   activity(); hideChips();
   ask.value = ''; autosize(); clearAttach(); sound('send');
   setMode('talk');
-  const T = newTurn(text, images); T.plain = isCommand;
+  const T = newTurn(text, images); T.plain = isCommand; T.mode = mode; S.liveTurn = T;
+  if (mode === 'plan') T.el.classList.add('plan');
   nibbi.setMood('thinking'); interactions.event('send');
   const feedRect = feed.getBoundingClientRect(); nibbi.lookAt(innerWidth / 2 + 40, feedRect.top + 30);
   setLink('busy');
@@ -931,56 +1081,156 @@ async function send(text, images) {
   const ctrl = new AbortController(); S.abort = ctrl;
   const brain = S.demo ? demoTurn : (S.link === 'offline' ? offlineTurn : sseTurn);
   let waitStep = null; if (!S.demo && S.status && S.status.busy) waitStep = addStep(T, 'waiting — the brain is busy with another turn (cron or fixer); yours is queued');
-  if (!S.demo && S.status && S.status.rateLimit && S.status.rateLimit.status !== 'allowed') waitStep = waitStep || addStep(T, 'rate-limited until ' + new Date((S.status.rateLimit.resetsAt || 0) * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' — trying anyway');
+  const limitNotice = !S.demo && rateLimitNotice(S.status?.rateLimit);
+  if (limitNotice) waitStep = waitStep || addStep(T, limitNotice);
   let result = null, spoke = false, toolCount = 0, lastFixerPoll = 0;
   sentenceCursor = 0; sentencesSpoken = 0; S.spokeStream = false; stopSpeaking();
   const fixerBefore = new Map((S.fixers || []).map((f) => [f.id, f.status]));
   try {
-    for await (const e of brain(text, images, ctrl.signal)) {
+    for await (const e of brain(text, images, ctrl.signal, mode)) {
       if (waitStep) { markStep(waitStep, 'done'); if (T.liveStep === waitStep) T.liveStep = null; waitStep = null; }
-      if (e.ev === 'start') { S.activeRunId = e.runId; }
-      else if (e.ev === 'tool' && e.name) {
-        toolCount++;
-        if (spoke && T.acc && !/\n\s*$/.test(T.acc)) { T.acc += '\n\n'; }
-        addStep(T, toolLabel(e.name));
-        if (nibbi.mood() !== 'working') nibbi.setMood('working');
-        if (toolCount % 3 === 1) nibbi.spatter(1, 0.9);
-        if (performance.now() - lastFixerPoll > 4000) { lastFixerPoll = performance.now(); pollFixers(T, fixerBefore); }
+      if (e.ev === 'start') { S.activeRunId = e.runId; T.runId = e.runId; S.steerable = false; syncSendButton(); }
+      else if (e.ev === 'ready') { if (e.runId) { S.activeRunId = e.runId; T.runId = e.runId; } S.steerable = !!e.steerable; syncSendButton(); }
+      else if (e.ev === 'fallback') {
+        S.steerable = false; syncSendButton();   // the local fallback cannot take guidance
+        updateLocalReply(T, e.fallback || e);
+        stopSpeaking(); sentenceCursor = 0; sentencesSpoken = 0; S.spokeStream = false;
+      } else if (e.ev === 'tool' && e.name && !T.local) {
+        const ev = describeToolEvent(e);
+        if (ev.phase === 'finished') finishToolStep(T, ev);
+        else {
+          toolCount++;
+          if (spoke && T.acc && !/\n\s*$/.test(T.acc)) { T.acc += '\n\n'; }
+          addStep(T, ev.label, null, ev);
+          if (nibbi.mood() !== 'working') nibbi.setMood('working');
+          if (toolCount % 3 === 1) nibbi.spatter(1, 0.9);
+          if (performance.now() - lastFixerPoll > 4000) { lastFixerPoll = performance.now(); pollFixers(T, fixerBefore); }
+        }
       } else if (e.ev === 'delta' && e.t) {
         if (!spoke) { spoke = true; nibbi.setMood('speaking'); if (T.liveStep) { markStep(T.liveStep, 'done'); T.liveStep = null; } }
         setSaid(T, T.acc + e.t, true);
-        nibbi.pulse(Math.min(1, 0.35 + e.t.length * 0.03)); streamSpeech(T);
-      } else if (e.ev === 'done') { result = e; }
+        nibbi.pulse(Math.min(1, 0.35 + e.t.length * 0.03)); if (!T.local) streamSpeech(T);
+      } else if (e.ev === 'done') { updateLocalReply(T, e); result = e; }
     }
   } catch (err) {
     if (err.name === 'AbortError') result = { text: T.acc || '_stopped watching — ' + NAME + ' may still be working in the background._', isError: false, aborted: true };
     else result = { text: (err.message || String(err)), isError: true };
   }
-  result = result || { text: 'No terminal result was received. Check Activity before retrying.', isError: true }; S.activeRunId = null;
+  result = result || { text: 'No terminal result was received. Check Activity before retrying.', isError: true }; S.activeRunId = null; S.steerable = false; S.liveTurn = null;
+  result = settleLocalReply(result, T);
+  if (T.local && (result.isError || result.aborted)) { stopSpeaking(); S.spokeStream = false; }
   const squash = (s) => String(s || '').replace(/»(voice|acts):[^\n]*\n?/g, '').replace(/\s+/g, '');
   if (T.acc && result.text && squash(T.acc) === squash(result.text)) result.text = T.acc.replace(/»voice:[^\n]*\n?/g, '');
   const ok = !result.isError;
-  if (!ok) { result.raw = result.text; result.text = humanError(result.text); }
+  if (!ok) { result.raw = result.text; if (!T.local) result.text = humanError(result.text); }
   finishSteps(T, ok);
   setSaid(T, result.text || '', false);
   setMeta(T, result);
   if (result.costUsd) S.sessionCost += result.costUsd; S.sessionTurns++;
   T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
-  $('#sr').textContent = ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200);
+  $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + (ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200));
   T.done = true;
   if (!ok) T.nib.classList.add('error');
-  S.busy = false; body.classList.remove('busy'); sendBtn.setAttribute('aria-label', 'send'); S.abort = null; syncMargins();
+  if (result.proposal && typeof result.proposal === 'object') renderProposalCard(T, result.proposal, text);
+  S.busy = false; body.classList.remove('busy'); S.abort = null; syncSendButton(); syncMargins();
   nibbi.lookFree();
-  if (!ok) { nibbi.setMood('error'); addActs(T, errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
+  if (!ok) { nibbi.setMood('error'); addActs(T, T.local ? [{ label: 'try again', run: () => send(T.text) }] : errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
   else if (!result.aborted) { nibbi.setMood('happy'); interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); }
   else nibbi.setMood('idle');
   if (ok && !result.aborted && !S.spokeStream) speak(result.voice || firstSentences(stripMd(parseActs(result.text).clean), 2, 320));
-  if (isCommand && ok) { const urls = [...String(result.text).matchAll(/https?:\/\/[^\s)]+/g)].map(m => m[0]); if (urls.length) addActs(T, urls.slice(0, 2).map(u => ({ label: 'open ' + u.replace(/^https?:\/\//, '').slice(0, 28), run: () => openUrl(u) })), { sticky: true }); }
-  if (!isCommand) { const pa = parseActs(result.text); if (pa.acts.length) addActs(T, pa.acts.map((a) => ({ label: a, run: () => send(a) }))); else addActs(T, replyActs(result.text)); }
+  if (isCommand && ok && !T.local) { const urls = [...String(result.text).matchAll(/https?:\/\/[^\s)]+/g)].map(m => m[0]); if (urls.length) addActs(T, urls.slice(0, 2).map(u => ({ label: 'open ' + u.replace(/^https?:\/\//, '').slice(0, 28), run: () => openUrl(u) })), { sticky: true }); }
+  if (!isCommand && !T.local && ok && !result.proposal) { const pa = parseActs(result.text); if (pa.acts.length) addActs(T, pa.acts.map((a) => ({ label: a, run: () => send(a) }))); else addActs(T, replyActs(result.text)); }
   setLink(S.demo ? 'demo' : 'live');
   refreshStatus();
-  if (ok && !isCommand && !T.nib.querySelector('.acts')) addActs(T, chipSet('after').map((c) => ({ label: c.label, run: () => send(c.text) })));
+  if (ok && !isCommand && !T.local && !T.nib.querySelector('.acts')) addActs(T, chipSet('after').map((c) => ({ label: c.label, run: () => send(c.text) })));
   scheduleIdleTimers();
+}
+
+/* ---- plan before dispatch: the review card under a plan-mode reply. Approve → plan.execute queues exactly the reviewed steps. ---- */
+const PLAN_STATE_LABEL = { prepared: 'awaiting approval', executing: 'queuing…', executed: 'approved', failed: 'failed', cancelled: 'cancelled', expired: 'expired', changed: 'review changed', interrupted: 'interrupted' };
+const PLAN_FINAL = new Set(['executed', 'failed', 'cancelled', 'expired', 'changed', 'interrupted']);
+const PLAN_ERROR_STATE = { REVIEW_CHANGED: 'changed', PLAN_EXPIRED: 'expired', PLAN_CANCELLED: 'cancelled', PLAN_EXECUTED: 'executed', PLAN_FAILED: 'failed', PLAN_INTERRUPTED: 'interrupted' };
+function postPlanBubble(text) {
+  setMode('talk'); const B = newTurn(null); B.plain = false; B.bubble.classList.remove('live');
+  setSaid(B, text, false); setMeta(B, {}); B.done = true; B.el.removeAttribute('aria-busy');
+  $('#sr').textContent = stripMd(text);
+}
+function renderProposalCard(T, p, prompt) {
+  const review = p.review && typeof p.review === 'object' ? p.review : {};
+  const steps = Array.isArray(review.steps) ? review.steps : [], warnings = Array.isArray(review.warnings) ? review.warnings.map((w) => String(w)) : [];
+  const card = document.createElement('section'); card.className = 'planr'; card.setAttribute('aria-label', 'plan review');
+  const head = document.createElement('div'); head.className = 'prh';
+  const title = document.createElement('b'); title.textContent = p.state === 'failed' ? 'Plan could not be prepared' : 'Plan · ' + steps.length + ' step' + (steps.length === 1 ? '' : 's') + (p.project ? ' on ' + p.project : '');
+  const state = document.createElement('span'); state.className = 'prs';
+  const expiry = document.createElement('span'); expiry.className = 'prx';
+  head.append(title, state, expiry); card.appendChild(head);
+  const summary = String(review.summary || p.summary || '').trim();
+  if (summary) { const s = document.createElement('p'); s.className = 'prsum'; s.textContent = summary; card.appendChild(s); }
+  if (p.state === 'failed') {
+    const err = document.createElement('p'); err.className = 'prerr'; err.textContent = String(p.error || 'The plan could not be parsed.'); card.appendChild(err);
+    const rationale = String(p.rationale || '').trim(); if (rationale && rationale !== String(T.acc || '').trim()) { const r = document.createElement('p'); r.className = 'prsum'; r.textContent = clipText(rationale, 600); card.appendChild(r); }
+  }
+  if (steps.length) {
+    const ol = document.createElement('ol'); ol.className = 'prsteps';
+    for (const s of steps) {
+      const li = document.createElement('li'); li.value = s.n || (steps.indexOf(s) + 1);
+      const t = document.createElement('b'); t.className = 'pt'; t.textContent = String(s.title || 'Step ' + li.value); li.appendChild(t);
+      const link = document.createElement('span'); link.className = 'pl' + (s.task ? '' : ' unlinked');
+      link.textContent = s.task ? 'task: ' + String(s.task.text || s.task.id || '') + ' · ' + (s.task.milestone ? String(s.task.milestone) : 'no milestone') : 'unlinked';
+      li.appendChild(link);
+      const meta = [Array.isArray(s.issueIds) && s.issueIds.length ? 'issues: ' + s.issueIds.map(String).join(', ') : '', Array.isArray(s.dependsOn) && s.dependsOn.length ? 'after step ' + s.dependsOn.map(String).join(', ') : ''].filter(Boolean).join(' · ');
+      if (meta) { const m = document.createElement('span'); m.className = 'pm'; m.textContent = meta; li.appendChild(m); }
+      if (s.context) { const c = document.createElement('span'); c.className = 'pc'; c.textContent = clipText(String(s.context), 400); li.appendChild(c); }
+      ol.appendChild(li);
+    }
+    card.appendChild(ol);
+  }
+  if (warnings.length) { const ul = document.createElement('ul'); ul.className = 'prwarn'; for (const w of warnings) { const li = document.createElement('li'); li.textContent = w; ul.appendChild(li); } card.appendChild(ul); }
+  const err = document.createElement('p'); err.className = 'prerr'; err.hidden = true; err.setAttribute('role', 'status'); card.appendChild(err);
+  T.bubble.appendChild(card);
+  let timer = 0;
+  const setState = (st, msg) => {
+    card.dataset.state = st; state.textContent = PLAN_STATE_LABEL[st] || st;
+    if (msg) { err.textContent = msg; err.hidden = false; } else if (st === 'executing' || st === 'executed') { err.textContent = ''; err.hidden = true; }
+    if (PLAN_FINAL.has(st)) { clearInterval(timer); timer = 0; }
+    for (const c of card.querySelectorAll('.chip')) if (!/^adjust/.test(c.textContent)) c.disabled = PLAN_FINAL.has(st) || st === 'executing';   // one approval in flight at a time; a final state keeps only Adjust
+    tick();
+  };
+  const tick = () => {
+    if (!card.isConnected) { clearInterval(timer); timer = 0; return; }
+    if (card.dataset.state !== 'prepared') { expiry.textContent = card.dataset.state === 'expired' ? 'Review expired' : ''; return; }
+    const left = (Number(p.expiresAt) || 0) - Date.now();
+    if (left <= 0) { setState('expired', 'This review expired — adjust and propose it again.'); return; }
+    expiry.textContent = 'Review expires in ' + (left < 60000 ? 'under a minute' : Math.ceil(left / 60000) + ' min');
+  };
+  const approve = async () => {
+    if (S.demo) { toast('Demo is read-only. Leave demo mode to approve plans.'); return; }
+    setState('executing');
+    try {
+      const r = await api.command('plan.execute', { id: p.id, fingerprint: p.fingerprint }, p.project);
+      const n = r && Array.isArray(r.results) ? r.results.length : steps.length;
+      setState('executed'); postPlanBubble('Approved: ' + n + ' build' + (n === 1 ? '' : 's') + ' queued' + (p.project ? ' on **' + md.esc(p.project) + '**' : '') + '. Each works in its own worktree; nothing lands until you approve the merge.');
+      sound('land'); refreshStatus();
+    } catch (e) {
+      const m = e.message || String(e), code = m.match(/^(REVIEW_CHANGED|PLAN_[A-Z]+):\s*/);   // a named refusal is final for this review: the card says why and Approve stays off
+      if (code) setState(PLAN_ERROR_STATE[code[1]] || 'failed', m.slice(code[0].length) || m);
+      else { setState('prepared', m); toast(m, 3200); }
+    }
+  };
+  const cancel = async () => {
+    if (S.demo) { toast('Demo is read-only. Leave demo mode to cancel plans.'); return; }
+    try { await api.command('plan.cancel', { id: p.id }, p.project); setState('cancelled', 'Plan cancelled — nothing was queued.'); }
+    catch (e) { toast(e.message || String(e), 3200); }
+  };
+  const adjust = () => { ask.value = prompt || T.text || ''; setPlanFirst(true); ask.focus(); autosize(); toast('adjust the goal, then Enter — plan first stays on', 2600); };
+  const acts = [];
+  if (p.state === 'prepared' && steps.length) acts.push({ label: 'approve', confirm: 'queue ' + steps.length + ' build' + (steps.length === 1 ? '' : 's') + ' — sure?', warn: true, run: approve });
+  acts.push({ label: 'adjust', run: adjust });
+  if (p.state === 'prepared') acts.push({ label: 'cancel', run: cancel });
+  addActs(T, acts, { sticky: true, into: card });
+  setState(p.state === 'prepared' || PLAN_STATE_LABEL[p.state] ? p.state : 'prepared', p.state === 'failed' ? '' : undefined);
+  if (card.dataset.state === 'prepared') timer = setInterval(tick, 30000);
+  return card;
 }
 
 const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart the brain — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
@@ -1028,7 +1278,7 @@ let tailCache = new Map();
 function demoFixers() {
   const t0 = Date.now();
   return [
-    { id: 'demo1', title: 'replay log for multiplayer runs', status: 'running', model: 'sonnet', costUsd: 0.41, startedAt: new Date(t0 - 200000).toISOString(), project: 'shipless' },
+    { id: 'demo1', title: 'replay log for multiplayer runs', status: 'running', model: 'sonnet', costUsd: 0.41, startedAt: new Date(t0 - 200000).toISOString(), project: 'shipless', allowedActions: ['run.steer', 'run.stop'] },
     { id: 'demo2', title: 'supply ruling per issue #9', status: (performance.now() > 25000 ? 'staged' : 'running'), game: 'shipless', diffstat: ' rules.md | 14 ++--\n 1 file changed, 9 insertions(+), 5 deletions(-)', model: 'sonnet', costUsd: 0.12, startedAt: new Date(t0 - 60000).toISOString(), endedAt: performance.now() > 25000 ? new Date().toISOString() : undefined, project: 'shipless' },
     { id: 'demo3', title: 'hub font sizing', status: 'queued', model: 'haiku', startedAt: new Date(t0 - 10000).toISOString(), project: 'shipless' },
     { id: 'demo4', title: 'stale doc cleanup', status: 'staged', model: 'haiku', costUsd: 0.22, startedAt: new Date(t0 - 400000).toISOString(), endedAt: new Date(t0 - 20000).toISOString(), project: 'shipless' },
@@ -1046,13 +1296,15 @@ function renderAgents(list, auto) {
     seen.add(f.id);
     let a = agentEls.get(f.id);
     if (!a) {
-      const el = document.createElement('button'); el.type = 'button'; el.className = 'agent';
+      // a div with the button role, not <button>: the card holds real controls (chips, the Guide textarea) and interactive content inside <button> is invalid HTML — WebKit and Firefox make such descendants unfocusable or route their clicks to the button
+      const el = document.createElement('div'); el.className = 'agent'; el.setAttribute('role', 'button'); el.tabIndex = 0;
       const cv = document.createElement('canvas'); cv.className = 'ava'; cv.setAttribute('aria-hidden', 'true');
       const card = document.createElement('div'); card.className = 'card';
       el.append(cv, card);
       el.addEventListener('pointerenter', () => { fillCard(a); startTail(a); }); el.addEventListener('focus', () => { fillCard(a); startTail(a); });
       el.addEventListener('pointerleave', () => { if (!el.classList.contains('pinned')) stopTail(a); });
       el.addEventListener('click', () => { el.classList.toggle('pinned'); fillCard(a); });
+      el.addEventListener('keydown', (e) => { if (e.target !== el || e.repeat) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } else if (e.key === 'Escape' && el.classList.contains('pinned')) { e.stopPropagation(); el.classList.remove('pinned'); } });
       agentsEl.appendChild(el);
       a = { el, canvas: cv, card, fixer: f }; agentEls.set(f.id, a);
     }
@@ -1089,12 +1341,36 @@ async function fillCard(a) {
   const m = document.createElement('div'); m.className = 'm'; m.textContent = line2;
   const tail = document.createElement('div'); tail.className = 'tail';
   const acts = document.createElement('div'); acts.className = 'acts';
-  for (const act of fixerActs(f)) { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip in' + (act.warn ? ' warn' : ''); b.textContent = act.label; let armed = 0; b.onclick = (e) => { e.stopPropagation(); if (act.confirm && !armed) { armed = setTimeout(() => { armed = 0; b.textContent = act.label; }, 4000); b.textContent = act.confirm; return; } a.el.classList.remove('pinned'); act.run(); }; acts.appendChild(b); }
+  const guide = (f.allowedActions || []).includes('run.steer');   // live and steerable → inline guidance form instead of the /steer prefill
+  for (const act of fixerActs(f).filter((x) => !(guide && x.label === 'steer'))) { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip in' + (act.warn ? ' warn' : ''); b.textContent = act.label; let armed = 0; b.onclick = (e) => { e.stopPropagation(); if (act.confirm && !armed) { armed = setTimeout(() => { armed = 0; b.textContent = act.label; }, 4000); b.textContent = act.confirm; return; } a.el.classList.remove('pinned'); act.run(); }; acts.appendChild(b); }
   a.card.append(h, m, tail, acts);
+  // the Guide form is never detached while it is in use: replaceChildren/re-append would blur the textarea mid-word when the pointer re-enters the card
+  if (guide) { if (!a.guide) a.guide = guideForm(a, f); a.guide.fixer = f; if (a.guide.parentNode !== a.card) a.card.appendChild(a.guide); } else if (a.guide) { a.guide.remove(); a.guide = null; }
   if (S.demo) { tail.textContent = f.status === 'running' ? '› editing src/multiplayer/replay.ts\n› npm test — 42 passing' : f.status === 'queued' ? 'waiting for a free slot' : 'merged into staging'; return; }
   const c = tailCache.get(f.id);
   if (c && Date.now() - c.at < 5000) { tail.textContent = c.lines.join('\n'); return; }
   try { const r = await fetch('/api/fixer-tail?id=' + encodeURIComponent(f.id)); const j = await r.json(); tailCache.set(f.id, { at: Date.now(), lines: j.lines || [] }); tail.textContent = (j.lines || []).slice(-3).join('\n'); } catch { /* offline */ }
+}
+/* inline guidance on a live agent card → run.steer; the card stays pinned while you type and the result lands under the box */
+function guideForm(a, f) {
+  const form = document.createElement('form'); form.className = 'guide'; form.setAttribute('aria-label', 'Guide ' + fixerTitle(f));
+  const ta = document.createElement('textarea'); ta.rows = 2; ta.placeholder = 'Guide this build…'; ta.spellcheck = false; ta.setAttribute('aria-label', 'Guidance for ' + fixerTitle(f));
+  const go = document.createElement('button'); go.type = 'submit'; go.className = 'chip in'; go.textContent = 'Guide';
+  const out = document.createElement('div'); out.className = 'gres'; out.hidden = true; out.setAttribute('role', 'status');
+  const row = document.createElement('div'); row.className = 'grow'; row.append(ta, go); form.append(row, out);
+  const own = (e) => e.stopPropagation();   // the form sits inside the agent card (a div with the button role): clicks and keys in it must not toggle the pin or rebuild the card
+  form.addEventListener('click', own); form.addEventListener('pointerdown', own); form.addEventListener('pointerup', own);
+  form.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' && !e.shiftKey && e.target === ta && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } if (e.key === 'Escape') { e.preventDefault(); a.el.classList.remove('pinned'); a.el.focus(); } });
+  form.addEventListener('keyup', own);
+  ta.addEventListener('focus', () => a.el.classList.add('pinned'));
+  form.onsubmit = async (e) => {
+    e.preventDefault(); e.stopPropagation(); const text = ta.value.trim(); if (!text) { ta.focus(); return; }
+    const run = form.fixer || f; go.disabled = true; out.hidden = false; out.classList.remove('fail'); out.textContent = 'sending…'; a.el.classList.add('pinned');
+    try { if (S.demo) throw new Error('Demo is read-only — guidance is not delivered here.'); const r = await api.command('run.steer', { id: run.id, text }, run.game || run.project); out.textContent = (r && (r.text || r.message)) || 'Guidance delivered.'; ta.value = ''; }
+    catch (err) { out.classList.add('fail'); out.textContent = err.message || String(err); }
+    finally { go.disabled = false; }
+  };
+  return form;
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('.agent')) for (const a of agentEls.values()) a.el.classList.remove('pinned'); });
 
@@ -1136,7 +1412,7 @@ function syncMargins() {
   });
   const metadata = marginMetadata({ status, project: selected, busy: S.busy, link: S.link, demo: S.demo, sessionCost: S.sessionCost, sessionTurns: S.sessionTurns });
   projectWorkspace.setBusy(S.busy);
-  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), activeProject: active, view: S.projectView, busy: S.busy, settings: {
+  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), activeProject: active, view: S.projectView, busy: S.busy, progress: S.progress, settings: {
     microphone: S.micEnabled, microphonePhase: S.micPhase,
     voice: S.voiceOn, sounds: LS.get('sounds', false) === true,
     notifications: LS.get('notifications', true) === true && notificationPermission === 'granted',
@@ -1302,17 +1578,18 @@ async function refreshStatus() {
     if (!r.ok) throw new Error('Snapshot unavailable');
     const snap = await r.json(); if (read !== statusRead) return;
     S.fixers = snap.fixers || []; S.auto = snap.auto || {}; S.goals = snap.goals || {}; S.snapshotCursor = snap.cursor;
+    S.progress = snap.progress && typeof snap.progress === 'object' ? snap.progress : undefined;
     S.status = snap.status || null;
     if (S.status) {
       if (!S.busy) setLink(S.demo ? 'demo' : (S.status.busy ? 'busy' : 'live'));
-      const pt = S.status.playtestGame || null; if (pt !== S.playtest) { S.playtest = pt; body.classList.toggle('playtest', !!pt); ask.placeholder = pt ? 'Playtesting ' + pt + ' — tell nibbi what happened…' : 'Ask nibbi to build something...'; if (pt && document.activeElement === ask) showChips('focus'); }
+      const pt = S.status.playtestGame || null; if (pt !== S.playtest) { S.playtest = pt; body.classList.toggle('playtest', !!pt); ask.placeholder = placeholderText(); if (pt && document.activeElement === ask) showChips('focus'); }
     } else if (!S.busy) {
       setLink(S.demo ? 'demo' : 'offline'); if (!S.demo && S.mode === 'idle' && nibbi.mood() === 'idle') nibbi.setMood('sleep');
     }
     renderAgents(S.fixers, S.auto); if (S.demo) fleetEvents(demoFixers()); renderProject(); refreshBadge(); reattachFixerActs();
   } catch {
     if (read !== statusRead) return;
-    S.status = null; if (!S.busy) setLink(S.demo ? 'demo' : 'offline');
+    S.status = null; S.progress = undefined; if (!S.busy) setLink(S.demo ? 'demo' : 'offline');
   }
   syncMargins();
 }
@@ -1388,7 +1665,7 @@ function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c
 
 /* ------------------------------------------------------------------ pill */
 function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; layout(false); }
-ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); activity(); });
+ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
 ask.addEventListener('focus', () => { if (S.projectView) S.projectComposerExpanded = true; layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
@@ -1397,13 +1674,39 @@ ask.addEventListener('keydown', (e) => {
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else { ask.blur(); if (S.mode === 'talk' && !S.busy) tidy(); } }
 });
-pill.addEventListener('submit', (e) => { e.preventDefault(); if (!S.busy && !ask.value.trim() && !pendingImages.length && wakeVoice.snapshot().phase === 'listening' && micCapture.finishUtterance()) return; if (S.busy) { if (S.activeRunId) { api.command('turn.stop', { id: S.activeRunId }).then(() => { S.abort?.abort(); toast('turn stopped; work preserved'); }).catch((e) => toast(e.message)); } else if (S.abort) { S.abort.abort(); toast('connection closed; check Activity for queued work'); } return; } send(ask.value, pendingImages.slice()); });
+/* mid-run steering: typed text while a steerable turn runs becomes guidance for that turn; an empty send still stops it */
+async function steerTurn(text) {
+  const id = S.activeRunId, T = S.liveTurn && !S.liveTurn.done ? S.liveTurn : null;
+  ask.value = ''; autosize(); syncSendButton();
+  const st = T ? insertStep(T, { label: 'guiding', name: 'turn.steer', kind: 'steer', source: 'governed', input: text, phase: 'started' }) : null;
+  try {
+    if (S.demo) throw new Error('Demo is read-only — guidance is not delivered here.');
+    await api.command('turn.steer', { id, text }, activeProject());
+    if (st) { st.finished = true; st.ok = true; st.detail = 'guidance delivered'; markStep(st, 'done'); fillStepResult(st); }
+  } catch (e) {
+    const m = e.message || String(e);
+    if (st) { st.finished = true; st.ok = false; st.detail = m; markStep(st, 'fail'); fillStepResult(st); }
+    toast(m, 3200);
+  }
+}
+pill.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!S.busy && !ask.value.trim() && !pendingImages.length && wakeVoice.snapshot().phase === 'listening' && micCapture.finishUtterance()) return;
+  if (S.busy) {
+    const guidance = ask.value.trim();   // typed text is guidance, never a stop: it reaches a steerable run or stays in the composer with the honest toast
+    if (guidance) { if (S.activeRunId && S.steerable) void steerTurn(guidance); else toast('This turn can\'t take guidance right now — stop it or wait', 3200); return; }
+    if (S.activeRunId) { api.command('turn.stop', { id: S.activeRunId }).then(() => { S.abort?.abort(); toast('turn stopped; work preserved'); }).catch((e) => toast(e.message)); } else if (S.abort) { S.abort.abort(); toast('connection closed; check Activity for queued work'); }
+    return;
+  }
+  send(ask.value, pendingImages.slice());
+});
 addEventListener('keydown', (e) => {
   if (keyboardInputOwned(e, true)) return;
   if (e.altKey && e.code === 'Space') { e.preventDefault(); if (!e.repeat && !window.__TAURI__?.event) void toggleListen(); return; }
   if (e.key === 'Escape' && document.activeElement !== ask && S.mode === 'talk' && !S.busy) { tidy(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.activeElement !== ask && !e.repeat && S.turns.length && !S.busy) { const map = { d: /^(diff|what changed)$/, p: /^preview$/, a: /^approve/, s: /^stop/, o: /^open/ }; const rx = map[e.key.toLowerCase()]; if (rx) { const chip = [...S.turns[S.turns.length - 1].body.querySelectorAll('.acts .chip')].find((c) => rx.test(c.textContent)); if (chip) { e.preventDefault(); chip.click(); chip.focus(); return; } } }
+  if (e.key === ' ' && e.target instanceof Element && e.target.closest('button, summary, [role="button"], a[href]')) return;   // Space activates the focused control (a step's summary, a chip); it is not a character for the composer
   if (document.activeElement !== ask && e.key.length === 1 && !e.repeat) { ask.focus(); }
 });
 
@@ -1488,11 +1791,8 @@ function renderVoice() {
   listenEl.hidden = !listening;
   const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: "What's up, Matty?", listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
   $('.heard', listenEl).textContent = labels[phase] || '';
-  if (!S.busy) {
-    const finishVoice = phase === 'listening' && S.micCapturing;
-    sendBtn.setAttribute('aria-label', finishVoice ? 'Finish voice message' : 'send');
-    sendBtn.title = finishVoice ? 'Finish this voice message now' : 'Send message';
-  }
+  S.voiceFinishing = phase === 'listening' && S.micCapturing;
+  syncSendButton();   // one owner for the send button's label: busy → steer/stop, idle → finish voice/send
   if (phase === 'listening') { nibbi.setMood('listening'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.3, r.top); }
   else if (!S.busy && nibbi.mood() === 'listening') { nibbi.setMood('idle'); nibbi.lookFree(); }
   syncMargins(); layout(false);
@@ -1574,12 +1874,32 @@ document.addEventListener('click', (e) => { const a = e.target.closest && e.targ
 let stateTimer = 0;
 function snapshot() {
   return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mic: { enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }, mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
-    turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => s.textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
-    chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectWorkspace.snapshot(), composerCollapsed: body.classList.contains('project-compose-compact'), toast: $('#toast').hidden ? null : $('#toast').textContent };
+    turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => (s.querySelector(':scope > summary') || s).textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
+    renderer: (() => { try { const r = nibbi.state(); return { character: r.character ?? null, backend: r.backend ?? (r.gl ? 'webgl' : 'canvas2d'), fallbackReason: r.fallbackReason ?? null, engine: r.motion ? 'pocket' : 'legacy', dpr: r.dpr ?? devicePixelRatio }; } catch { return null; } })(), chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectWorkspace.snapshot(), composerCollapsed: body.classList.contains('project-compose-compact'), toast: $('#toast').hidden ? null : $('#toast').textContent };
+}
+/* a persisted step: ≤ 1 KB without its diff, diff ≤ 2 KB */
+function stepRow(s) {
+  const path = s.input && typeof s.input === 'object' && typeof s.input.path === 'string' ? s.input.path : typeof s.path === 'string' ? s.path : '';   // the diff card's head after a reload, when the input is only its bounded text
+  const row = { label: clipText(s.label, 80), name: clipText(s.name, 80), kind: clipText(s.kind, 20), source: clipText(s.source, 12), n: s.n || 1, ok: s.ok === true ? true : s.ok === false ? false : null, elapsedMs: typeof s.elapsedMs === 'number' && Number.isFinite(s.elapsedMs) ? Math.round(s.elapsedMs) : null, detail: clipText(s.detail, 240), input: clipText(typeof s.input === 'string' ? s.input : boundedInput(s.input), 320), bytesLabel: clipText(s.bytesLabel, 16), fixed: !!s.fixed, governed: !!s.governed, ...(path && s.diff ? { path: clipText(path, 160) } : {}) };
+  for (let guard = 0; guard < 8 && JSON.stringify(row).length > 1024; guard++) { if (row.input.length > 64) row.input = clipText(row.input, Math.max(64, row.input.length - 128)); else if (row.detail.length > 64) row.detail = clipText(row.detail, 64); else break; }
+  if (s.diff) row.diff = clipText(s.diff, 2048);
+  return row;
+}
+function restoreStep(T, row) {
+  const ev = row.governed || row.name ? { label: row.label, name: row.name, kind: row.kind, source: row.source || (row.governed ? 'governed' : 'native'), input: row.input } : null;
+  const cls = row.fixed ? 'fixer' : row.kind === 'steer' ? 'steer' : null;
+  const el = stepEl(row.label || row.name || 'step', cls, ev);
+  el.classList.remove('live'); el.classList.add(row.ok === false ? 'fail' : 'done');
+  if (row.n > 1) el.querySelector('.n').textContent = '×' + row.n;
+  if (row.elapsedMs != null) el.querySelector('.t').textContent = elapsedLabel(row.elapsedMs);
+  T.steps.hidden = false; T.steps.insertBefore(el, T.fold);
+  const st = { ...stepRecord(el, row.label, cls, ev), n: row.n || 1, ok: row.ok, elapsedMs: row.elapsedMs, detail: row.detail || '', diff: row.diff || '', bytesLabel: row.bytesLabel || '', finished: true, path: typeof row.path === 'string' ? row.path : '' };
+  if (ev && (st.detail || st.diff || (st.governed && st.ok !== null))) fillStepResult(st);   // native rows stay name-only, as they were live
+  T.stepsList.push(st); return st;
 }
 function persistTranscript() {
   try {
-    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), fixerId: T.fixerId || null, cost: T.cost || 0, steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '' }));
+    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
     LS.set('transcript', { at: Date.now(), rows });
   } catch { /* quota */ }
 }
@@ -1588,9 +1908,13 @@ function restoreTranscript() {
   setMode('talk');
   for (const r of t.rows) {
     const T = newTurn(r.you, undefined, r.at); T.plain = r.plain; T.bubble.classList.remove('live'); T.fixerId = r.fixerId; T.cost = r.cost;
-    if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }
+    if (Array.isArray(r.stepRows) && r.stepRows.length) {   // structured steps come back folded and expandable
+      for (const row of r.stepRows.slice(0, 40)) if (row && typeof row === 'object') restoreStep(T, row);
+      T.stepLine = r.steps || stepSummaryLine(T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s)));
+      T.fold.querySelector('.l').innerHTML = escapeHtml(T.stepLine) + ' — <u>show</u>'; T.steps.classList.add('folded');
+    } else if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
     setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error');
-    T.at = r.at; setMeta(T, { costUsd: r.cost }); T.el.removeAttribute('aria-busy');
+    T.at = r.at; setMeta(T, { costUsd: r.cost, ...localReplyMetadata(r) }); T.el.removeAttribute('aria-busy');
   }
   S.stick = true; scrollFeed(true); body.classList.add('rest');
 }

@@ -14,6 +14,7 @@ import { previewStatus } from './previews.js';
 import { githubApi, githubPages, githubJson, githubCommand, githubGit, GithubError, withGithubRepoLock, redactGithubError, clearGithubCache } from './github-cli.js';
 import { connectionFor, projectConfig, inspectGithubConnection, validateGithubConnection, saveGithubConnection, remoteBranchSha, fetchGithubBranch, githubLocalView, githubRepoPath, checkedSha, checkedBranch, type GithubConnection, type RequiredGithubCheck, readGithubRules } from './github-repositories.js';
 import type { Fixer } from './fixer.js';
+import { recordDelivery } from './progress.js';
 
 export interface GithubCheck { id: string; name: string; appId?: number; creator?: string; workflowId?: number; workflowPath?: string; headSha: string; status: string; conclusion: string | null; url?: string }
 export interface GithubPr {
@@ -262,6 +263,9 @@ export async function completeGithubMerge(id: string, retryFailed = false): Prom
       if (binding.baseBranch === binding.connection.releaseBranch) binding.release = completion.receipt;
       completion.state = 'complete'; completion.updatedAt = Date.now(); delete completion.error; saveBinding(binding);
       runtime().put('fixers', id, { ...run, status: 'merged', remoteMerge: completion.receipt, endedAt: run.endedAt ?? new Date().toISOString() }, { type: 'run.updated', projectId: binding.project, runId: id, payload: { id, status: 'merged', remote: true, run: { ...run, status: 'merged', remoteMerge: completion.receipt, github: githubBuildSummary(id) }, attemptId: run.attemptId } });
+      // The merge is complete and durable above; progress is a rollup and must never reopen completion.
+      try { recordDelivery({ run: { ...run, status: 'merged' }, receipt: completion.receipt }); }
+      catch (failure) { runtime().emit({ type: 'progress.record_failed', runId: id, projectId: binding.project, payload: { message: redactGithubError((failure as Error).message) } }); }
     } catch (error) { completion.state = completion.verifiedSha ? 'records_pending' : 'verification_failed'; completion.error = redactGithubError((error as Error).message); completion.updatedAt = Date.now(); saveBinding(binding); throw error; }
   });
 }

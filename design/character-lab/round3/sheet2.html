@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Round 3 sheet</title>
+<style>
+  @font-face { font-family: Geist; src: url(/public/fonts/GeistVF.woff2) format('woff2'); font-weight: 100 900; }
+  @font-face { font-family: 'Geist Mono'; src: url(/public/fonts/GeistMonoVF.woff2) format('woff2'); font-weight: 100 900; }
+  body { margin: 0; background: #f3f0ea; color: #1b1a18; font: 14px/1.4 Geist, system-ui, sans-serif; }
+  .sheet { padding: 20px 24px 28px; } h1 { font-size: 22px; margin: 0 0 2px; font-weight: 600; }
+  .sub { color: #6b665e; font: 12px 'Geist Mono', monospace; margin-bottom: 10px; }
+  table { border-collapse: collapse; } th { font: 11px 'Geist Mono', monospace; color: #6b665e; text-align: left; padding: 6px 8px 2px; font-weight: 500; } th.row { vertical-align: top; padding-top: 14px; width: 62px; }
+  td { padding: 2px 4px; vertical-align: middle; } .host { border-radius: 6px; overflow: hidden; } .sizes { display: flex; gap: 8px; align-items: flex-end; } .stack { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+</style></head>
+<body><div class="sheet" id="sheet"></div>
+<script type="module">
+import { ACTIONS } from '../actions.mjs';
+const q = new URLSearchParams(location.search);
+const ids = (q.get('ids') || '').split(',').filter(Boolean);
+const reduced = q.get('reduced') === '1', tint = q.get('tint') || null, matrix = q.get('mode') === 'matrix';
+const root = document.getElementById('sheet');
+const settle = (ctl, frames) => { for (let i = 0; i < frames; i++) ctl.step(1 / 60); };
+function cell(mod, action, seconds, R, size) {
+  const host = document.createElement('div'); host.className = 'host';
+  const ctl = mod.mount(host, { R, seed: 1, size, tint, reduced });
+  settle(ctl, 45); // let physics settle in idle first
+  ctl.cue(action); settle(ctl, Math.max(1, Math.round(seconds * 60)));
+  return host;
+}
+if (matrix) {
+  const h1 = document.createElement('h1'); h1.textContent = 'Nibbi — round 2 techniques × nine moments (each technique’s declared still)'; root.appendChild(h1);
+  const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = `rows: techniques · columns: moments · big = hero (R 30), small = 24 px${reduced ? ' · reduced motion' : ''}`; root.appendChild(sub);
+  const table = document.createElement('table'); const head = table.insertRow(); head.insertCell().outerHTML = '<th></th>'; for (const a of ACTIONS) head.insertCell().outerHTML = `<th>${a.label}</th>`;
+  for (const id of ids) { const mod = await import(`./techniques/${id}.mjs`); const tr = table.insertRow(); tr.insertCell().outerHTML = `<th class="row">${mod.meta.name}</th>`;
+    for (const a of ACTIONS) { const td = tr.insertCell(); const wrap = document.createElement('div'); wrap.className = 'stack'; const s = mod.meta.stills?.[a.id] ?? .7; wrap.appendChild(cell(mod, a.id, s, 30, 'hero')); wrap.appendChild(cell(mod, a.id, s, 12, 'tiny')); td.appendChild(wrap); } }
+  root.appendChild(table);
+} else for (const id of ids) {
+  const mod = await import(`./techniques/${id}.mjs`);
+  const h1 = document.createElement('h1'); h1.textContent = `${mod.meta.name} — ${mod.meta.tagline}`; root.appendChild(h1);
+  const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = `${id}.mjs · ${mod.meta.technique} · rows: moments · columns: seconds after the cue (★ = declared still)${reduced ? ' · reduced motion' : ''} · last: pill / 24 px at ★`; root.appendChild(sub);
+  const table = document.createElement('table'); const times = [.15, .4, null, 1.6, 2.6];
+  const head = table.insertRow(); head.insertCell().outerHTML = '<th></th>'; for (const t of times) head.insertCell().outerHTML = `<th>${t === null ? '★' : t + ' s'}</th>`; head.insertCell().outerHTML = '<th>pill · 24 px</th>';
+  for (const a of ACTIONS) { const s = mod.meta.stills?.[a.id] ?? .7; const tr = table.insertRow(); tr.insertCell().outerHTML = `<th class="row">${a.label}<br><span style="font-weight:400">★ ${s}s</span></th>`;
+    for (const t of times) tr.insertCell().appendChild(cell(mod, a.id, t === null ? s : t, 42, 'hero'));
+    const td = tr.insertCell(); const wrap = document.createElement('div'); wrap.className = 'sizes'; wrap.appendChild(cell(mod, a.id, s, 26, 'pill')); wrap.appendChild(cell(mod, a.id, s, 12, 'tiny')); td.appendChild(wrap); }
+  root.appendChild(table);
+}
+await document.fonts.ready; await new Promise(r => setTimeout(r, 200));
+window.sheetReady = true;
+</script></body></html>

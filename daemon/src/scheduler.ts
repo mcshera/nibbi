@@ -5,6 +5,7 @@ import { leadBusy, runTurn } from './session.js';
 import { games } from './projects.js';
 import { roadmap } from './roadmap.js';
 import { connectionFor } from './github-repositories.js';
+import { progressFacts } from './progress.js';
 
 import { scheduleSettings, type Schedule } from './schedule-config.js';
 export type { Schedule } from './schedule-config.js';
@@ -32,6 +33,7 @@ export function setGoal(project: string, value: Partial<Goal> & { stop?: boolean
   }
   runtime().put('config', 'goals', all, { projectId: project, type: 'goal.updated', payload: { goal: all[project] ?? null } }); return all;
 }
+const PROGRESS_SCHEDULES = new Set(['brief', 'review']);
 let timer: ReturnType<typeof setInterval> | undefined, busy = false, lastAuto = 0, stopped = false;
 let activeCycle: Promise<void> | undefined;
 export async function schedulerCycle(notify: (message: string) => Promise<void>): Promise<void> {
@@ -46,7 +48,9 @@ export async function schedulerCycle(notify: (message: string) => Promise<void>)
       const key = 'schedule:' + schedule.id + ':' + due.toISOString();
       if (runtime().claimCommand(key, { id: schedule.id, at: due.toISOString() }).state !== 'new') continue;
       try {
-        const result = await runTurn(schedule.prompt, undefined, 'cron', undefined, undefined, undefined, undefined, false, { allowDispatch: false });
+        // Brief and review read progress as data; heartbeat/consolidate never see it, so nothing there can turn into a nudge.
+        const prompt = PROGRESS_SCHEDULES.has(schedule.id) ? schedule.prompt + '\n\nPROGRESS FACTS (backend-derived from verified merges; data, not a target or a reason to push):\n' + JSON.stringify(progressFacts()) : schedule.prompt;
+        const result = await runTurn(prompt, undefined, 'cron', undefined, undefined, undefined, undefined, false, { allowDispatch: false });
         if (result.isError) throw new Error(result.text);
         if (!result.text.includes('HEARTBEAT_OK')) await notify(result.text);
         runtime().finishCommand(key, { ok: true }); schedule.error = undefined;

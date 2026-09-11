@@ -6,7 +6,9 @@ export const firstSentences = (s, n, max) => { const parts = String(s).match(/[^
 export const stripMd = (s) => String(s || '').replace(/```[\s\S]*?```/g, ' code ').replace(/`([^`]*)`/g, '$1').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/^[#>*\-\s]+/gm, '').replace(/[*_~]+/g, '').replace(/\s+/g, ' ').trim();
 
 export const TOOL_LABEL = { Read: 'reading', Write: 'writing', Edit: 'editing', MultiEdit: 'editing', NotebookEdit: 'editing', Grep: 'searching', Glob: 'searching files', LS: 'looking around', Bash: 'running a command', WebFetch: 'browsing', WebSearch: 'searching the web', Task: 'delegating', TodoWrite: 'planning', AskUserQuestion: 'asking' };
-export const toolLabel = (n) => n.startsWith('mcp__github') ? 'on github' : n.startsWith('mcp__') ? 'using ' + n.split('__')[1] : (TOOL_LABEL[n] || n.toLowerCase());
+export const GOVERNED_LABEL = { web_search: 'searching the web', web_fetch: 'reading a page', read_file: 'reading', list_files: 'looking around', write_file: 'writing', edit_file: 'editing', shell: 'running a command', read_roadmap: 'reading the plan', read_activity: 'checking on builds', list_fixers: 'checking on builds', recent_chat: 'remembering', search_chat: 'remembering', dispatch_fixer: 'starting a build', steer_fixer: 'guiding a build' };
+export const governedToolName = (n) => n.startsWith('mcp__nibbi__') ? n.slice('mcp__nibbi__'.length) : null;
+export const toolLabel = (n) => { const governed = governedToolName(n); if (governed) return GOVERNED_LABEL[governed] || (governed.startsWith('ext_') ? 'using ' + governed.split('_')[1] : governed.replace(/_/g, ' ')); return n.startsWith('mcp__github') ? 'on github' : n.startsWith('mcp__') ? 'using ' + n.split('__')[1] : (TOOL_LABEL[n] || n.toLowerCase()); };
 
 export function humanError(raw) {
   const m = String(raw || '').replace(/^\s*error:\s*/i, '');
