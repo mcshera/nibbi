@@ -50,9 +50,17 @@ function fakeMicrophone() {
   };
 }
 const phase = (page, expected) => page.waitForFunction(expected => window.nibbiApp?.voice?.snapshot().phase === expected, expected, { timeout: 12000 });
+// Hey Nibbi is a row in the composer's options panel (the "+" button opens it); a click must go through the panel.
+const micClick = async page => { if (await page.locator('#dock').getAttribute('aria-expanded') !== 'true') await page.locator('#dock').click(); await page.locator('#mic').click(); };
+// in-page probe: is each control visible inside the viewport and does its centre point land on it (runs inside the page, so no closures)
+const probe = sels => ({ overflow: document.documentElement.scrollWidth > innerWidth, ...Object.fromEntries(sels.map(sel => { const r = document.querySelector(sel).getBoundingClientRect(); return [sel, { visible: r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, clickable: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest(sel) !== null }]; })) });
 async function geometry(page) {
-  const g = await page.evaluate(() => { const r = document.querySelector('#mic').getBoundingClientRect(); return { overflow: document.documentElement.scrollWidth > innerWidth, visible: r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, clickable: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('#mic') !== null }; });
-  assert.deepEqual(g, { overflow: false, visible: true, clickable: true });
+  const closed = await page.evaluate(probe, ['#dock']);
+  assert.deepEqual(closed, { overflow: false, '#dock': { visible: true, clickable: true } }, 'the options button is visible and clickable, no horizontal overflow');
+  if (await page.locator('#dock').getAttribute('aria-expanded') !== 'true') await page.locator('#dock').click();
+  const open = await page.evaluate(probe, ['#mic', '#plan-first', '#attach-image']);
+  assert.deepEqual(open, { overflow: false, '#mic': { visible: true, clickable: true }, '#plan-first': { visible: true, clickable: true }, '#attach-image': { visible: true, clickable: true } }, 'the panel rows are visible and clickable, no horizontal overflow');
+  await page.keyboard.press('Escape'); assert.equal(await page.locator('#dock-menu').isVisible(), false, 'Escape closes the options panel');
 }
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
@@ -101,7 +109,7 @@ try {
       if (name === 'mobile' && await page.locator('#workspace-sidebar').getAttribute('aria-hidden') === 'false') await page.keyboard.press('Escape');
     };
     const railMic = async () => {
-      if (name === 'desktop') await page.locator('#mic').click();
+      if (name === 'desktop') await micClick(page);
       else { await settings(); await page.locator('#st-microphone').click(); }
     };
     await micStates(false);
@@ -131,13 +139,13 @@ try {
     let releaseSTT; sttHold = new Promise(resolve => { releaseSTT = resolve; });
     await utter('Hey Nibbi, this must never send'); await phase(page, 'transcribing');
     assert.match(await page.locator('#listen').innerText(), /Processing speech.*mic paused/, 'Processing is not presented as continued listening');
-    await page.locator('#mic').click(); await phase(page, 'off'); await micStates(false); releaseSTT(); await page.waitForTimeout(300);
+    await micClick(page); await phase(page, 'off'); await micStates(false); releaseSTT(); await page.waitForTimeout(300);
     assert.equal(sent.length, 2); assert.equal(await page.evaluate(() => window.voiceFake.tracks.filter(t => t.readyState !== 'ended').length), 0);
-    await page.locator('#mic').click(); await phase(page, 'armed');
+    await micClick(page); await phase(page, 'armed');
     let releaseSay; sayHold = new Promise(resolve => { releaseSay = resolve; });
     await utter('Hey Nibbi, also must never send'); await phase(page, 'greeting');
-    await page.locator('#mic').click(); await phase(page, 'off'); releaseSay(); await page.waitForTimeout(300); assert.equal(sent.length, 2);
-    await page.locator('#mic').click(); await phase(page, 'armed');
+    await micClick(page); await phase(page, 'off'); releaseSay(); await page.waitForTimeout(300); assert.equal(sent.length, 2);
+    await micClick(page); await phase(page, 'armed');
     await page.locator('#ask').fill('Keep this typed draft'); await phase(page, 'paused');
     const beforeDraft = sttCount; await page.evaluate(() => { window.voiceFake.level = 28; }); await page.waitForTimeout(400);
     await page.evaluate(() => { window.voiceFake.level = 0; });
@@ -145,17 +153,17 @@ try {
     await page.locator('#ask').fill(''); await phase(page, 'armed');
     await page.evaluate(() => dispatchEvent(new PageTransitionEvent('pagehide'))); await phase(page, 'off');
     assert.equal(await page.evaluate(() => window.voiceFake.tracks.filter(t => t.readyState !== 'ended').length), 0);
-    await page.locator('#mic').click(); await phase(page, 'armed');
+    await micClick(page); await phase(page, 'armed');
     await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); delete document.hidden; }); await phase(page, 'off');
     assert.equal(await page.evaluate(() => window.voiceFake.tracks.filter(t => t.readyState !== 'ended').length), 0);
     await page.keyboard.down('Alt'); await page.keyboard.down('Space'); await phase(page, 'armed'); await page.waitForTimeout(450); await page.keyboard.up('Space'); await page.keyboard.up('Alt'); await phase(page, 'armed');
     await page.keyboard.press('Alt+Space'); await phase(page, 'off');
     assert.equal(await page.evaluate(() => window.voiceFake.tracks.filter(t => t.readyState !== 'ended').length), 0);
-    await page.locator('#mic').click(); await phase(page, 'armed'); await page.reload(); await phase(page, 'off');
+    await micClick(page); await phase(page, 'armed'); await page.reload(); await phase(page, 'off');
     assert.equal(await page.locator('#mic').getAttribute('aria-pressed'), 'false');
     for (const mode of ['denied', 'unavailable']) {
       await page.evaluate(mode => { window.voiceFake.mode = mode; }, mode);
-      await page.locator('#mic').click(); await phase(page, 'off');
+      await micClick(page); await phase(page, 'off');
       assert.equal(await page.locator('#mic').getAttribute('aria-pressed'), 'false'); await geometry(page);
     }
     // Manual finish remains available if a noisy room prevents a clean pause.
@@ -170,7 +178,7 @@ try {
     await phase(page, 'armed');
     assert.deepEqual(sent, ['Tell me a short story', 'tell me another story', 'This voice message was finished with Send']);
     assert.match(await page.locator('#listen').innerText(), /Waiting for.*Hey Nibbi/);
-    await page.locator('#mic').click(); await phase(page, 'off'); await micStates(false);
+    await micClick(page); await phase(page, 'off'); await micStates(false);
     assert.equal(await page.evaluate(() => window.voiceFake.tracks.filter(t => t.readyState !== 'ended').length), 0);
     assert.deepEqual(errors, []); results.push({ name, passed: true, sent, spoken, sttCount, checks: ['default off', 'sidebar settings/composer share mic toggle', 'speaker preference does not enable mic', 'pending permission can toggle off', 'nonzero noise floor ends speech promptly', 'Send can finish a voice message', 'processing label distinguishes mic pause', 'ambient filtered', 'native greeting playback', 'followup once', 'inline stripped', 'rearm', 'cancel STT', 'cancel greeting', 'tracks stopped', 'Alt+Space toggle', 'reload off', 'typed draft preserved', 'pagehide off', 'hidden event off', 'denied/unavailable', 'visible clickable no overflow'] });
     await context.close();

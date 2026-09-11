@@ -43,9 +43,13 @@ try {
  for(const [w,h] of [[1440,900],[1180,712],[900,680],[390,844],[320,568],[390,430]]) {
   const {page,context}=await fixture({width:w,height:h},w===1180);
   try { await check(`layout and navigation ${w}x${h}`,async()=>{
-    await bounds(page,'#pill'); const mic=await bounds(page,'#mic'),send=await bounds(page,'#send');
-    assert(mic.x+mic.width<=send.x+1,'Hey Nibbi immediately left of Send');assert(Math.abs((mic.y+mic.height/2)-(send.y+send.height/2))<6,'controls aligned');assert(mic.height>=44);
-    assert.equal(await page.locator('#mic').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#mic').innerText(),'Hey Nibbi');
+    await bounds(page,'#pill'); const dock=await bounds(page,'#dock'),ask=await bounds(page,'#ask'),send=await bounds(page,'#send');
+    assert(dock.x+dock.width<=ask.x+1,'options button immediately left of the field');assert(ask.x+ask.width<=send.x+1,'field immediately left of Send');assert(Math.abs((dock.y+dock.height/2)-(send.y+send.height/2))<6,'controls aligned');assert(dock.height>=(w<=640?44:40)&&dock.width>=(w<=640?44:40),'options button target');assert(send.height>=44&&send.width>=44,'send target');
+    assert.equal(await page.locator('#dock').getAttribute('aria-expanded'),'false');assert.equal(await page.locator('#dock-menu').isVisible(),false,'options panel closed at rest');
+    await page.locator('#dock').click();assert.equal(await page.locator('#dock').getAttribute('aria-expanded'),'true');const menu=await bounds(page,'#dock-menu'),mic=await bounds(page,'#mic');
+    assert(menu.y+menu.height<=dock.y+1,'options panel opens above the options button');assert(mic.height>=44,'Hey Nibbi row is a 44px target');assert.equal(await page.evaluate(()=>document.activeElement?.closest('#dock-menu')!==null),true,'focus moves into the panel');
+    assert.equal(await page.locator('#mic').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#mic').innerText(),'Hey Nibbi');assert.equal(await page.locator('#plan-first').getAttribute('aria-pressed'),'false');
+    await page.keyboard.press('Escape');assert.equal(await page.locator('#dock-menu').isVisible(),false,'Escape closes the panel');assert.equal(await page.evaluate(()=>document.activeElement?.id),'dock','Escape returns focus to the options button');
     assert.equal(await page.evaluate(()=>nibbi.state().character),'pool-velvet');
     assert.equal(await page.locator('.project-group').count(),3);
     for(const project of projects){
