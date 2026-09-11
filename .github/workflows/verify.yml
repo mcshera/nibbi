@@ -19,8 +19,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install chromium
       - run: npm run typecheck
-      - run: npm test
       - run: npm run build
+      - run: npm test
       - run: npm run verify
         env: { CI: '1' }
       - run: node tools/github-workflow-verify.mjs
