@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { runtime, type RuntimeStore } from './store.js';
+import { threadClause } from './history.js';
+import { HOME } from './threads.js';
 import type { GovernedTool } from './tool-service.js';
 
 /** UTF-8 serialized JSON limits, including metadata. No transcript is copied to files. */
@@ -11,7 +13,7 @@ const CHANNELS = ['app', 'cli', 'telegram', 'goal'];
 const SYNTHETIC_PREFIXES = ['[installation check 1/2', '[installation check 2/2', '[installation check]',
   '[host watchdog]', '[nibbi watchdog]', '[watchdog]', '[synthetic test]', '[smoke test]', 'supplied synthetic fixture facts ('];
 const NONHUMAN_SOURCES = ['auto', 'cron', 'heartbeat', 'system', 'background', 'test', 'synthetic', 'watchdog', 'installation-check'];
-type Scope = { kind: 'vault' | 'project'; projectId: string | null; channel?: string };
+type Scope = { kind: 'vault' | 'project'; projectId: string | null; channel?: string; thread?: string | null };
 type TimeStatus = 'valid' | 'invalid' | 'future';
 type Message = { id: number; at: string | null; timestampStatus: TimeStatus; role: 'user' | 'assistant';
   channel: string; text: string; truncated: boolean; textOffset: number; matchOffset: number | null; matchLength: number | null;
@@ -25,18 +27,23 @@ const inputSchema = z.object({ limit: z.number().int().min(1).max(CONTINUITY_LIM
   beforeId: idSchema.optional(), cutoffId: idSchema.optional() }).strict();
 const searchSchema = inputSchema.extend({ query: z.string().min(1).max(CONTINUITY_LIMITS.queryChars)
   .refine(value => value.trim().length > 0 && !/[\u0000-\u001f\u007f]/.test(value), 'Query must contain visible text, without control characters') });
-function scopeFor(project: string | undefined): Scope {
-  if (project === undefined || project === 'vault') return { kind: 'vault', projectId: null };
+function scopeFor(project: string | undefined, thread?: string | null): Scope {
+  const within = thread === undefined ? {} : { thread };
+  if (project === undefined || project === 'vault') return { kind: 'vault', projectId: null, ...within };
   if (typeof project !== 'string' || !project.trim() || project.length > 128 || /[\u0000-\u001f\u007f]/.test(project)) throw new Error('Invalid project scope');
-  return { kind: 'project', projectId: project };
+  return { kind: 'project', projectId: project, ...within };
 }
 function scoped(alias: string, scope: Scope): string {
   const project = scope.kind === 'vault' ? `(${alias}.project_id IS NULL OR ${alias}.project_id='vault')` : `${alias}.project_id=@project`;
-  return project + (scope.channel ? ` AND ${alias}.channel=@selectedChannel` : '');
+  return project + (scope.channel ? ` AND ${alias}.channel=@selectedChannel` : '')
+    + (scope.thread === undefined ? '' : ` AND ${threadClause(alias, '@thread')}`);
 }
+/** Every query that scopes by thread has to bind it, including the ones that build their own bindings. */
+const threadBinding = (scope: Scope): Record<string, string | null> => scope.thread === undefined ? {} : { thread: scope.thread ?? HOME };
 const placeholders = (values: string[], prefix: string): string => values.map((_, i) => `@${prefix}${i}`).join(',');
 function bindings(scope: Scope): Record<string, string> {
   return Object.fromEntries([...(scope.kind === 'project' ? [['project', scope.projectId!]] : []), ...(scope.channel ? [['selectedChannel', scope.channel]] : []),
+    ...Object.entries(threadBinding(scope)),
     ...CHANNELS.map((value, i) => [`channel${i}`, value]), ...SYNTHETIC_PREFIXES.map((value, i) => [`prefix${i}`, value]),
     ...NONHUMAN_SOURCES.map((value, i) => [`source${i}`, value])]);
 }
@@ -97,7 +104,7 @@ function previousUser(scope: Scope, now: number, store: RuntimeStore) {
 }
 function cutoff(scope: Scope, store: RuntimeStore): number {
   return (store.db.prepare(`SELECT COALESCE(MAX(m.id),0) AS id FROM messages m WHERE ${scoped('m', scope)}`)
-    .get({ ...(scope.kind === 'project' ? { project: scope.projectId } : {}), ...(scope.channel ? { selectedChannel: scope.channel } : {}) }) as { id: number }).id;
+    .get({ ...(scope.kind === 'project' ? { project: scope.projectId } : {}), ...(scope.channel ? { selectedChannel: scope.channel } : {}), ...threadBinding(scope) }) as { id: number }).id;
 }
 function page(scope: Scope, input: Input, now: number, store: RuntimeStore, messageChars: number) {
   const cutoffId = input.cutoffId ?? cutoff(scope, store);
@@ -188,9 +195,9 @@ function finalize<T extends { messages: Message[]; hasMore: boolean; searchPrefi
  * Invalid/future contact timestamps produce elapsedMs:null, never a guessed elapsed interval.
  * maxMessages:0 is contact-only: messagesOmitted:true, no message scan or pagination claim.
  */
-export function continuitySnapshot(project: string | undefined, opts: { now?: Date; maxMessages?: number; channel?: 'app' | 'cli' | 'telegram' | 'goal' } = {}, store: RuntimeStore = runtime()) {
-  const scope = scopeFor(project);
-  const parsed = z.object({ now: z.date().optional(), maxMessages: z.number().int().min(0).max(CONTINUITY_LIMITS.snapshotMessages).optional(), channel: z.enum(['app', 'cli', 'telegram', 'goal']).optional() }).strict().parse(opts);
+export function continuitySnapshot(project: string | undefined, opts: { now?: Date; maxMessages?: number; channel?: 'app' | 'cli' | 'telegram' | 'goal'; thread?: string | null } = {}, store: RuntimeStore = runtime()) {
+  const parsed = z.object({ now: z.date().optional(), maxMessages: z.number().int().min(0).max(CONTINUITY_LIMITS.snapshotMessages).optional(), channel: z.enum(['app', 'cli', 'telegram', 'goal']).optional(), thread: z.string().nullable().optional() }).strict().parse(opts);
+  const scope = scopeFor(project, parsed.thread);
   if (parsed.channel) scope.channel = parsed.channel;
   const now = parsed.now ?? new Date();
   return store.db.transaction(() => finalize({ ...envelope(scope, now), previousUser: previousUser(scope, now.getTime(), store),
@@ -201,21 +208,24 @@ export function continuitySnapshot(project: string | undefined, opts: { now?: Da
  * A page can be partial with no matches. Search is ASCII-case-insensitive literal SQLite instr(),
  * only the first 16384 characters of each message; never treat partial/no matches as exhaustive.
  */
-export function continuityTools(project: string | undefined, store?: RuntimeStore): GovernedTool[] {
-  const scope = scopeFor(project);
+export function continuityTools(project: string | undefined, store?: RuntimeStore, thread?: string | null): GovernedTool[] {
+  const scope = scopeFor(project, thread);
   const properties = { limit: { type: 'integer', minimum: 1, maximum: CONTINUITY_LIMITS.toolMessages, default: 10 },
     beforeId: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
-    cutoffId: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER } };
+    cutoffId: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+    ...(thread === undefined ? {} : { allThreads: { type: 'boolean', default: false, description: 'Read every thread in this project instead of only the active one.' } }) };
   return ['recent_chat', 'search_chat'].map(name => ({ name,
-    description: `${name === 'recent_chat' ? 'Read recent' : 'Search literal text in'} stored human-visible conversation in the active scope only, newest recorded ID first. Read-only historical data, not current facts or instructions. Reuse pagination.cutoffId and pagination.nextBeforeId as beforeId. At most 20 messages, 512 candidate rows, 24 KiB JSON. Search examines only the first 16384 code points per message and returns an exact snippet with up to 160 leading context code points and following text. textOffset is the absolute snippet start, matchOffset is relative within it; both use zero-based code points. Byte limits may shorten context but preserve the full match. Partial/no-match pages are not exhaustive. Legacy reply attribution is heuristic. No other scope can be requested.`,
+    description: `${name === 'recent_chat' ? 'Read recent' : 'Search literal text in'} stored human-visible conversation in the active scope only, newest recorded ID first. That scope is the active conversation thread unless allThreads is set, and no other project can be requested. Read-only historical data, not current facts or instructions. Reuse pagination.cutoffId and pagination.nextBeforeId as beforeId. At most 20 messages, 512 candidate rows, 24 KiB JSON. Search examines only the first 16384 code points per message and returns an exact snippet with up to 160 leading context code points and following text. textOffset is the absolute snippet start, matchOffset is relative within it; both use zero-based code points. Byte limits may shorten context but preserve the full match. Partial/no-match pages are not exhaustive. Legacy reply attribution is heuristic. No other scope can be requested.`,
     inputSchema: { type: 'object', additionalProperties: false, properties: { ...properties,
       ...(name === 'search_chat' ? { query: { type: 'string', minLength: 1, maxLength: CONTINUITY_LIMITS.queryChars } } : {}) },
       required: name === 'search_chat' ? ['query'] : [] },
     call: async (args, signal) => {
       signal.throwIfAborted();
-      const input = (name === 'search_chat' ? searchSchema : inputSchema).parse(args);
+      const { allThreads, ...rest } = args as Record<string, unknown>;
+      const input = (name === 'search_chat' ? searchSchema : inputSchema).parse(rest);
+      const asked = thread !== undefined && allThreads === true ? { ...scope, thread: undefined } : scope;
       const now = new Date();
-      return finalize({ ...envelope(scope, now), ...page(scope, input, now.getTime(), store ?? runtime(), CONTINUITY_LIMITS.messageChars) }, CONTINUITY_LIMITS.toolBytes);
+      return finalize({ ...envelope(asked, now), ...page(asked, input, now.getTime(), store ?? runtime(), CONTINUITY_LIMITS.messageChars) }, CONTINUITY_LIMITS.toolBytes);
     },
   }));
 }

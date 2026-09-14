@@ -42,3 +42,28 @@ messaging. It makes the chat history hard to read."*
 - Nibbi's idle screen is the reference image: big character, one pill, nothing else.
 - In conversation the character is a presence, not a header: small, expressive, out of the way.
 - The mini-Nibbi + bubble remains the speaker mark for every reply.
+
+## Threads
+
+A thread is a conversation inside one project. The home thread is not a record: it is every
+message with no thread, so adding threads migrated nothing and an older daemon can still open
+the database (`thread_id` is an additive column and `user_version` stays 1).
+
+`threadId` is orthogonal to `channel`. Channel stays the transport — app, cli, telegram, goal —
+and a thread is what the owner is talking about, so the CLI and Telegram keep writing to home
+and a thread can later be continued from any transport.
+
+`GET /api/threads?project=` lists home first, then live threads by recency, then archived ones.
+`thread.create`, `thread.rename` and `thread.archive` are ordinary project commands. `/api/send`
+carries `threadId`, and the SSE `start`, `ready` and `done` frames echo it back.
+
+Each thread gets its own provider session, its own continuity snapshot and its own `recent_chat`
+scope; `search_chat` takes `allThreads` to widen to the project. `/clear` resets one thread's
+sessions rather than every project's. The home thread deliberately keeps the original session
+key, so upgrading resets nobody's live context.
+
+In the surface, threads are rows under a project's Builds, Issues and Plans, with New thread
+last. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
+localStorage; a turn that is still streaming keeps its own detached nodes and finishes in the
+thread it belongs to. The thread's name rides on the composer placeholder, never as a badge in
+the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused.

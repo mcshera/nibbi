@@ -73,7 +73,7 @@ try{
    await tab(page,'builds');const build=page.locator(`[data-build-id="${buildId}"]`);if(!await build.evaluate(el=>el.open))await build.locator('summary').click();
    await build.getByRole('button',{name:'Changes',exact:true}).click();await build.locator('.project-evidence-panel').getByText(/fixture-change/).first().waitFor();assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');
    await build.getByRole('button',{name:'Checks',exact:true}).click();await build.getByRole('heading',{name:'Verification: Passed',exact:true}).waitFor();await shot(page,'build-review-desktop');
-   await build.getByRole('button',{name:'Merge locally',exact:true}).click();assert.equal(fixture.runtime.get('fixers',buildId).status,'staged','First click only asks for confirmation');
+   await build.getByRole('button',{name:'Approve & merge',exact:true}).click();assert.equal(fixture.runtime.get('fixers',buildId).status,'staged','First click only asks for confirmation');
    await page.getByRole('button',{name:/^Confirm merge/i}).click();await page.waitForFunction(()=>document.querySelector('.project-notice')?.textContent.toLowerCase().includes('merged'));
    assert.equal(fixture.runtime.get('fixers',buildId).status,'merged');assert.equal((await fixture.section('paper-garden','plans')).items.find(i=>i.id===linkedTaskId).done,true);assert.equal((await fixture.section('paper-garden','issues')).items.find(i=>i.id===createdIssueId).done,true);
   });

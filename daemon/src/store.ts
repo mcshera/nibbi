@@ -27,6 +27,12 @@ export class RuntimeStore {
       CREATE INDEX IF NOT EXISTS messages_time ON messages(at,id);
       PRAGMA user_version = 1;
     `);
+    // Threads are an additive column, and user_version deliberately stays 1: an older daemon
+    // refuses a database whose version is higher, which would strand a candidate rollback.
+    // Rows written before threads existed have thread_id NULL, which is the home thread.
+    const columns = (this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]).map(column => column.name);
+    if (!columns.includes('thread_id')) this.db.exec('ALTER TABLE messages ADD COLUMN thread_id TEXT');
+    this.db.exec('CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id,id)');
   }
   get<T>(bucket: string, id: string): T | undefined {
     const row = this.db.prepare('SELECT value FROM records WHERE bucket=? AND id=?').get(bucket, id) as { value: string } | undefined;

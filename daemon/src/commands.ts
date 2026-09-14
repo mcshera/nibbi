@@ -3,13 +3,13 @@ import { executeCommand } from './command-service.js';
 import { listFixers, games } from './fixer.js';
 import { loadState, saveState } from './state.js';
 export interface CmdResult { handled: boolean; reply?: string; ok?: boolean }
-export async function handleCommand(raw: string, notify: (message: string) => Promise<void>, options: { project?: string; idempotencyKey?: string } = {}): Promise<CmdResult> {
+export async function handleCommand(raw: string, notify: (message: string) => Promise<void>, options: { project?: string; idempotencyKey?: string; threadId?: string } = {}): Promise<CmdResult> {
   if (!raw.trim().startsWith('/')) return { handled: false };
   const [command, ...parts] = raw.trim().slice(1).split(/\s+/); const arg = parts.join(' ');
   const map: Record<string, { name: string; args: Record<string, unknown> }> = {
     fix: { name: 'run.dispatch', args: { issue: arg } }, approve: { name: 'run.merge', args: { id: arg } },
     discard: { name: 'run.discard', args: { id: arg } }, retry: { name: 'run.retry', args: { id: arg } },
-    clear: { name: 'session.reset', args: {} }, stop: { name: 'run.stop', args: { id: arg } },
+    clear: { name: 'session.reset', args: { threadId: options.threadId ?? 'home' } }, stop: { name: 'run.stop', args: { id: arg } },
     preview: { name: parts[1] === 'stop' ? 'preview.stop' : 'preview.start', args: { id: parts[0] } },
   };
   if (map[command]) {

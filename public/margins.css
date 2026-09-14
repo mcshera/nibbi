@@ -148,3 +148,19 @@ body.native-mac .margin-card-right { top: auto; }
 .project-section-badge[data-tone="attention"] { color: var(--ink); font-weight: 600; }
 .project-section-badge[data-tone="error"] { color: #873f35; }
 .project-section-detail { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 3px; color: var(--ink-3); font-size: 10px; font-weight: 400; }
+
+/* Glass: the sidebar and its cards become frosted paper over the translucent window. */
+body.glass .workspace-sidebar { background: rgba(236, 232, 224, .70); backdrop-filter: blur(18px) saturate(1.1); }
+body.glass .margin-card { --margin-paper: rgba(250, 248, 244, .88); backdrop-filter: blur(16px) saturate(1.05); }
+body.glass .margin-global-error { background: rgba(250, 248, 244, .88); }
+body.glass .sidebar-toggle { background: rgba(245, 242, 236, .86); backdrop-filter: blur(12px); }
+body.glass .margin-new { background: rgba(255, 255, 255, .30); }
+
+/* Threads sit under a project's sections: the conversations, not another record type. */
+.project-threads { display: flex; flex-direction: column; }
+.project-thread .project-section-copy, .project-thread-new .project-section-copy { font-size: 13px; }
+.project-thread-when { margin-left: auto; padding-left: 8px; color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.project-thread[aria-current="true"] { background: rgba(21,20,19,.075); }
+.project-thread[aria-current="true"] .project-section-copy { font-weight: 600; }
+.project-thread-new .project-section-copy { color: var(--ink-3); }
+.project-thread-new:hover .project-section-copy { color: var(--ink-2); }
