@@ -1,5 +1,6 @@
 // Review regressions run against temporary state; delayed routes never merge real work.
 import assert from 'node:assert/strict';
+import {openProjectCard} from './choose-project.mjs';
 import { chromium } from 'playwright';
 import { testBackend } from './test-backend.mjs';
 
@@ -126,7 +127,7 @@ try {
     await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('dialog').count(), 0);
     assert.equal(await page.locator('.review').count(), 1, 'Closing settings preserves review');
-    await page.getByRole('button', { name: 'Project settings for fixture', exact: true }).click();
+    await openProjectCard(page, 'fixture');   // the gear lives in the switcher's list now
     const cap = page.locator('.margin-card:not([hidden]) input[type=number]').first();
     await cap.focus(); await cap.press('a'); await cap.press('ArrowRight');
     assert.equal(await cap.evaluate(element => element === document.activeElement), true);
