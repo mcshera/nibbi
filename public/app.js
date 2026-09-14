@@ -39,7 +39,17 @@ const character = ['wash', 'pool', 'dry', 'pool-velvet', 'pool-bloom', 'pool-tid
 const nibbi = createNibbi({ ink: $('#ink'), fx: fxCv, character, motion: !character && Q.get('motion') === 'legacy' ? 'legacy' : 'pocket' });
 const gaze = Q.get('gaze');
 if (['left', 'straight', 'right'].includes(gaze)) nibbi.lookDirection?.(gaze === 'left' ? -1 : gaze === 'right' ? 1 : 0, 0);
-body.style.backgroundImage = 'url(' + nibbi.paperDataURL() + ')';
+// Glass: the desktop shell can sit on a translucent window (macOS Liquid Glass, applied in
+// the Tauri shell). The surface decides whether it shows — without .glass the paper tile is
+// opaque and the app looks exactly as it does in a browser, where glass is never offered.
+const glassAvailable = !!window.__TAURI__;
+let glassOn = glassAvailable && LS.get('glass', true) !== false;
+function applyPaper() {
+  body.classList.toggle('glass', glassOn);
+  document.documentElement.classList.toggle('glass', glassOn);
+  body.style.backgroundImage = 'url(' + nibbi.paperDataURL({ alpha: glassOn ? 0.78 : 1 }) + ')';
+}
+applyPaper();
 
 /* ------------------------------------------------------------------ state */
 const S = {
@@ -1477,6 +1487,7 @@ function syncMargins() {
     notificationStatus: { granted: 'System permission granted', denied: 'Blocked in system or browser settings', default: 'Permission is needed to enable notifications', unavailable: 'Permission is not available here' }[notificationPermission] || 'Permission is not available here',
     ...metadata,
     demo: S.demo, calm: calmMotion, systemReduced: reducedMotion.matches,
+    glass: glassOn, glassAvailable,
   } });
 }
 function renderProject() {
@@ -1529,6 +1540,7 @@ async function handleMarginAction(action, id, value) {
     case 'sounds': { const on = !LS.get('sounds', false); LS.set('sounds', on); syncMargins(); if (on) sound('send'); return; }
     case 'notifications': await toggleNotifications(); return;
     case 'calm': if (!reducedMotion.matches) { calmMotion = !calmMotion; LS.set('pocketCalm', calmMotion); syncMotionPreference(); } return;
+    case 'glass': if (glassAvailable) { glassOn = !glassOn; LS.set('glass', glassOn); applyPaper(); syncMargins(); toast(glassOn ? 'glass window' : 'paper window'); } return;
     case 'demo': S.demo = !S.demo; syncMargins(); await refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); return;
     case 'tidy': margins.close(); tidy(); return;
     default: throw new Error('This control is not available.');
@@ -1932,7 +1944,7 @@ document.addEventListener('click', (e) => { const a = e.target.closest && e.targ
 /* live state report: the running app tells the host what it is showing (loopback-readable at /nibbi/state) */
 let stateTimer = 0;
 function snapshot() {
-  return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mic: { enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }, mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
+  return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mic: { enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }, mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, glass: glassOn, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
     turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => (s.querySelector(':scope > summary') || s).textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
     renderer: (() => { try { const r = nibbi.state(); return { character: r.character ?? null, backend: r.backend ?? (r.gl ? 'webgl' : 'canvas2d'), fallbackReason: r.fallbackReason ?? null, engine: r.motion ? 'pocket' : 'legacy', dpr: r.dpr ?? devicePixelRatio }; } catch { return null; } })(), chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectWorkspace.snapshot(), composerCollapsed: body.classList.contains('project-compose-compact'), toast: $('#toast').hidden ? null : $('#toast').textContent };
 }

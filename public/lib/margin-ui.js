@@ -205,7 +205,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     row.append(node('dt', '', label), value); metadata.append(row); meta[key] = value;
   }
   const prefs = {};
-  for (const [action, label, id] of [['microphone','Hey Nibbi microphone','st-microphone'], ['voice','Spoken replies','st-voice'], ['sounds','Sound effects','st-sounds'], ['notifications','Notifications','st-notifications'], ['calm','Calm motion','st-motion'], ['demo','Demo brain','st-demo']]) {
+  for (const [action, label, id] of [['microphone','Hey Nibbi microphone','st-microphone'], ['voice','Spoken replies','st-voice'], ['sounds','Sound effects','st-sounds'], ['notifications','Notifications','st-notifications'], ['calm','Calm motion','st-motion'], ['glass','Glass window','st-glass'], ['demo','Demo brain','st-demo']]) {
     const el = bind(button('', 'margin-pref', () => void dispatch(action, undefined, undefined, settings.error)), action, undefined,
       () => action === 'calm' && !!model.settings.systemReduced || action === 'notifications' && model.settings.notificationsSupported === false);
     el.id = id; const value = node('span', 'margin-pref-value', 'Off');
@@ -377,6 +377,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     for (const [key, el] of Object.entries(meta)) el.textContent = text(s[key], 'Not available');
     for (const [action, pref] of Object.entries(prefs)) {
       const on = action === 'calm' ? !!(s.calm || s.systemReduced) : !!s[action];
+      if (action === 'glass') pref.el.hidden = s.glassAvailable === false;   // browsers have no translucent window to show
       pref.el.setAttribute('aria-pressed', String(on)); pref.value.textContent = action === 'calm' && s.systemReduced ? 'OS reduced motion' : action === 'microphone' && on ? ({ starting: 'Allow mic', armed: 'Ready', listening: 'Listening', paused: 'Paused', greeting: 'Responding', transcribing: 'Processing', sending: 'Answering' }[s.microphonePhase] || 'On') : on ? 'On' : 'Off';
     }
     notificationNote.textContent = s.notificationsSupported === false ? 'Notifications are not supported here.' : text(s.notificationStatus, '');
