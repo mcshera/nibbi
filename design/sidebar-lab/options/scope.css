@@ -1,0 +1,16 @@
+/* scope's strip: one row, four names, the number only. */
+.sidebar-lab-scope .scope-tabs { flex: none; padding: 0 12px 8px; }
+.sidebar-lab-scope .scope-row { display: flex; align-items: stretch; gap: 2px; }
+.sidebar-lab-scope .scope-tab {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; justify-content: center; gap: 4px;
+  min-height: 38px; padding: 8px 4px; border-radius: 8px;
+  border-bottom: 2px solid transparent; color: var(--ink-2);
+}
+.sidebar-lab-scope.is-narrow .scope-tab { min-height: 44px; }
+.sidebar-lab-scope .scope-tab:hover { background: var(--wash); }
+.sidebar-lab-scope .scope-tab[aria-current="page"] { background: var(--wash-firm); border-bottom-color: var(--ink); color: var(--ink); }
+.sidebar-lab-scope .scope-tab-name { font-size: 12.5px; font-weight: 550; white-space: nowrap; }
+.sidebar-lab-scope .scope-tab[aria-current="page"] .scope-tab-name { font-weight: 650; }
+.sidebar-lab-scope .scope-tab-count { font-size: 10.5px; color: var(--quiet); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-lab-scope .scope-tab-count[data-tone="attention"] { color: var(--ink); font-weight: 600; }
+.sidebar-lab-scope .scope-tab-count[data-tone="error"] { color: #7c392f; font-weight: 600; }

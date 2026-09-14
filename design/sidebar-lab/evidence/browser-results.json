@@ -1,0 +1,373 @@
+{
+  "environment": "local Chrome via Playwright; geometry in CSS pixels at the page's real viewport (?scale=1). Not a device benchmark, and it certifies neither Safari/WKWebView nor the native Tauri shell.",
+  "checks": [
+    {
+      "name": "No horizontal overflow: 10 states × 5 sizes"
+    },
+    {
+      "name": "Every state marks the open conversation, the current section, the card, the way back and the backdrop"
+    },
+    {
+      "name": "Every control in the bar is at least 44px on a phone and 32px on a desktop"
+    },
+    {
+      "name": "Text at 12px and under is at least 4.5:1 against its own background"
+    },
+    {
+      "name": "Every design dispatches only what handleMarginAction already understands",
+      "scope": "thread newThread projectSection",
+      "scope-a": "thread newThread projectSection",
+      "scope-b": "thread newThread projectSection",
+      "scope-c": "thread newThread projectSection"
+    },
+    {
+      "name": "Escape closes the card first and keeps focus, then closes the bar"
+    },
+    {
+      "name": "With reduced motion nothing animates in any of five moments: switch, card, drawer, collapsed, home"
+    },
+    {
+      "name": "60 projects mount in under 250ms",
+      "scope": "3ms",
+      "scope-a": "1ms",
+      "scope-b": "1ms",
+      "scope-c": "1ms"
+    },
+    {
+      "name": "destroy() leaves nothing behind"
+    },
+    {
+      "name": "The lab page itself has no horizontal overflow at 420px"
+    },
+    {
+      "name": "No console or page errors"
+    }
+  ],
+  "measured": {
+    "scope": {
+      "minContrast": 5.52,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 3,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToBuriedThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": true,
+        "opened": true
+      },
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-collapse",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#sidebar-progress",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        "[data-project-section]",
+        ".project-section-badge",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [
+        ".project-options"
+      ],
+      "workspaceLeft": "256px",
+      "tabPressesToNewThread": 10,
+      "deadSpaceAtRest": {
+        "1180x820": 326,
+        "390x844": 357
+      },
+      "deadSpaceImproved": {
+        "1180x820": 29,
+        "390x844": 29
+      },
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "1180x820/buried projects": false,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true,
+        "390x844/buried projects": false
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "1180x820/buried projects": 13,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4,
+        "390x844/buried projects": 13
+      },
+      "mountMs60": 3,
+      "setModelMs60": 0,
+      "destroyClean": true
+    },
+    "scope-a": {
+      "minContrast": 5.52,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 3,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToBuriedThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": true,
+        "opened": true
+      },
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-collapse",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#sidebar-progress",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        "[data-project-section]",
+        ".project-section-badge",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [
+        ".project-options"
+      ],
+      "workspaceLeft": "256px",
+      "tabPressesToNewThread": 10,
+      "deadSpaceAtRest": {
+        "1180x820": 306,
+        "390x844": 336
+      },
+      "deadSpaceImproved": {
+        "1180x820": 29,
+        "390x844": 29
+      },
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "1180x820/buried projects": false,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true,
+        "390x844/buried projects": false
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "1180x820/buried projects": 12,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4,
+        "390x844/buried projects": 13
+      },
+      "mountMs60": 1,
+      "setModelMs60": 0,
+      "destroyClean": true
+    },
+    "scope-b": {
+      "minContrast": 5.52,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 3,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToBuriedThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": true,
+        "opened": true
+      },
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-collapse",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#sidebar-progress",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        "[data-project-section]",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [
+        ".project-options",
+        ".project-section-badge"
+      ],
+      "workspaceLeft": "256px",
+      "tabPressesToNewThread": 10,
+      "deadSpaceAtRest": {
+        "1180x820": 318,
+        "390x844": 355
+      },
+      "deadSpaceImproved": {
+        "1180x820": 29,
+        "390x844": 29
+      },
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "1180x820/buried projects": false,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true,
+        "390x844/buried projects": false
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "1180x820/buried projects": 13,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4,
+        "390x844/buried projects": 13
+      },
+      "mountMs60": 1,
+      "setModelMs60": 0,
+      "destroyClean": true
+    },
+    "scope-c": {
+      "minContrast": 5.52,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 3,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": false,
+        "opened": true
+      },
+      "clicksToBuriedThread": {
+        "clicks": 1,
+        "scrolledToNavigate": false,
+        "scrolledToTarget": true,
+        "opened": true
+      },
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-collapse",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#sidebar-progress",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        "[data-project-section]",
+        ".project-section-badge",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [
+        ".project-options"
+      ],
+      "workspaceLeft": "256px",
+      "tabPressesToNewThread": 9,
+      "deadSpaceAtRest": {
+        "1180x820": 318,
+        "390x844": 353
+      },
+      "deadSpaceImproved": {
+        "1180x820": 29,
+        "390x844": 29
+      },
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "1180x820/buried projects": false,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true,
+        "390x844/buried projects": false
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "1180x820/buried projects": 13,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4,
+        "390x844/buried projects": 13
+      },
+      "mountMs60": 1,
+      "setModelMs60": 0,
+      "destroyClean": true
+    }
+  },
+  "errors": [],
+  "warnings": [],
+  "failed": false,
+  "pinnedCatalogue": [
+    "#workspace-sidebar",
+    "#sidebar-toggle",
+    ".sidebar-collapse",
+    ".sidebar-backdrop",
+    "#project-rail",
+    "#settings-rail",
+    "#sidebar-progress",
+    "#status",
+    "#st-voice",
+    "#st-platform",
+    "#st-motion",
+    ".margin-card",
+    ".margin-card-scroll",
+    ".margin-close",
+    ".margin-new",
+    "[data-project-id]",
+    ".project-options",
+    "[data-project-section]",
+    ".project-section-badge",
+    ".project-thread-new"
+  ]
+}
