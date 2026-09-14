@@ -3,6 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { buildSystemPrompt, VAULT } from './vault.js';
 import { leadExecutionPolicy } from './lead-instructions.js';
 import { continuitySnapshot, continuityTools } from './continuity.js';
+import { HOME, requireThread } from './threads.js';
 import { activityTools, listFixersSummary } from './activity-context.js';
 import { configuredScheduleFlags } from './schedule-config.js';
 import { loadState, saveState } from './state.js';
@@ -26,7 +27,7 @@ let dispatchNotify: (message: string) => Promise<void> = async () => undefined;
 export function setDispatchNotify(fn: (message: string) => Promise<void>): void { dispatchNotify = fn; }
 export interface TurnResult { text: string; costUsd?: number; sessionId?: string; isError: boolean; ctxTokens?: number; voice?: string; local?: boolean; localModel?: string; fallback?: FallbackInfo; runId?: string }
 export interface ImageAttachment { media_type: string; data: string }
-export interface TurnOptions { project?: string; provider?: ProviderId; signal?: AbortSignal; allowDispatch?: boolean; historySource?: 'test'; onStart?: (runId: string) => void; onReady?: (runId: string, info: { steerable: boolean }) => void; onFallback?: (info: FallbackInfo) => void; onToolEvent?: (payload: Record<string, unknown>) => void }
+export interface TurnOptions { project?: string; threadId?: string; provider?: ProviderId; signal?: AbortSignal; allowDispatch?: boolean; historySource?: 'test'; onStart?: (runId: string) => void; onReady?: (runId: string, info: { steerable: boolean }) => void; onFallback?: (info: FallbackInfo) => void; onToolEvent?: (payload: Record<string, unknown>) => void }
 export function splitVoice(text: string): { text: string; voice?: string } {
   const parts = text.split(/»voice:\s*/);
   if (parts.length === 1) return { text };
@@ -53,8 +54,22 @@ export function isRateLimited(): boolean {
   const limit = loadState().rateLimit;
   return limit?.status === 'rejected' && (!limit.resetsAt || Date.now() < (limit.resetsAt < 1e12 ? limit.resetsAt * 1000 : limit.resetsAt));
 }
-export function resetSession(): void {
+export function resetSession(scope?: { project?: string; threadId?: string }): void {
   if (active.size) throw new Error('Stop the active turn before resetting context');
+  // Without a scope this is the old global reset, which the CLI still uses. With one it
+  // clears a single thread's provider sessions, so other threads keep their context.
+  if (scope?.threadId) {
+    const prefix = (scope.project ?? 'vault') + ':';
+    const suffix = scope.threadId === HOME ? '' : ':' + scope.threadId;
+    for (const key of (runtime().db.prepare("SELECT id FROM records WHERE bucket='sessions'").all() as { id: string }[]).map(row => row.id)) {
+      const [, provider, ...rest] = key.split(':');
+      if (!key.startsWith(prefix) || !provider) continue;
+      const tail = rest.join(':');                               // skillHash, or threadId:skillHash
+      const onThread = suffix ? tail.startsWith(scope.threadId + ':') : !tail.includes(':');
+      if (onThread) runtime().remove('sessions', key);
+    }
+    return;
+  }
   runtime().db.prepare("DELETE FROM records WHERE bucket='sessions'").run();
   const state = loadState(); state.sessionId = undefined; state.ctxTokens = undefined; saveState(state);
 }
@@ -76,10 +91,10 @@ export async function steerTurn(id: string, text: string): Promise<void> {
   logChat({ ts: new Date().toISOString(), role: 'user', channel: control.channel, text: '[STEER] ' + guidance, project: control.project, runId: id });
 }
 export async function shutdownSessions(): Promise<void> { closing = true; for (const control of active.values()) control.abort.abort(new Error('Backend shutdown')); await Promise.allSettled([...queues.values()]); }
-export function leadTools(project?: string, allowDispatch = true): GovernedTool[] {
+export function leadTools(project?: string, allowDispatch = true, thread?: string | null): GovernedTool[] {
   const schema = (properties: Record<string, unknown>, required: string[]): Record<string, unknown> => ({ type: 'object', properties, required, additionalProperties: false });
   return [
-    ...continuityTools(project, runtime()),
+    ...continuityTools(project, runtime(), thread),
     ...activityTools(project, runtime()),
     ...githubLeadTools(project),
     { name: 'list_fixers', description: 'Read a bounded current run-status summary. Alias of read_activity with default filters; use read_activity for exact IDs, time cutoffs and pages. Returns an envelope, not full run records.', inputSchema: schema({}, []),
@@ -111,6 +126,7 @@ export async function runTurn(prompt: string, onText?: (text: string) => void, c
   if (closing) throw new Error('Backend is shutting down');
   const project = options.project === 'vault' ? undefined : options.project;
   if (project && !games()[project]) throw new Error('Unknown project');
+  const threadId = requireThread(options.project, options.threadId);
   const settings = projectSettings(project ?? '');
   const provider = options.provider ?? settings.lead.provider;
   const key = (project ?? 'vault') + ':' + provider;
@@ -148,26 +164,26 @@ export async function runTurn(prompt: string, onText?: (text: string) => void, c
       abort.signal.throwIfAborted();
       const skills = catalog.selected(project ?? 'vault', 'lead', provider);
       const refs = skills.map(skill => ({ id: skill.id, revision: skill.revision }));
-      const sessionKey = key + ':' + createHash('sha256').update(JSON.stringify(refs)).digest('hex');
+      const sessionKey = key + (threadId === HOME ? '' : ':' + threadId) + ':' + createHash('sha256').update(JSON.stringify(refs)).digest('hex');
       const sessionId = channel === 'auto' ? undefined : store.get<{ id: string }>('sessions', sessionKey)?.id;
       let limit = eligibleChat ? activeUsageLimit(store, provider) : undefined;
       store.put('lead-runs', runId, { id: runId, project, provider, status: 'running', skillRefs: refs, startedAt: Date.now() });
       emit('turn.started', { provider, skillRefs: refs });
       // Both snapshots precede this user row. Stateless local chat cannot use a resumed zero-excerpt snapshot.
-      const continuity = continuitySnapshot(project, { maxMessages: sessionId || !visible ? 0 : 4 }, store);
-      const localContext = eligibleChat ? continuitySnapshot(project, { maxMessages: 4, channel: channel as 'app' | 'cli' | 'telegram' }, store) : undefined;
+      const continuity = continuitySnapshot(project, { maxMessages: sessionId || !visible ? 0 : 4, thread: threadId }, store);
+      const localContext = eligibleChat ? continuitySnapshot(project, { maxMessages: 4, channel: channel as 'app' | 'cli' | 'telegram', thread: threadId }, store) : undefined;
       const scheduleFlags = configuredScheduleFlags(store);
       const baseInstructions = buildSystemPrompt();
       const bridge = !options.historySource && interactiveLocalChat(channel) && !limit
         ? await primaryLocalBridge(store, sessionKey, channel, project, abort.signal) : '';
-      const userId = visible ? logChat({ ts: new Date().toISOString(), role: 'user', channel, text: prompt, project, runId, source: options.historySource }) : undefined;
+      const userId = visible ? logChat({ ts: new Date().toISOString(), role: 'user', channel, text: prompt, project, threadId, runId, source: options.historySource }) : undefined;
       let result: AgentResult | undefined;
       let primaryCost: number | undefined;
       if (!limit) {
         const nativeSkills = catalog.materialize(runId, skills);
         const repos = project ? [games()[project].repo] : Object.values(games()).map(cfg => cfg.repo);
         const scope = { role: 'lead' as const, cwd: VAULT, readableRoots: [VAULT, ...repos, nativeSkills.root], writableRoots: [VAULT] };
-        lease = await leaseTools([...fileTools(scope, abort.signal), ...leadTools(project, options.allowDispatch !== false), ...await webTools(project, { store, emit: primaryEvent }), ...(visible ? mcpToolsFor(project, { store, emit: primaryEvent }) : [])], abort.signal,
+        lease = await leaseTools([...fileTools(scope, abort.signal), ...leadTools(project, options.allowDispatch !== false, threadId), ...await webTools(project, { store, emit: primaryEvent }), ...(visible ? mcpToolsFor(project, { store, emit: primaryEvent }) : [])], abort.signal,
           { onAttempt: name => primaryEvent('tool.attempted', { name: name.slice(0, 200) }),
             onCall: info => { lastArgs.set(info.name, info.args); primaryEvent('tool.started', { name: info.name, source: 'governed', input: boundedInput(info.args) }); },
             onResult: info => { const args = lastArgs.get(info.name) ?? {}; const diff = info.ok ? diffFor(info.name, args) : undefined; primaryEvent('tool.finished', { name: info.name, source: 'governed', ok: info.ok, summary: info.ok ? summarizeResult(info.name, args, info.result) : String(info.error ?? 'failed').slice(0, 300), ...(info.ok ? {} : { error: String(info.error ?? 'failed').slice(0, 300) }), bytes: info.bytes, elapsedMs: info.elapsedMs, ...(diff ? { diff } : {}) }); } });
@@ -238,7 +254,7 @@ export async function runTurn(prompt: string, onText?: (text: string) => void, c
       if (visible) state.lastReply = { local: !!fallback, ...(fallback ? { localModel: fallback.localModel } : {}), primaryProvider: provider, at: state.lastTurnAt, isError: result.isError };
       saveState(state);
       const replyId = visible ? logChat({ ts: new Date().toISOString(), role: 'oracle', channel, text: output.text, costUsd: result.costUsd,
-        project, runId, source: options.historySource, ...(fallback ? { local: true, localModel: fallback.localModel, fallback, isError: result.isError } : {}) }) : undefined;
+        project, threadId, runId, source: options.historySource, ...(fallback ? { local: true, localModel: fallback.localModel, fallback, isError: result.isError } : {}) }) : undefined;
       if (fallback && userId && replyId && !options.historySource) rememberLocalExchange(store, sessionKey, channel, project, userId, replyId);
       store.put('lead-runs', runId, { id: runId, project, provider, skillRefs: refs, status: abort.signal.aborted ? 'interrupted' : result.isError ? 'failed' : 'done', result: output, endedAt: Date.now() });
       emit('turn.completed', { result: output }); return output;

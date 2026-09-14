@@ -168,6 +168,8 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
       if (width < 900) {
         assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true');
         await page.locator('#sidebar-toggle').click();
+        // The sidebar slides in; focus order is only meaningful once it has laid out.
+        await page.evaluate(() => Promise.all(document.querySelector('#workspace-sidebar').getAnimations().map(a => a.finished.catch(() => {}))));
         assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-modal'), 'true');
         assert.equal(await page.locator('#outside').evaluate(el => el.inert), true);
         await page.locator('#status').focus();
@@ -202,7 +204,9 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     await page.evaluate(() => ui.close());
     await page.evaluate(() => {model.projects = Array.from({length:60},(_,i)=>({...model.projects[0],id:`p-${i}`,name:'A very long project name '.repeat(10)+i,active:i===0}));model.activeProject='p-0';ui.update(model);});
     assert.equal(await page.locator('#project-rail [data-project-id]').count(), 60);
-    assert.equal(await page.locator('.project-section').count(), 180);
+    // Three record sections per project, plus the New thread row that shares their styling.
+    assert.equal(await page.locator('[data-project-section]').count(), 180);
+    assert.equal(await page.locator('.project-thread-new').count(), 60);
     const settingsBefore = await page.locator('#status').boundingBox();
     assert.equal(await page.locator('#project-rail').evaluate(el => el.scrollHeight > el.clientHeight), true);
     await page.locator('#project-rail [data-project-id="p-59"]').scrollIntoViewIfNeeded();
