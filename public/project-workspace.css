@@ -206,3 +206,16 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
   .github-panel .project-toolbar { align-items: flex-start; }
   .project-evidence-tabs { gap: 14px; }
 }
+
+/* Glass: workspace surfaces read as frosted paper; every text-bearing fill stays >= .85
+   so muted ink keeps its contrast over a dark desktop wallpaper. */
+body.glass .project-action { background: var(--surface); }
+body.glass .project-action.primary { background: var(--ink); }
+body.glass .project-search input, body.glass .project-field input,
+body.glass .project-field textarea, body.glass .project-field select { background: rgba(250, 248, 244, .90); }
+body.glass .project-notice { background: rgba(239, 232, 220, .90); }
+body.glass .project-notice[data-kind="error"] { background: rgba(240, 229, 220, .90); }
+body.glass .project-notice[data-kind="success"] { background: rgba(231, 235, 225, .90); }
+body.glass .project-confirmation { background: rgba(238, 231, 220, .90); }
+body.glass .project-workspace .diffv .dbody { background: rgba(251, 250, 247, .90); }
+body.glass .project-action:hover:not(:disabled) { background: rgba(233, 229, 221, .92); }

@@ -84,6 +84,38 @@ fn ensure_host() -> Result<(), String> {
     Err("Could not start Node. Re-run install.sh to configure the backend path.".into())
 }
 
+/// macOS 26+ Liquid Glass behind the surface, with an NSVisualEffectView fallback on older
+/// systems. The effect is applied once and left on: the surface decides whether it shows by
+/// painting opaque paper over it (`body:not(.glass)`), so there is no IPC command to guard
+/// and no extra capability. Never configure `windowEffects` in tauri.conf.json — that is
+/// Tauri's only entry point into its own transitive window-vibrancy 0.6, and both versions
+/// register the ObjC class `NSVisualEffectViewTagged`, which aborts if both ever run.
+#[cfg(target_os = "macos")]
+fn apply_glass<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    use window_vibrancy::{
+        apply_liquid_glass, apply_vibrancy, LiquidGlassOptions, NSGlassEffectViewStyle,
+        NSVisualEffectMaterial, NSVisualEffectState,
+    };
+    // A light warm tint (alpha 0.22) keeps the material glassy: the surface's own 0.78
+    // paper veil already carries the WCAG floor on its own, so the tint does not have to,
+    // and what shows through this layer stays a recognisably blurred desktop.
+    let options = LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular)
+        .tint_color((245, 242, 236, 56))
+        .radius(0.0) // NSWindow already clips the window's corners
+        .opaque(false);
+    if apply_liquid_glass(window, options).is_err() {
+        // Below macOS 26 the crate returns UnsupportedPlatformVersion and applies nothing.
+        let _ = apply_vibrancy(
+            window,
+            NSVisualEffectMaterial::UnderWindowBackground,
+            Some(NSVisualEffectState::FollowsWindowActiveState),
+            None,
+        );
+    }
+    // A transparent window otherwise loses its drop shadow.
+    let _ = window.set_shadow(true);
+}
+
 fn main() {
     use tauri_plugin_global_shortcut::{Code, Modifiers, ShortcutState};
     if let Err(error) = ensure_host() { eprintln!("{error}"); std::process::exit(1); }
@@ -113,6 +145,10 @@ fn main() {
                 .build(),
         )
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                apply_glass(&window);
+            }
             let show = MenuItem::with_id(app, "show", "Open Nibbi", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;

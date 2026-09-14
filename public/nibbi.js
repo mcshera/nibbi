@@ -32,16 +32,22 @@ const grainBytes = new Uint8Array(GRAIN * GRAIN);
     grainBytes[y * GRAIN + x] = clamp(Math.round(v * 255), 0, 255);
   }
 })();
-function paperDataURL() {
+// alpha < 1 lets a translucent window show the desktop through the fibers; the tile is
+// the page background, so its alpha is what actually makes the glass build see-through.
+const paperTiles = new Map();
+function paperDataURL({ alpha = 1 } = {}) {
+  const a = clamp(Number.isFinite(alpha) ? alpha : 1, 0, 1);
+  const key = Math.round(a * 255);
+  const cached = paperTiles.get(key); if (cached) return cached;
   const c = document.createElement('canvas'); c.width = GRAIN; c.height = GRAIN;
   const g = c.getContext('2d'); const img = g.createImageData(GRAIN, GRAIN);
   for (let i = 0; i < GRAIN * GRAIN; i++) {
     const n = (grainBytes[i] - 128) / 128;
     const spec = grainBytes[(i * 7 + 31) % (GRAIN * GRAIN)] > 249 ? -6 : 0;
-    img.data[i * 4] = 245 + n * 3.5 + spec; img.data[i * 4 + 1] = 242 + n * 3.5 + spec; img.data[i * 4 + 2] = 236 + n * 4.0 + spec; img.data[i * 4 + 3] = 255;
+    img.data[i * 4] = 245 + n * 3.5 + spec; img.data[i * 4 + 1] = 242 + n * 3.5 + spec; img.data[i * 4 + 2] = 236 + n * 4.0 + spec; img.data[i * 4 + 3] = key;
   }
   g.putImageData(img, 0, 0);
-  return c.toDataURL();
+  const url = c.toDataURL(); paperTiles.set(key, url); return url;
 }
 
 // Smooth radial fit to the approved ink-bubble hero silhouette. The reference

@@ -422,3 +422,23 @@ body.busy.steer-ready .pill .send::after { display: none; }
   .agent { animation-fill-mode: none; }   /* the filled arrive transform (identity matrix) would otherwise make the agent, not the row, the card's containing block */
   .agent .card { position: fixed; left: 50%; bottom: calc(100% + 6px); width: min(260px, calc(100vw - 24px)); }
 }
+
+/* ---------- glass: the desktop shell on a translucent macOS window ----------
+   Only the Tauri shell adds .glass (app.js), so browsers and the PWA are untouched.
+   The window itself carries Liquid Glass; everything here is the paper laid over it.
+   Alphas come from a contrast budget measured against the worst case, a black desktop
+   wallpaper. The budget deliberately ignores the native tint, because the surface cannot
+   verify that the glass material is present: the paper veil alone must carry it. At .78
+   over black the page reads rgb(191,189,184), where #151413 is 13.4:1 and the muted ink
+   has to darken from #6f6b65 (2.7:1, failing) to #4f4b46 (4.6:1). With the window's glass
+   behind it the real values sit higher still. */
+html.glass, body.glass { background-color: transparent; }
+body.glass {
+  --paper: rgba(245, 242, 236, .78);
+  --ink-3: #4f4b46;
+  --pill-bg: rgba(250, 248, 243, .78);
+  --surface: rgba(250, 248, 244, .86);
+}
+body.glass .dock-menu { background: rgba(250, 248, 243, .9); backdrop-filter: blur(16px) saturate(1.1); }
+body.glass .chip { background: rgba(250, 248, 243, .82); }
+body.glass .nib .said .diffv .dbody, body.glass .sbody .diffv .dbody, body.glass .diffv .dfile { background: rgba(251, 250, 247, .9); }

@@ -111,3 +111,6 @@
   .platform-panel .platform-check input[type=checkbox] { width: 22px; height: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .platform-panel button { transition: none; } }
+
+/* Glass: the settings dialog keeps its own frosted paper. */
+body.glass .platform-panel { background: rgba(250, 248, 243, .90); backdrop-filter: blur(16px) saturate(1.05); }
