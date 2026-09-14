@@ -55,7 +55,7 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await progress.getAttribute('role'), 'status');
     assert.ok(await progress.evaluate(el => el.classList.contains('margin-muted')), 'quiet muted style');
     assert.equal(await progress.innerText(), 'Progress not available', 'no progress in the model reads as unavailable, not zero');
-    assert.ok(await progress.evaluate(el => el.compareDocumentPosition(document.querySelector('.margin-project-list')) & Node.DOCUMENT_POSITION_FOLLOWING), 'line sits above the project list');
+    assert.ok(await progress.evaluate(el => el.compareDocumentPosition(document.querySelector('.margin-body')) & Node.DOCUMENT_POSITION_PRECEDING), 'the quiet line sits under the conversations, not over the project list');
     await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}; ui.update(model);});
     assert.equal(await progress.innerText(), 'Nothing merged yet today');
     await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 0}, week: {deliveries: 4}, streak: 0}; ui.update(model);});
@@ -70,38 +70,54 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await progress.innerText(), 'Progress not available');
     assert.deepEqual(await page.evaluate(() => calls), [], 'progress rendering dispatches nothing');
     const card = page.locator('.margin-card:not([hidden])');
-    const row = id => page.locator(`#project-rail .margin-project[data-project-id="${id}"]`);
+    const switcher = page.locator('.margin-switch-trigger');
+    const openMenu = async () => { if (!await page.locator('.margin-switch-menu').isVisible()) await switcher.click(); };
+    // The gear lives in the switcher's list now, so reaching it means opening the list.
+    const gear = async id => { await openMenu(); return options(id); };
+    const row = id => page.locator(`.margin-switch-menu .margin-project[data-project-id="${id}"]`);
     const options = id => page.locator('.project-group').filter({has:page.locator(`.margin-project[data-project-id="${id}"]`)}).locator('.project-options');
+    // Every project is a row in the switcher's list; only the current one has a strip and a body.
     assert.equal(await page.locator('.project-group').count(), 3);
-    for (const id of ['alpha','beta','gamma']) {
-      const sections = page.locator(`.project-section[data-section-project="${id}"]`);
-      assert.deepEqual(await sections.evaluateAll(els => els.map(el => el.dataset.projectSection)), ['builds','issues','plans']);
-      assert.equal(await row(id).getAttribute('aria-expanded'), String(id === 'alpha'), 'only the initially active project starts expanded');
-    }
-    await row('alpha').click();
-    assert.equal(await row('alpha').getAttribute('aria-expanded'), 'false');
-    assert.deepEqual(await page.evaluate(() => calls), [], 'collapsing a project does not dispatch work');
-    await row('alpha').click();
-    assert.equal(await row('alpha').getAttribute('aria-expanded'), 'true');
-    assert.deepEqual(await page.evaluate(() => calls), [{action:'selectProject',id:'alpha',value:undefined}]);
-    assert.equal(await card.count(), 0, 'project rows expand navigation without opening settings');
+    assert.equal(await switcher.getAttribute('data-current-project'), 'alpha', 'the switcher names the project the model says is active');
+    assert.deepEqual(await page.locator('.project-section[data-project-section]').evaluateAll(els => els.map(el => el.dataset.projectSection)), ['builds','issues','plans']);
+    assert.deepEqual(await page.locator('.project-section[data-section-project]').evaluateAll(els => [...new Set(els.map(el => el.dataset.sectionProject))]), ['alpha'], 'only the current project has a strip');
+    assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'the list starts closed');
+    await openMenu();
+    assert.equal(await page.locator('.margin-switch-menu').isVisible(), true);
+    assert.deepEqual(await page.evaluate(() => calls), [], 'opening the list dispatches nothing');
+    assert.equal(await card.count(), 0, 'opening the list does not open settings');
     await row('beta').click();
-    assert.equal(await row('beta').getAttribute('aria-current'), 'false', 'project selection remains owned by the supplied model');
+    assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'choosing a project closes the list');
+    assert.deepEqual(await page.evaluate(() => calls), [{action:'selectProject',id:'beta',value:undefined}]);
+    assert.equal(await switcher.getAttribute('data-current-project'), 'alpha', 'project selection remains owned by the supplied model');
     for (const section of ['builds','issues','plans']) {
-      await page.locator(`.project-section[data-section-project="beta"][data-project-section="${section}"]`).click();
-      assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action:'projectSection',id:'beta',value:section});
+      await page.locator(`.project-section[data-section-project="alpha"][data-project-section="${section}"]`).click();
+      assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action:'projectSection',id:'alpha',value:section});
     }
-    assert.deepEqual(await page.evaluate(() => calls.filter(c => c.action === 'selectProject')), [{action:'selectProject',id:'alpha',value:undefined},{action:'selectProject',id:'beta',value:undefined}]);
-    assert.equal(await page.locator('.project-section[aria-current]').count(), 0, 'clicking does not invent active section state');
-    await page.evaluate(() => {model.view={project:'beta',section:'issues'};ui.update(model);});
+    assert.deepEqual(await page.evaluate(() => calls.filter(c => c.action === 'selectProject')), [{action:'selectProject',id:'beta',value:undefined}]);
+    // Chat carries aria-current when no section is open — that is the point of it being a tab — so
+    // the question is only whether a *section* invented state.
+    assert.equal(await page.locator('.project-section[data-project-section][aria-current]').count(), 0, 'clicking does not invent active section state');
+    assert.equal(await page.locator('.margin-tab[data-margin-tab="chat"][aria-current="page"]').count(), 1, 'Chat is the current tab when no section is open');
+    await page.evaluate(() => {model.view={project:'alpha',section:'issues'};ui.update(model);});
     assert.equal(await page.locator('.project-section[aria-current="page"]').count(), 1);
     assert.equal(await page.locator('.project-section[aria-current="page"]').getAttribute('data-project-section'), 'issues');
-    assert.equal(await page.locator('.project-section[aria-current="page"]').getAttribute('data-section-project'), 'beta');
+    assert.equal(await page.locator('.project-section[aria-current="page"]').getAttribute('data-section-project'), 'alpha');
     await page.evaluate(() => {model.view=null;ui.update(model);});
-    assert.equal(await page.locator('.project-section[aria-current]').count(), 0);
-    assert.equal(await options('alpha').getAttribute('aria-label'), 'Project settings for Alpha <img src=x onerror=alert(1)>');
+    assert.equal(await page.locator('.project-section[data-project-section][aria-current]').count(), 0);
+    // The Chat tab asks for the conversation that is already open. What it is really asking for is
+    // to stop looking at a record section, so it must dispatch even when nothing about the thread
+    // changes — openThread leaves the section before it notices the thread is unchanged.
+    await page.evaluate(() => {model.view={project:'alpha',section:'builds'};model.projects[0].threads=[{id:'home',title:'Home',lastAt:new Date().toISOString(),active:true}];ui.update(model);});
+    const beforeChat = await page.evaluate(() => calls.length);
+    await page.locator('.margin-tab[data-margin-tab="chat"]').click();
+    assert.equal(await page.evaluate(() => calls.length), beforeChat + 1, 'the Chat tab dispatches even when its conversation is already the open one');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action:'thread',id:'alpha',value:'home'});
+    await page.evaluate(() => {model.view=null;ui.update(model);});
+    await openMenu();
+    assert.equal(await (await gear('alpha')).getAttribute('aria-label'), 'Project settings for Alpha <img src=x onerror=alert(1)>');
     const callsBeforeSettings = await page.evaluate(() => calls.length);
-    await options('alpha').click();
+    await (await gear('alpha')).click();
     assert.equal(await page.evaluate(() => calls.length), callsBeforeSettings, 'opening project settings does not change the active project or dispatch work');
     assert.equal(await card.count(), 1);
     assert.match(await card.textContent(), /2 of 7 complete/);
@@ -129,7 +145,7 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('#workspace-sidebar').evaluate(el => el.inert), true);
     await page.locator('#sidebar-toggle').click();
     assert.equal(await page.locator('[data-project-id="alpha"]').getAttribute('aria-current'), 'true');
-    await options('alpha').click();
+    await (await gear('alpha')).click();
     assert.equal(await cap.inputValue(), '124', 'collapse preserves unsaved project draft');
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('.margin-card:not([hidden])').count(), 0);
@@ -152,7 +168,7 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('#st-motion').isDisabled(), true);
     await page.locator('#outside').click();
     assert.equal(await card.count(), 0);
-    await options('beta').click();
+    await (await gear('beta')).click();
     assert.match(await card.textContent(), /Progress not available/);
     assert.match(await card.textContent(), /Spend not available · Cap not available/);
     await page.evaluate(() => {model.projects[1].spend = 0; model.projects[1].spendCap = 0; ui.update(model);});
@@ -178,7 +194,7 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
         await page.keyboard.press('Shift+Tab');
         assert.equal(await page.locator('#status').evaluate(el => el === document.activeElement), true, 'mobile reverse Tab wraps');
       } else assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false', 'desktop expansion survives breakpoint changes');
-      await options('alpha').click();
+      await (await gear('alpha')).click();
       const bounds = await card.boundingBox();
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `card fits ${width}`);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -192,6 +208,7 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
         assert.equal(await card.locator('.margin-close').evaluate(el => el === document.activeElement), true, 'open card owns mobile focus');
         await page.keyboard.press('Escape');
         assert.equal(await page.locator('#status').evaluate(el => el === document.activeElement), true);
+        await openMenu();   // New project lives at the foot of the switcher's list
         await page.locator('.margin-new').click();
         assert.equal(await page.evaluate(() => calls.at(-1).action), 'newProject');
         await page.keyboard.press('Escape');
@@ -203,17 +220,22 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     }
     await page.evaluate(() => ui.close());
     await page.evaluate(() => {model.projects = Array.from({length:60},(_,i)=>({...model.projects[0],id:`p-${i}`,name:'A very long project name '.repeat(10)+i,active:i===0}));model.activeProject='p-0';ui.update(model);});
-    assert.equal(await page.locator('#project-rail [data-project-id]').count(), 60);
-    // Three record sections per project, plus the New thread row that shares their styling.
-    assert.equal(await page.locator('[data-project-section]').count(), 180);
-    assert.equal(await page.locator('.project-thread-new').count(), 60);
+    assert.equal(await page.locator('#project-rail [data-project-id]').count(), 60, 'every project is a row in the list');
+    // Sixty projects, one strip: only the project you are in renders its sections and its
+    // conversations. That is the whole difference between this bar and the tree it replaced.
+    assert.equal(await page.locator('[data-project-section]').count(), 3);
+    assert.equal(await page.locator('.project-thread-new').count(), 1);
+    assert.equal(await page.locator('.margin-switch-trigger').getAttribute('data-current-project'), 'p-0');
+    await openMenu();
     const settingsBefore = await page.locator('#status').boundingBox();
-    assert.equal(await page.locator('#project-rail').evaluate(el => el.scrollHeight > el.clientHeight), true);
-    await page.locator('#project-rail [data-project-id="p-59"]').scrollIntoViewIfNeeded();
-    assert.ok(await page.locator('#project-rail').evaluate(el => el.scrollTop > 0));
-    assert.deepEqual(await page.locator('#status').boundingBox(), settingsBefore, 'settings stays pinned while projects scroll');
+    const menuList = page.locator('.margin-switch-menu .margin-project-list');
+    assert.equal(await menuList.evaluate(el => el.scrollHeight > el.clientHeight), true, 'the list scrolls rather than the bar');
+    await page.locator('.margin-switch-menu [data-project-id="p-59"]').scrollIntoViewIfNeeded();
+    assert.ok(await menuList.evaluate(el => el.scrollTop > 0));
+    assert.deepEqual(await page.locator('#status').boundingBox(), settingsBefore, 'settings stays pinned while the list scrolls');
     assert.ok(settingsBefore.y >= 0 && settingsBefore.y + settingsBefore.height <= 760);
-    await page.evaluate(() => {model.projects=[];ui.update(model);});
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => {model.projects=[];model.activeProject=null;ui.update(model);});
     assert.equal(await page.locator('#project-rail [data-project-id]').count(), 0);
     assert.equal(await page.locator('.project-section').count(), 0);
     await page.evaluate(() => ui.destroy());
