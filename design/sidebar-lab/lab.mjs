@@ -4,7 +4,9 @@
 import { STATES, stateById, buildModel, FLAGS, FLAG_IDS, ENVIRONMENT, defaultFlags, DESKTOP, PHONE } from './states.mjs';
 import { createFrame, stylesReady } from './chrome.mjs';
 
-export const OPTION_IDS = ['_today', 'scope', 'peer', 'spine'];
+// Round 2: the owner picked Scope and asked for the strip in one row, plus three more variants.
+// peer and spine are still here — reach them with ?only=_today,peer,spine
+export const OPTION_IDS = ['scope', 'scope-a', 'scope-b', 'scope-c'];
 
 const params = new URLSearchParams(location.search);
 const bare = params.get('scale') === '1';

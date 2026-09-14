@@ -38,7 +38,16 @@ const HELPERS = () => {
   const lum = rgb => { const c = rgb.map(v => { const s = v / 255; return s <= .03928 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
   const parse = v => (v.match(/[\d.]+/g) || []).slice(0, 4).map(Number);
   window.__lab = {
-    visible(el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; },
+    visible(el) {
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) return false;
+      // Opacity counts: a hover action faded to 0 is not something you can hit.
+      for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+        const cs = getComputedStyle(n);
+        if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) return false;
+      }
+      return true;
+    },
     background(el) {
       let n = el;
       while (n && n !== document.documentElement) { const bg = parse(getComputedStyle(n).backgroundColor); if (bg.length >= 3 && (bg[3] === undefined || bg[3] > .5)) return bg.slice(0, 3); n = n.parentElement; }
@@ -73,7 +82,8 @@ try {
     if (!ids.length) fail('options load', { viewport: vp.id });
     for (const state of STATES) {
       await page.evaluate(id => sidebarLab.cue(id), state.id);
-      await page.waitForTimeout(state.id === 'many' ? 120 : 60);
+      // The bar slides for 220ms. Measuring heights and hit-tests before it lands reads the animation.
+      await page.waitForTimeout(state.id === 'many' || state.id === 'deep' ? 320 : 280);
       const report = await page.evaluate(({ stateId, narrow }) => {
         const rows = [];
         for (const id of sidebarLab.options) {
@@ -219,72 +229,86 @@ try {
   const still = await page.evaluate(async () => {
     sidebarLab.setEnvironment({ reduced: true });
     const report = {};
-    for (const id of sidebarLab.options) { sidebarLab.cue('switch'); sidebarLab.cue('collapsed'); }
-    await new Promise(r => setTimeout(r, 90));
-    for (const id of sidebarLab.options) report[id] = sidebarLab.hostEl(id).getAnimations({ subtree: true }).filter(a => a.playState === 'running').length;
+    // Every moment that opens or moves something, not just the one that settles on its own.
+    for (const stateId of ['switch', 'card', 'drawer', 'collapsed', 'home']) {
+      sidebarLab.cue(stateId);
+      await new Promise(r => setTimeout(r, 90));
+      for (const id of sidebarLab.options) {
+        const running = sidebarLab.hostEl(id).getAnimations({ subtree: true }).filter(a => a.playState === 'running');
+        if (running.length) (report[id] ||= []).push(`${stateId}: ${running.length}`);
+      }
+    }
     sidebarLab.setEnvironment({ reduced: false });
     return report;
   });
-  const moving = Object.entries(still).filter(([, n]) => n > 0);
+  
+  const moving = Object.entries(still);
   if (moving.length) fail('reduced motion settles', { detail: Object.fromEntries(moving) });
-  else check('With reduced motion nothing is still animating a beat after a cue');
+  else check('With reduced motion nothing animates in any of five moments: switch, card, drawer, collapsed, home');
   await page.emulateMedia({ reducedMotion: null });
 
   // Scorecard rows.
   const measured = await page.evaluate(async () => {
     const report = {};
     const settle = () => new Promise(r => setTimeout(r, 280));   // the bar slides for 220ms; measuring mid-slide lies
-    // How many clicks from home, and whether the bar has to be scrolled to see the target after them.
-    const clicksTo = async (id, targetSelector, candidates) => {
+    // Real clicks, counted from zero, ending on the target itself — and the two kinds of scrolling
+    // kept apart, because "I had to scroll to find the project" and "I had to scroll to find the
+    // conversation" are different costs and they are what separates these designs.
+    const clicksTo = async (id, targetSelector, candidates, fromState = 'home') => {
       sidebarLab.show(id);
-      sidebarLab.cue('home');
+      sidebarLab.cue(fromState);
       await settle();
       const host = sidebarLab.hostEl(id);
-      let scrolled = false;
-      for (let clicks = 1; clicks <= 4; clicks++) {
-        let target = host.querySelector(targetSelector);
-        if (window.__lab.reachable(target, host)) return { clicks, scrolled };
+      let clicks = 0, scrolledToNavigate = false, scrolledToTarget = false;
+      const bring = async el => {
+        if (window.__lab.reachable(el, host)) return true;
+        el.scrollIntoView({ block: 'nearest' });
+        await new Promise(r => setTimeout(r, 80));
+        return window.__lab.reachable(el, host);
+      };
+      for (let step = 0; step <= 4; step++) {
+        const target = host.querySelector(targetSelector);
         if (target) {
-          target.scrollIntoView({ block: 'nearest' });
-          await new Promise(r => setTimeout(r, 60));
-          if (window.__lab.reachable(target, host)) return { clicks, scrolled: true };
-          scrolled = true;
+          const wasReachable = window.__lab.reachable(target, host);
+          if (wasReachable || await bring(target)) {
+            if (!wasReachable) scrolledToTarget = true;
+            sidebarLab.clearActions();
+            target.click(); clicks++;
+            await new Promise(r => setTimeout(r, 60));
+            const opened = sidebarLab.actions.some(a => a.option === id && a.name === 'thread');
+            return { clicks, scrolledToNavigate, scrolledToTarget, opened };
+          }
         }
         let moved = false;
         for (const selector of candidates) {
           for (const el of host.querySelectorAll(selector)) {
             if (el.disabled || el.getAttribute('aria-expanded') === 'true') continue;
-            if (!window.__lab.reachable(el, host)) {
-              // A row clipped by the bar's own scroll is still reachable — you scroll to it. Count that.
-              el.scrollIntoView({ block: 'nearest' });
-              await new Promise(r => setTimeout(r, 60));
-              if (!window.__lab.reachable(el, host)) continue;
-              scrolled = true;
-            }
-            el.click(); moved = true; break;
+            const wasReachable = window.__lab.reachable(el, host);
+            if (!wasReachable && !await bring(el)) continue;
+            if (!wasReachable) scrolledToNavigate = true;
+            el.click(); clicks++; moved = true; break;
           }
           if (moved) break;
         }
-        if (!moved) return { clicks: null, scrolled };
-        await new Promise(r => setTimeout(r, 120));
+        if (!moved) return { clicks: null, scrolledToNavigate, scrolledToTarget, opened: false };
+        await new Promise(r => setTimeout(r, 140));
       }
-      return { clicks: null, scrolled };
+      return { clicks: null, scrolledToNavigate, scrolledToTarget, opened: false };
     };
     for (const id of sidebarLab.options) {
       sidebarLab.show(id);
       const row = {};
       row.clicksToSecondThread = await clicksTo(id, '[data-thread-project="battalion"][data-thread-id="t-left-bar"]',
         ['[data-lab-role="chat"]', '[data-project-id="battalion"]', '[data-lab-role="chooser"]']);
-      row.clicksToOtherProjectThread = await clicksTo(id, '[data-thread-project="nibbi"][data-thread-id="home"]',
+      // The last conversation of a five-conversation project — hunting, not landing on the first row.
+      row.clicksToOtherProjectThread = await clicksTo(id, '[data-thread-project="nibbi"][data-thread-id="t-site"]',
         ['[data-lab-role="chooser"]', '[data-project-id="nibbi"]', '[data-lab-role="chat"]']);
-      // Where New thread sits in the focus order, counting from the bar's first control.
+      // And the same, in the fixture built to be hard: ninth project of twelve, thirty conversations.
+      row.clicksToBuriedThread = await clicksTo(id, '[data-thread-id="d-28"]',
+        ['[data-lab-role="chooser"]', '[data-project-id]', '[data-lab-role="chat"]'], 'deep');
       sidebarLab.cue('home');
       await settle();
       const host = sidebarLab.hostEl(id);
-      const focusable = () => [...host.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"], a[href]')].filter(el => window.__lab.visible(el));
-      const order = focusable();
-      const target = host.querySelector('[data-lab-role="new-thread"]');
-      row.tabsToNewThread = target ? (order.indexOf(target) >= 0 ? order.indexOf(target) + 1 : null) : null;
       // Pinned selectors kept.
       sidebarLab.cue('card');
       await settle();
@@ -300,6 +324,74 @@ try {
   });
   for (const [id, row] of Object.entries(measured)) Object.assign(results.measured[id] ||= {}, row);
 
+  // Tab presses, actually pressed. DOM order is not tab order, so the old index was not this number.
+  const optionIds = await page.evaluate(() => sidebarLab.options);
+  for (const id of optionIds) {
+    await page.evaluate(optionId => { sidebarLab.show(optionId); sidebarLab.cue('home'); }, id);
+    await page.waitForTimeout(300);
+    const start = await page.evaluate(optionId => {
+      const host = sidebarLab.hostEl(optionId);
+      const first = [...host.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"], a[href]')]
+        .find(el => window.__lab.visible(el));
+      if (!first) return false;
+      first.focus({ preventScroll: true });
+      return document.activeElement === first;
+    }, id);
+    let presses = null;
+    if (start) {
+      for (let n = 1; n <= 40; n++) {
+        await page.keyboard.press('Tab');
+        const onTarget = await page.evaluate(optionId => {
+          const active = document.activeElement;
+          return !!active && active === sidebarLab.hostEl(optionId).querySelector('[data-lab-role="new-thread"]');
+        }, id);
+        if (onTarget) { presses = n; break; }
+      }
+    }
+    (results.measured[id] ||= {}).tabPressesToNewThread = presses;
+  }
+
+  // Dead space at rest: the gap between where the bar's content stops and where its foot is pinned.
+  // references.md names this as an anti-pattern; a lab that names it should measure it.
+  for (const [vpId, width, height] of [['1180x820', 1180, 820], ['390x844', 390, 844]]) {
+    const gapPage = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+    collect(gapPage);
+    await gapPage.goto(`${url}?scale=1&frame=${width}x${height}`);
+    await gapPage.waitForFunction(() => window.sidebarLab?.ready, null, { timeout: 30000 });
+    await gapPage.addScriptTag({ content: `(${HELPERS.toString()})()` });
+    await gapPage.evaluate(() => sidebarLab.cue('home'));
+    await gapPage.waitForTimeout(320);
+    const measureGap = () => gapPage.evaluate(() => {
+      const report = {};
+      for (const id of sidebarLab.options) {
+        sidebarLab.show(id);
+        const host = sidebarLab.hostEl(id);
+        const bar = host.querySelector('[data-pin="workspace-sidebar"]') || host.firstElementChild;
+        if (!bar) { report[id] = null; continue; }
+        const barBox = bar.getBoundingClientRect();
+        let contentBottom = barBox.top, footTop = barBox.bottom;
+        for (const el of bar.querySelectorAll('*')) {
+          if (!window.__lab.visible(el) || el.children.length) continue;
+          const r = el.getBoundingClientRect();
+          if (r.height === 0 || r.bottom > barBox.bottom + 1) continue;
+          const foot = el.closest('[data-pin="settings-rail"], [data-lab-role="settings"]');
+          if (foot) footTop = Math.min(footTop, r.top);
+          else contentBottom = Math.max(contentBottom, r.bottom);
+        }
+        report[id] = Math.max(0, Math.round(footTop - contentBottom));
+      }
+      return report;
+    });
+    const gaps = await measureGap();
+    for (const [id, gap] of Object.entries(gaps)) ((results.measured[id] ||= {}).deadSpaceAtRest ||= {})[vpId] = gap;
+    // And with every improvement on: the rollup sentence and the progress line are what fill the gap.
+    await gapPage.evaluate(() => sidebarLab.setFlags(Object.fromEntries(sidebarLab.flagIds.map(f => [f, true]))));
+    await gapPage.waitForTimeout(320);
+    const improved = await measureGap();
+    for (const [id, gap] of Object.entries(improved)) ((results.measured[id] ||= {}).deadSpaceImproved ||= {})[vpId] = gap;
+    await gapPage.close();
+  }
+
   // New thread without scrolling, and conversations above the fold, at the sizes that decide it.
   for (const [vpId, width, height] of [['1180x820', 1180, 820], ['390x844', 390, 844]]) {
     const sizePage = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
@@ -307,7 +399,7 @@ try {
     await sizePage.goto(`${url}?scale=1&frame=${width}x${height}`);
     await sizePage.waitForFunction(() => window.sidebarLab?.ready, null, { timeout: 30000 });
     await sizePage.addScriptTag({ content: `(${HELPERS.toString()})()` });
-    for (const [stateId, label] of [['home', '4'], ['many', '12']]) {
+    for (const [stateId, label] of [['home', '4'], ['many', '12'], ['deep', 'buried']]) {
       await sizePage.evaluate(id => sidebarLab.cue(id), stateId);
       await sizePage.waitForTimeout(300);
       const row = await sizePage.evaluate(async () => {
@@ -371,7 +463,8 @@ try {
   await page.close();
 
   // ---------- 3. Evidence ----------
-  const shots = await browser.newPage({ viewport: { width: 1680, height: 1100 }, deviceScaleFactor: 1 });
+  // Wide enough that #studies lays out four columns: three would drop Spine from every state frame.
+  const shots = await browser.newPage({ viewport: { width: 1960, height: 1100 }, deviceScaleFactor: 1 });
   collect(shots);
   await shots.goto(url);
   await shots.waitForFunction(() => window.sidebarLab?.ready, null, { timeout: 30000 });
@@ -380,7 +473,12 @@ try {
   for (const state of STATES) {
     await shots.evaluate(id => sidebarLab.cue(id), state.id);
     await shots.waitForTimeout(state.id === 'many' ? 200 : 120);
-    const box = await shots.evaluate(() => { const r = document.getElementById('studies').getBoundingClientRect(); return { x: Math.max(0, r.x), y: Math.max(0, r.y + scrollY), width: Math.min(r.width, innerWidth), height: Math.min(r.height, 1600) }; });
+    const box = await shots.evaluate(() => {
+      const el = document.getElementById('studies');
+      const r = el.getBoundingClientRect();
+      // The whole element, not whatever the first grid row happened to be.
+      return { x: Math.max(0, r.x), y: Math.max(0, r.y + scrollY), width: Math.min(r.width, innerWidth), height: Math.min(el.scrollHeight, 2400) };
+    });
     await shots.screenshot({ path: `${out}state-${state.id}.png`, clip: box });
   }
   await shots.evaluate(() => { sidebarLab.cue('home'); sidebarLab.setFlags(Object.fromEntries(sidebarLab.flagIds.map(f => [f, true]))); });

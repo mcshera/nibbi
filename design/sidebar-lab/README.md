@@ -1,6 +1,8 @@
 # Nibbi sidebar lab
 
-Four left bars, the same four projects, the same nine moments, side by side. The first is the bar Nibbi ships today; the other three each answer one question — **what is the project control, and where do conversations sit relative to Builds, Issues and Plans?**
+**Round two is the four bars on the page now: Scope and three variants of its strip.** Round one asked what shape the bar should be and the owner picked Scope — *"I like 02 scope, can you make chat/builds/plan/issues one row. Make me 3 more variants of 02 scope."* Round two changes only the strip; everything else is the shared `scope-shell.mjs`.
+
+Round one's four bars are still here: `?only=_today,scope,peer,spine`.
 
 The ask, in the owner's words: *"chat is at the bottom when it should almost be a different tab on the projects bar like a dropdown."* Read [BRIEF.md](BRIEF.md) for the reasoning, the scorecard and the recommendation; [references.md](references.md) for what T3 Code, OpenCode, Claude Code desktop, Zed, Cursor and Warp do; [CONTRACT.md](CONTRACT.md) for what an option must satisfy.
 
@@ -15,6 +17,17 @@ node design/sidebar-lab/serve.mjs
 
 Open **http://127.0.0.1:4540/design/sidebar-lab/**. Keys `1`–`9` cue a moment on every bar at once; the improvements and the environment toggles are under the bench. If the port is busy: `NIBBI_SIDEBAR_LAB_PORT=4541 node design/sidebar-lab/serve.mjs`.
 
+**Round two — the strip** (on the page by default)
+
+| | Option | The row | The trade |
+|---|---|---|---|
+| 01 | **Scope** | `Chat 4 · Builds 71 · Issues · Plans 56/58` | the number is in the row, the sentence is not |
+| 02 | **Scope · quiet row** | four words, then one line saying what the current tab holds | nothing in the strip ever changes; you lose the glance |
+| 03 | **Scope · icon row** | glyphs; the current tab opens up and says the whole phrase | three unlabelled glyphs |
+| 04 | **Scope · chat is the room** | three record tabs; chat is the body, not a tab | the word "Chat" is gone from the bar |
+
+**Round one — the shape** (`?only=_today,scope,peer,spine`)
+
 | | Option | Pattern | The project control |
 |---|---|---|---|
 | 01 | **Today** | disclosure tree | a row you expand; records first, conversations last |
@@ -24,14 +37,15 @@ Open **http://127.0.0.1:4540/design/sidebar-lab/**. Keys `1`–`9` cue a moment 
 
 ## The nine moments
 
-`1` home · `2` a thread · `3` switching · `4` builds open · `5` project card · `6` busy · `7` twelve projects · `8` collapsed · `9` phone drawer.
+`1` home · `2` a thread · `3` switching · `4` builds open · `5` project card · `6` busy · `7` twelve projects · `8` collapsed · `9` a buried project (ninth of twelve, thirty conversations) · `0` phone drawer.
 
 The improvements are separate from the layouts and can be turned on one at a time: a Chat tab in the workspace, New thread pinned to the top, a branch-and-attention summary line, the progress line moved to the foot, the gear on hover, keyboard shortcuts, drag to resize, row actions on hover, and attention reported as text rather than a dot.
 
 ## Evidence
 
 - [`evidence/matrix.png`](evidence/matrix.png) — every option × every moment at 1180×760 and 390×844. [`matrix-improved.png`](evidence/matrix-improved.png) is the same with every improvement on.
-- `evidence/sheet-<id>.png` — one option across all nine moments at both sizes.
+- `evidence/strip-<id>-home.png` and `strip-<id>-builds.png` — each strip at full size, cropped to the top of the bar. **Start here for round two.**
+- `evidence/sheet-<id>.png` — one option across every moment at both sizes.
 - [`evidence/lab-desktop.png`](evidence/lab-desktop.png), [`lab-phone.png`](evidence/lab-phone.png), [`lab-improvements.png`](evidence/lab-improvements.png), [`lab-glass.png`](evidence/lab-glass.png) — the lab itself.
 - `evidence/state-<id>.png` — all four bars at one moment.
 - [`evidence/browser-results.json`](evidence/browser-results.json) — every gated check, plus the measured rows the scorecard is built from: clicks to a second conversation, clicks to another project's conversation, whether New thread is reachable without scrolling at four and twelve projects, conversations above the fold on a phone, where New thread falls in the focus order, which of twenty pinned app selectors survive, mount time at sixty projects, and the smallest contrast found.

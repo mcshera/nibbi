@@ -18,7 +18,10 @@ export const STATES = [
     build: () => fixture.withActiveThread(fixture.many(), 'battalion', 'home') },
   { id: 'collapsed', key: '8', label: 'Collapsed', note: 'The bar is out of the way. What does it still tell you?',
     build: () => fixture.withActiveThread(fixture.base(), 'battalion', 'home') },
-  { id: 'drawer', key: '9', label: 'Phone drawer', note: 'At 390px the bar is a slide-over with a backdrop.',
+  { id: 'deep', key: '9', label: 'Buried project',
+    note: 'The working project is ninth of twelve and holds thirty conversations. The case a short list hides.',
+    build: () => fixture.deep() },
+  { id: 'drawer', key: '0', label: 'Phone drawer', note: 'At 390px the bar is a slide-over with a backdrop.',
     viewport: { width: 390, height: 844, narrow: true },
     build: () => fixture.withActiveThread(fixture.base(), 'battalion', 'home') },
 ];

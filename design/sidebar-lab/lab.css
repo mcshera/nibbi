@@ -49,6 +49,7 @@ a { color: inherit; }
 .bench-note { color: var(--lab-muted); margin: 8px 0 0; min-height: 14px; letter-spacing: .6px; }
 
 .studies { display: grid; gap: 30px; padding: 26px 0 0; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+@media (min-width: 1900px) { .studies { grid-template-columns: repeat(4, minmax(0, 1fr)); } }   /* the evidence shot: all four bars, or the comparison is not one */
 .study { border: 1px solid var(--lab-line); border-radius: 14px; background: #fbfaf7; overflow: hidden; display: flex; flex-direction: column; }
 .study-head { padding: 14px 16px 10px; display: flex; gap: 10px; align-items: baseline; }
 .study-number { color: var(--lab-muted); }

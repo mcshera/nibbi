@@ -72,6 +72,38 @@ OpenCode's retired two-pane, adapted. The spine holds one tile per project (the 
 **Costs.** A single letter is a weak name: `shipless` and `shipless-docs` collide, and only the tooltip separates them. The 200px column drops the section detail line to a tooltip. The peek is a pointer affordance — keyboard gets it on focus, touch does not get it at all.
 **Promotion.** Two pinned selectors go: there is no separate collapse control (one toggle does both jobs) and the progress line only exists with the foot improvement on (18 of 20).
 
+## 5b. Round two — Scope, and the strip in one row
+
+> "I like 02 scope, can you make chat/builds/plan/issues one row. Make me 3 more variants of 02 scope."
+
+Round one asked which shape the bar should be, and the answer was Scope. Round two changes exactly one thing: **the strip**. Everything else — the switcher, the full-width dropdown, the body, the foot, the cards — is now one shared shell (`scope-shell.mjs`), so the four variants differ only in the row and can be compared on it alone.
+
+The row was two rows because four tabs across 256px cannot carry `71 need attention`. Each variant pays for the single row differently.
+
+| | The row | What it gives up | What it buys |
+|---|---|---|---|
+| **Scope** | `Chat 4 · Builds 71 · Issues · Plans 56/58` | the sentence — only the number is in the row | you can see, without moving, that Builds has 71 |
+| **Scope · quiet row** | `Chat · Builds · Issues · Plans`, then one line: `71 need attention · 3 running` | the glance — you learn what is waiting only for the tab you are on | the strip never changes, and the sentence is whole |
+| **Scope · icon row** | a glyph each; the current tab opens up and says its name and phrase | three tabs are unlabelled glyphs | the tab being read carries the full phrase, and the row changes width, not wording |
+| **Scope · chat is the room** | `Builds 71 need att… · Issues No issues · Plans 56/58 tasks` — three tabs, no Chat | the word "Chat" entirely | three tabs fit their phrases; the conversations are the body by default, not a tab you select |
+
+The fourth argues with the ask on purpose. Chat is not somewhere you go, it is where you already are, so it is the body and the record tabs are a filter you turn on and off. Choosing the tab you are already on returns you to the conversations. That costs a `lab:backToChat` action the app does not have yet.
+
+**Measured** — the variants differ only in the strip, so most rows are identical by construction, and that is the point: choose on the row, not on the numbers.
+
+| | Scope | Quiet row | Icon row | Chat is the room |
+|---|---|---|---|---|
+| Clicks to a second conversation | 1 | 1 | 1 | 1 |
+| Clicks to another project's last conversation | 3 | 3 | 3 | 3 |
+| Tab presses to New thread | 10 | 10 | 10 | **9** |
+| Conversations above the fold, buried project at 390 | 13 | 13 | 13 | 13 |
+| Pinned app selectors kept | 19/20 | 19/20 | 18/20 | 19/20 |
+| Actions the app does not have | none | none | none | `lab:backToChat` |
+
+The icon row keeps one fewer selector because a glyph carries no badge until it is the current tab, so `.project-section-badge` is absent from three of its four tabs.
+
+**One finding from round one, answered.** The independent review measured 326px of empty bar below Scope's content at 1180×820 — the dead-zone anti-pattern `references.md` names. It is not inherent to the shape: **turn on the attention rollup and the progress-at-the-foot improvements and the gap closes to 29px**, because those two lines are what the bar has to say when the conversation list is short. Whichever strip wins, ship it with those two on.
+
 ## 6. Side by side
 
 Author's reading, 1 = weak, 5 = strong. These are one person's judgment of the sheets, not research.
