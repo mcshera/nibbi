@@ -1,21 +1,6 @@
-/* Wake listening lives beside Send. The label stays visible in every state. */
-.pill textarea { min-width: 0; }
-.pill .send { align-self: flex-end; }
-.pill .ico.mic,
-.pill.mic-on .ico.mic,
-.pill.listening .ico.mic {
-  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
-  align-self: flex-end; flex: none; width: auto; min-width: 128px; height: 44px;
-  margin: 4px 2px 4px 0; padding: 0 10px; border: 0; border-radius: 22px;
-  background: transparent; color: var(--ink-2); opacity: 1; transform: none;
-  font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1;
-  white-space: nowrap; transition: background var(--t1), color var(--t1);
-}
-.pill .ico.mic:hover { background: rgba(21,20,19,.055); color: var(--ink); }
-.pill .ico.mic:active { background: rgba(21,20,19,.09); }
-.pill .ico.mic:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* Hey Nibbi is a row in the dock panel: mic glyph, label, a small switch. While it is on, the bar shows the listen strip — that strip is the whole "mic is on" signal. */
 .mic-switch {
-  display: block; position: relative; flex: none; width: 30px; height: 18px;
+  display: block; position: relative; flex: none; width: 30px; height: 18px; margin-left: auto;
   border: 1px solid #aaa49a; border-radius: 10px; background: #d9d4ca;
   transition: background var(--t1), border-color var(--t1);
 }
@@ -24,21 +9,7 @@
   border-radius: 50%; background: var(--ink-3);
   transition: transform var(--t2) var(--ease), background var(--t1);
 }
-.mic[aria-pressed="true"] .mic-switch { background: var(--ink); border-color: var(--ink); }
-.mic[aria-pressed="true"] .mic-thumb { transform: translateX(12px); background: var(--paper); }
-.pill.mic-on { padding-bottom: 32px; }
-.pill.listening textarea { opacity: 1; }
-.pill .listen { top: auto; bottom: 7px; left: 20px; right: 20px; transform: none; justify-content: center; gap: 8px; font-size: 12px; line-height: 18px; color: #625e57; }
-.pill .listen .bars { height: 18px; flex: none; }
-.pill .listen .bars i { width: 2px; height: 5px; }
+[aria-pressed="true"] > .mic-switch { background: var(--ink); border-color: var(--ink); }
+[aria-pressed="true"] > .mic-switch .mic-thumb { transform: translateX(12px); background: var(--paper); }
+.dock-menu .ico.mic[aria-pressed="true"] { color: var(--ink); }
 body[data-mic="paused"] .listen .bars, body[data-mic="starting"] .listen .bars, body[data-mic="transcribing"] .listen .bars { opacity: .4; }
-@media (max-width: 600px) {
-  .pill { flex-wrap: wrap; border-radius: 26px; padding: 10px; gap: 6px; }
-  .pill textarea { flex: 1 0 100%; width: 100%; padding: 6px 8px 2px; }
-  .pill .attach { width: 100%; max-width: 100%; overflow-x: auto; padding: 5px 8px; }
-  .pill .ico.mic,
-  .pill.mic-on .ico.mic,
-  .pill.listening .ico.mic { margin: 0 2px 0 auto; }
-  .pill.mic-on { padding-bottom: 32px; }
-  .pill .listen { font-size: 11px; bottom: 6px; left: 16px; right: 16px; }
-}

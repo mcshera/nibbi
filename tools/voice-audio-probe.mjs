@@ -72,7 +72,9 @@ try {
   const phase = expected => page.waitForFunction(expected => window.nibbiApp?.voice?.snapshot().phase === expected, expected, { timeout: 70000 });
   await page.goto(fixture.base + '/?nosw=1');
   await page.waitForFunction(() => window.nibbiApp?.voice && document.body.dataset.link === 'live');
-  await page.locator('#mic').click(); await phase('armed');
+  // Hey Nibbi is a row inside the Ink dock's panel: open the "+" before pressing it (same route as voice-verify.mjs and project-workflow-verify.mjs)
+  const openDock = async () => { if (await page.locator('#dock').getAttribute('aria-expanded') !== 'true') { await page.locator('#dock').click(); await page.waitForFunction(() => document.querySelector('#dock').getAttribute('aria-expanded') === 'true'); } };
+  await openDock(); await page.locator('#mic').click(); await phase('armed');
   result.ambientStartedAt = Date.now();
   await page.evaluate(() => window.audioProbe.inject('/audio-probe-ambient.wav'));
   await page.waitForResponse(r => r.url().endsWith('/api/transcribe'), { timeout: 70000 });
@@ -96,7 +98,7 @@ try {
   result.followupToSendMs = result.sends[0].at - result.followupStartedAt;
   result.greetingSource = 'Cached actual local Kokoro OGG, synthesis latency excluded; original standalone probe ~5.35s.';
   result.events = await page.evaluate(() => window.audioProbe.events);
-  await page.locator('#mic').click(); await phase('off');
+  await openDock(); await page.locator('#mic').click(); await phase('off');
   result.tracksEnded = await page.evaluate(() => window.audioProbe.destination.stream.getTracks().every(t => t.readyState === 'ended'));
   assert.ok(result.tracksEnded); result.passed = true;
   await page.screenshot({ path: out + 'audio-probe-complete.png' });

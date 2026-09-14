@@ -30,6 +30,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 /* ------------------------------------------------------------------ dom */
 const body = document.body, feed = $('#feed'), pill = $('#pill'), ask = $('#ask'), sendBtn = $('#send'), micBtn = $('#mic'), chipsEl = $('#chips'), attachEl = $('#attach'), listenEl = $('#listen');
+const dockBtn = $('#dock'), dockMenu = $('#dock-menu'), attachImageBtn = $('#attach-image'), attachFile = $('#attach-file');
 // The Mac shell overlays its window buttons; ordinary browser layouts need no inset.
 body.classList.toggle('native-mac', (!!window.__TAURI__ || Q.get('app') === '1') && /Mac/.test(navigator.platform));
 const fxCv = $('#fx');
@@ -65,19 +66,75 @@ let visibleProjectIds = [];
 const projectSummaries = createProjectSummaryStore({ onChange: (project, summaries) => { projectWorkspace.setSummaries?.(project, summaries); syncMargins(); } });
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
 const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: closeProjectView, onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
-const composeToggle = document.createElement('button'); composeToggle.type = 'button'; composeToggle.id = 'project-compose-toggle'; composeToggle.className = 'project-compose-toggle'; composeToggle.hidden = true; composeToggle.setAttribute('aria-controls', 'ask attach'); pill.prepend(composeToggle);
+const composeToggle = document.createElement('button'); composeToggle.type = 'button'; composeToggle.id = 'project-compose-toggle'; composeToggle.className = 'project-compose-toggle'; composeToggle.hidden = true; composeToggle.setAttribute('aria-controls', 'ask attach'); ask.before(composeToggle);
 composeToggle.onclick = () => { S.projectComposerExpanded = body.classList.contains('project-compose-compact'); layout(false); if (S.projectComposerExpanded) ask.focus(); };
 /* "Plan first": the next message becomes a reviewable plan (numbered steps → approve → builds) instead of a chat turn */
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
-planBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="4" cy="4.5" r="1.4" fill="currentColor"/><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="4" cy="13.5" r="1.4" fill="currentColor"/><path d="M8 4.5h6M8 9h6M8 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
-pill.insertBefore(planBtn, micBtn);
-function placeholderText() { return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? 'Describe the goal — nibbi proposes steps to review before any build starts…' : 'Ask nibbi to build something...'; }
+planBtn.innerHTML = '<svg class="mi" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="4" cy="4.5" r="1.4" fill="currentColor"/><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="4" cy="13.5" r="1.4" fill="currentColor"/><path d="M8 4.5h6M8 9h6M8 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="mi-label">Plan first</span><span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>';
+micBtn.before(planBtn);   // the menu lists plan first, then Hey Nibbi, then attach
+/* the hints stay one line on desktop; on a phone the field is much narrower — measured 242px of text at 390 and 172px at 320 — so the
+   short variants keep the bar one line at rest at every phone width. The breakpoint is the CSS one (640px), not 360: at 390 the long
+   plan-first hint wrapped and took the resting bar from 60px to 70px. "Goal first — steps…" renders 147px, inside the 172px the field has at 320. */
+const narrowField = matchMedia('(max-width: 640px)');
+function placeholderText() {
+  const n = narrowField.matches;
+  return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? (n ? 'Goal first — steps…' : 'Describe the goal — nibbi proposes steps first…') : (n ? 'Ask nibbi to build…' : 'Ask nibbi to build something...');
+}
+narrowField.addEventListener('change', () => { ask.placeholder = placeholderText(); autosize(); });
 function setPlanFirst(on) {
   S.planFirst = !!on; planBtn.setAttribute('aria-pressed', String(S.planFirst)); pill.classList.toggle('plan-first', S.planFirst);
   planBtn.title = S.planFirst ? 'Plan first is on — the next message becomes a reviewable plan (click to turn off)' : 'Plan first — propose numbered steps to review before any build starts';
   ask.placeholder = placeholderText();
+  /* the dot on the "+" is a pseudo-element and #dock's title only reaches a pointer, so the field itself carries the state for assistive tech:
+     a static visually-hidden description (#plan-first-note), added while plan first is armed and removed when it is off. Description, not name
+     (aria-label="message nibbi" is untouched) and not a live region — a screen reader reads it when focus arrives in the field, not on every toggle. */
+  if (S.planFirst) ask.setAttribute('aria-describedby', 'plan-first-note'); else ask.removeAttribute('aria-describedby');
+  syncDockTitle();
+  autosize();   // the placeholder changed length: re-fit the field's height (a long hint may wrap) and re-place the feed above the pill
 }
 planBtn.onclick = () => { setPlanFirst(!S.planFirst); ask.focus(); toast(S.planFirst ? 'plan first — the next message becomes a reviewable plan' : 'plan first off', 2200); };
+/* the ink dock: one "+" opens a small panel above it holding the mode toggles and attach. A mode that is on takes no room in the bar:
+   Hey Nibbi speaks through the #listen strip, plan first through the placeholder and one CSS dot on the "+" (.pill.plan-first).
+   The "+" keeps its accessible name ("Message options") — only its hover title names what is on; the panel rows carry aria-pressed. */
+function syncDockTitle() {
+  const on = [S.planFirst ? 'plan first' : '', S.micEnabled ? 'Hey Nibbi' : ''].filter(Boolean);
+  dockBtn.title = on.length ? 'Options — ' + on.join(' and ') + (on.length > 1 ? ' are on' : ' is on') : 'Options — plan first, Hey Nibbi, attach image';
+}
+const dockItems = () => [...dockMenu.querySelectorAll('button:not([disabled])')].filter(b => !b.hidden);
+/* a native non-modal <dialog>: the app's other panels are recognised by `dialog[open]` (the sidebar yields Escape to it, global shortcuts stand down) */
+function openDock() {
+  if (dockMenu.open) return;
+  dockMenu.show(); dockBtn.setAttribute('aria-expanded', 'true'); pill.classList.add('dock-open');
+  dockItems()[0]?.focus();
+}
+function closeDock(refocus) {
+  if (!dockMenu.open) return;
+  dockMenu.close(); dockBtn.setAttribute('aria-expanded', 'false'); pill.classList.remove('dock-open');
+  if (refocus) dockBtn.focus();
+}
+dockBtn.addEventListener('click', () => { if (dockMenu.open) closeDock(true); else openDock(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dockMenu.open && !e.defaultPrevented) { e.preventDefault(); e.stopImmediatePropagation(); closeDock(true); } }, true);   // Esc closes the panel wherever focus sits (the "+", or body after a WebKit mousedown blur); the sidebar's own Esc listener must not also see it once the panel is gone
+dockMenu.addEventListener('cancel', (e) => { e.preventDefault(); closeDock(true); });
+/* WebKit: buttons are not mouse-focusable and a mousedown on one blurs the active element, so a press on a row (or on the "+") would fire focusout → close before the click lands.
+   keep focus where it is during the press (mousedown preventDefault) and, belt and braces, let focusout stand down while a press inside the dock is in flight; the click decides */
+let dockPress = 0;
+function dockPressed(e) { clearTimeout(dockPress); dockPress = setTimeout(() => { dockPress = 0; }, 700); if (e.type === 'mousedown') e.preventDefault(); }
+for (const el of [dockBtn, dockMenu]) { el.addEventListener('pointerdown', dockPressed); el.addEventListener('mousedown', dockPressed); }
+document.addEventListener('click', () => { clearTimeout(dockPress); dockPress = 0; });   // bubble phase: after the row or the "+" handled the click
+dockMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDock(true); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+    const items = dockItems(), i = items.indexOf(document.activeElement); if (!items.length) return; e.preventDefault();
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next].focus();
+  }
+});
+/* choosing an item closes the panel: a toggle keeps its state on its own row, attach hands over to the file chooser */
+dockMenu.addEventListener('click', (e) => { const item = e.target instanceof Element && e.target.closest('button'); if (!item) return; closeDock(false); if (item !== attachImageBtn) (ask.getClientRects().length ? ask : dockBtn).focus(); });
+dockMenu.addEventListener('focusout', (e) => { if (dockPress) return; const to = e.relatedTarget; if (to instanceof Node && (dockMenu.contains(to) || to === dockBtn)) return; closeDock(false); });
+document.addEventListener('pointerdown', (e) => { if (!dockMenu.open || !(e.target instanceof Node)) return; if (dockMenu.contains(e.target) || dockBtn.contains(e.target)) return; closeDock(false); }, true);
+attachImageBtn.addEventListener('click', () => { attachFile.value = ''; attachFile.click(); });
+attachFile.addEventListener('change', () => { for (const f of attachFile.files || []) addImage(f); attachFile.value = ''; ask.focus(); });
 setPlanFirst(false);
 function watchProjectSummaries() { projectSummaries.watch([...new Set([...visibleProjectIds, ...(S.projectView ? [S.projectView.project] : [])])]); }
 function syncProjectComposer() {
@@ -192,7 +249,7 @@ function newTurn(text, images, at) {
   if (images && images.length) { const w = document.createElement('div'); w.className = 'imgs'; for (const im of images) { const i = document.createElement('img'); i.src = 'data:' + im.media_type + ';base64,' + im.data; w.appendChild(i); } you.appendChild(w); }
   you.appendChild(document.createTextNode(text || ''));
   const nib = document.createElement('div'); nib.className = 'nib';
-  const ava = document.createElement('canvas'); ava.className = 'ava'; ava.setAttribute('aria-hidden', 'true'); nibbi.addMirror(ava);
+  const ava = null;   // no small nibbi beside the bubble: the bubble's corner dot is the signature
   const nibBody = document.createElement('div'); nibBody.className = 'nibbody';
   const steps = document.createElement('div'); steps.className = 'steps'; steps.hidden = true;
   const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="l"></span>'; fold.onclick = () => steps.classList.remove('folded'); steps.appendChild(fold);
@@ -204,7 +261,7 @@ function newTurn(text, images, at) {
   const provenance = document.createElement('div'); provenance.className = 'meta local-provenance'; provenance.style.opacity = '1'; provenance.hidden = true; provenance.setAttribute('aria-live', 'polite');
   bubble.append(provenance, steps, said);
   nibBody.append(bubble, meta);
-  nib.append(ava, nibBody);
+  nib.append(nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
   feed.appendChild(turn); S.stick = true; scrollFeed(true);
   const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null };
@@ -1664,7 +1721,7 @@ function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer 
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
-function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; layout(false); }
+function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
 ask.addEventListener('focus', () => { if (S.projectView) S.projectComposerExpanded = true; layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
@@ -1717,7 +1774,8 @@ function addImage(file) {
 }
 function renderAttach() {
   attachEl.hidden = !pendingImages.length; attachEl.replaceChildren();
-  pendingImages.forEach((im, i) => { const b = document.createElement('button'); b.type = 'button'; const img = document.createElement('img'); img.src = 'data:' + im.media_type + ';base64,' + im.data; b.appendChild(img); b.onclick = () => { pendingImages.splice(i, 1); renderAttach(); }; attachEl.appendChild(b); });
+  pendingImages.forEach((im, i) => { const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', 'Remove attached image ' + (i + 1)); const img = document.createElement('img'); img.src = 'data:' + im.media_type + ';base64,' + im.data; b.appendChild(img); b.onclick = () => { pendingImages.splice(i, 1); renderAttach(); }; attachEl.appendChild(b); });
+  layout(false);   // the strip changes the pill's height (its own row at ≤640px): suggestion chips, feed and fixers re-place above it
 }
 function clearAttach() { pendingImages = []; renderAttach(); }
 document.addEventListener('paste', (e) => { for (const it of e.clipboardData?.items || []) if (it.kind === 'file') addImage(it.getAsFile()); });
@@ -1791,6 +1849,7 @@ function renderVoice() {
   listenEl.hidden = !listening;
   const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: "What's up, Matty?", listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
   $('.heard', listenEl).textContent = labels[phase] || '';
+  syncDockTitle();   // the listen strip already carries the live phase; the “+” title only has to name the mode
   S.voiceFinishing = phase === 'listening' && S.micCapturing;
   syncSendButton();   // one owner for the send button's label: busy → steer/stop, idle → finish voice/send
   if (phase === 'listening') { nibbi.setMood('listening'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.3, r.top); }
