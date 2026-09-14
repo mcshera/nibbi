@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>sidebar lab · contact sheet</title>
+<link rel="stylesheet" href="/public/styles.css">
+<link rel="stylesheet" href="/public/margins.css">
+<link rel="stylesheet" href="/public/project-workspace.css">
+<link rel="stylesheet" href="./lab.css">
+<style>
+  body { padding: 28px 30px 40px; background: #f3f0ea; }
+  .sheet-head { display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--lab-line); padding-bottom: 12px; margin-bottom: 18px; }
+  .sheet-head h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -.4px; }
+  .sheet-head p { margin: 0; color: var(--lab-muted); font-size: 12px; }
+  .grid { display: grid; gap: 10px; align-items: start; }
+  .col-head, .row-head { font-family: var(--mono); font-size: 10px; letter-spacing: 1.1px; color: var(--lab-muted); }
+  .col-head { padding-bottom: 2px; border-bottom: 1px solid var(--lab-line); }
+  .row-head { display: flex; flex-direction: column; gap: 3px; padding-top: 4px; }
+  .row-head strong { font-family: Geist, sans-serif; font-size: 13px; letter-spacing: 0; color: var(--lab-ink); }
+  .cell { position: relative; overflow: hidden; border: 1px solid var(--lab-line); border-radius: 6px; background: #e6e2da; }
+  .cell.is-same { opacity: .45; }
+  .cell-note { position: absolute; left: 4px; bottom: 3px; font-family: var(--mono); font-size: 8px; color: var(--ink-4); background: rgba(245,242,236,.75); padding: 1px 3px; border-radius: 3px; }
+  .lab-frame-label { display: none; }
+</style>
+</head><body>
+<div class="sheet-head"><h1>Nibbi · sidebar lab</h1><p id="caption"></p></div>
+<div class="grid" id="grid"></div>
+<script type="module">
+import { createFrame, stylesReady } from './chrome.mjs';
+import { STATES, buildModel, defaultFlags, FLAG_IDS } from './states.mjs';
+
+const q = new URLSearchParams(location.search);
+const ids = (q.get('ids') || '_today').split(',').filter(Boolean);
+const viewports = (q.get('viewports') || '1180x760,390x844').split(',').map(s => {
+  const [width, height] = s.split('x').map(Number);
+  return { id: s, width, height, narrow: width <= 899 };
+});
+const states = q.get('states') && q.get('states') !== 'all' ? q.get('states').split(',') : STATES.map(s => s.id);
+// One column width; each size is scaled to fit it, capped so a phone row does not tower over a desktop one.
+const COLUMN = Number(q.get('column') || 360), MAX_H = Number(q.get('maxHeight') || 460);
+const scaleFor = vp => Math.min(COLUMN / vp.width, MAX_H / vp.height);
+let flags = defaultFlags(false);
+if (q.get('flags') === 'all') flags = defaultFlags(true);
+else if (q.get('flags')) for (const f of q.get('flags').split(',')) if (f in flags) flags[f] = true;
+const reduced = q.get('reduced') === '1', glass = q.get('glass') === '1', nativeMac = q.get('nativeMac') === '1';
+document.documentElement.classList.toggle('reduced', reduced);
+
+const grid = document.getElementById('grid');
+const on = FLAG_IDS.filter(f => flags[f]);
+document.getElementById('caption').textContent =
+  `${ids.join(' · ')} — ${states.length} moments × ${viewports.map(v => v.id).join(' and ')}${on.length ? ` · improvements on: ${on.join(', ')}` : ' · improvements off'}${reduced ? ' · reduced motion' : ''}${glass ? ' · glass' : ''}`;
+grid.style.gridTemplateColumns = `120px repeat(${states.length}, ${COLUMN}px)`;
+
+grid.append(document.createElement('div'));
+for (const id of states) {
+  const head = document.createElement('div'); head.className = 'col-head';
+  head.textContent = (STATES.find(s => s.id === id)?.label || id).toUpperCase();
+  grid.append(head);
+}
+const modules = await Promise.all(ids.map(async id => { try { return { id, module: await import(`./options/${id}.mjs`) }; } catch (error) { return { id, error }; } }));
+for (const entry of modules) {
+  for (const vp of viewports) {
+    const head = document.createElement('div'); head.className = 'row-head';
+    const name = document.createElement('strong'); name.textContent = entry.module?.meta?.name || entry.id;
+    head.append(name, Object.assign(document.createElement('span'), { textContent: vp.id }));
+    grid.append(head);
+    for (const stateId of states) {
+      const cell = document.createElement('div'); cell.className = 'cell';
+      const state = STATES.find(s => s.id === stateId);
+      // The phone drawer at a desktop size is the same picture as home; say so instead of repeating it.
+      const same = stateId === 'drawer' && !vp.narrow;
+      const useViewport = { ...vp };
+      const cueState = same ? 'home' : stateId;
+      const scale = scaleFor(vp);
+      cell.style.width = Math.round(vp.width * scale) + 'px';
+      cell.style.height = Math.round(vp.height * scale) + 'px';
+      grid.append(cell);
+      if (entry.error) { cell.textContent = 'failed'; continue; }
+      const scaler = document.createElement('div'); scaler.className = 'frame-scale';
+      scaler.style.transform = `scale(${scale})`;
+      scaler.style.width = Math.round(vp.width * scale) + 'px';
+      cell.append(scaler);
+      const model = buildModel(cueState);
+      const frame = createFrame({ viewport: useViewport, label: '', onAction: () => {} });
+      scaler.append(frame.el);
+      try {
+        const inst = entry.module.mount(frame.host, { model, state: cueState, viewport: useViewport, reduced, flags, onAction: () => {} });
+        frame.setContext({ model, state: cueState, flags, glass, nativeMac, viewport: useViewport });
+        inst.setViewport(useViewport); inst.setModel(model); inst.cue(cueState);
+        frame.sync();
+      } catch (error) { cell.append(Object.assign(document.createElement('div'), { className: 'cell-note', textContent: 'threw: ' + error.message })); }
+      if (same) { cell.classList.add('is-same'); cell.append(Object.assign(document.createElement('div'), { className: 'cell-note', textContent: '= home at this size' })); }
+    }
+  }
+}
+await stylesReady();
+await new Promise(r => setTimeout(r, 400));
+window.sheetReady = true;
+</script></body></html>

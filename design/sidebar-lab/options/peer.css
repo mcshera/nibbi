@@ -1,0 +1,73 @@
+/* peer is a minimal delta, so this file is mostly the same three un-scopings _today needs — fixed
+   positioning, body-scoped state classes, width media queries — plus the handful of rules the
+   promoted Chat row and its disclosure actually require. margins.css still does the styling. */
+.sidebar-lab-peer { position: absolute; inset: 0; }
+.sidebar-lab-peer .workspace-sidebar { position: absolute; inset: 0 auto 0 0; z-index: 3; }
+.sidebar-lab-peer.sidebar-open .workspace-sidebar { transform: none; visibility: visible; }
+.sidebar-lab-peer .sidebar-toggle { position: absolute; left: 16px; top: 16px; z-index: 4; }
+.lab-native-mac .sidebar-lab-peer .sidebar-head { padding-top: 48px; }
+.lab-native-mac .sidebar-lab-peer .sidebar-toggle { top: 48px; }
+.sidebar-lab-peer .sidebar-backdrop { position: absolute; inset: 0; z-index: 2; }
+/* margins.css:110-119, re-scoped: a frame cannot answer a page-width media query. */
+.sidebar-lab-peer.is-narrow .workspace-sidebar { width: min(300px, 100% - 40px); box-shadow: 8px 0 32px -20px rgba(21,20,19,.3); }
+.sidebar-lab-peer.is-narrow .lab-card { left: 12px; right: 12px; width: auto; }
+.sidebar-lab-peer.is-narrow .margin-card .margin-pill, .sidebar-lab-peer.is-narrow .margin-card .margin-mode { min-height: 36px; }
+.sidebar-lab-peer.is-narrow .margin-pref { min-height: 44px; }
+.sidebar-lab-peer.is-narrow .project-options { width: 40px; height: 44px; }
+/* margins.css has no narrow bump for these two, so on a phone they ship at 40px — under the 44px
+   rule. The same re-scoping that fixes the media query fixes the target. */
+.sidebar-lab-peer.is-narrow .sidebar-toggle, .sidebar-lab-peer.is-narrow .sidebar-collapse { width: 44px; height: 44px; }
+.sidebar-lab-peer .lab-card { left: calc(var(--sidebar-width) + 12px); }
+.sidebar-lab-peer .sidebar-progress-foot, .sidebar-lab-peer .sidebar-rollup { margin: 0 0 10px; padding: 0 12px; font-size: 11.5px; }
+
+/* The one token this design changes. margins.css gives quiet type --ink-3 (#6f6b65) = 4.33:1 on the
+   bar's #ece8e0, under 4.5 at the 10 and 11px this design promotes. #5f5b55 is 5.52:1 and is still
+   plainly quieter than --ink-2. Set on the token so every quiet element inherits the fix at once. */
+.sidebar-lab-peer { --ink-3: #5f5b55; }
+
+/* New project rides the "Projects" heading row, so the list below it is only projects. */
+.sidebar-lab-peer .sidebar-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 22px 0 8px; }
+.sidebar-lab-peer .sidebar-title-row .sidebar-section-title { margin: 0 0 0 12px; }
+.sidebar-lab-peer .sidebar-new-project { display: grid; place-items: center; flex: none; width: 30px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--ink-3) !important; }
+.sidebar-lab-peer .sidebar-new-project:hover { background: rgba(21,20,19,.07); color: var(--ink) !important; }
+.sidebar-lab-peer .sidebar-new-project svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.sidebar-lab-peer.is-narrow .sidebar-new-project { width: 40px; height: 44px; min-height: 44px; }
+.sidebar-lab-peer.is-narrow .sidebar-title-row { margin-top: 14px; }
+
+/* Chat: a section row by every visual measure — same glyph column, same badge slot — plus a caret,
+   because it is the only one of the four that opens in place instead of filling the workspace. */
+.sidebar-lab-peer .project-chat-group { display: flex; flex-direction: column; }
+.sidebar-lab-peer .project-chat-caret svg { transform: rotate(-90deg); transition: transform 160ms var(--ease); }
+.sidebar-lab-peer .project-chat[aria-expanded="true"] .project-chat-caret svg { transform: none; }
+.sidebar-lab-peer .project-chat-count { font-variant-numeric: tabular-nums; }
+/* The conversations hang off the Chat row on a hairline, one step in, so the four rows of a project
+   still read as four rows. */
+.sidebar-lab-peer .project-chat-body { display: flex; flex-direction: column; margin: 1px 0 5px 9px; padding-left: 11px; border-left: 1px solid rgba(21,20,19,.13); }
+.sidebar-lab-peer .project-chat-body .project-section { padding-inline: 8px 6px; }
+/* One line per conversation: the list is for scanning, and the full name rides the title attribute. */
+.sidebar-lab-peer .project-thread .project-section-copy { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* threadActions: the time fades out and rename/archive fade in, over the same slot (t3code V2). */
+.sidebar-lab-peer .project-thread-row { position: relative; display: flex; }
+.sidebar-lab-peer .project-thread-row .project-thread { flex: 1; min-width: 0; }
+.sidebar-lab-peer .project-thread-when { transition: opacity 120ms var(--ease); }
+.sidebar-lab-peer .project-thread-actions { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; gap: 2px; opacity: 0; pointer-events: none; transition: opacity 120ms var(--ease); }
+.sidebar-lab-peer .project-thread-row:hover .project-thread-actions,
+.sidebar-lab-peer .project-thread-row:focus-within .project-thread-actions { opacity: 1; pointer-events: auto; }
+.sidebar-lab-peer .project-thread-row:hover .project-thread-when,
+.sidebar-lab-peer .project-thread-row:focus-within .project-thread-when { opacity: 0; }
+.sidebar-lab-peer .project-thread-action { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: none; color: var(--ink-3) !important; }
+.sidebar-lab-peer .project-thread-action:hover { background: rgba(21,20,19,.09); color: var(--ink) !important; }
+.sidebar-lab-peer .project-thread-action svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* Touch has no hover, so the actions stay out and the time gives them the room. */
+.sidebar-lab-peer.is-narrow.is-thread-actions .project-thread-actions { opacity: 1; pointer-events: auto; }
+.sidebar-lab-peer.is-narrow.is-thread-actions .project-thread-when { display: none; }
+.sidebar-lab-peer.is-narrow .project-thread-action { width: 44px; height: 44px; }
+
+/* Improvement 5, as on the baseline. */
+.sidebar-lab-peer.is-hover-gear .project-options { opacity: 0; transition: opacity 120ms var(--ease); }
+.sidebar-lab-peer.is-hover-gear .project-heading-row:hover .project-options,
+.sidebar-lab-peer.is-hover-gear .project-options:focus-visible,
+.sidebar-lab-peer.is-hover-gear .project-options[aria-expanded="true"] { opacity: 1; }
+
+.sidebar-lab-peer.is-reduced, .sidebar-lab-peer.is-reduced * { transition: none !important; animation: none !important; }

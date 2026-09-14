@@ -1,0 +1,154 @@
+/* The Scope shell, shared by every Scope variant: the switcher, the full-width dropdown, the body,
+   the foot and the cards. Only the strip differs between variants, and each brings its own.
+   Quiet type is #5f5b55, not the app's --ink-3 (#6f6b65): on this paper that is 4.33:1, under the
+   4.5:1 floor at these sizes. */
+.scope-root {
+  --bar: 256px;
+  --quiet: #5f5b55;
+  --edge: rgba(21, 20, 19, .09);
+  --wash: rgba(21, 20, 19, .045);
+  --wash-firm: rgba(21, 20, 19, .075);
+  position: absolute; inset: 0;
+  font: 12.5px/1.5 Geist, system-ui, sans-serif; color: var(--ink);
+}
+.scope-root button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.scope-root button:disabled { opacity: .42; cursor: default; }
+.scope-root :is(button, input):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.scope-root svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* --- the shell ------------------------------------------------------------------------------- */
+.scope-root .scope-bar {
+  position: absolute; inset: 0 auto 0 0; z-index: 3; width: var(--bar);
+  display: flex; flex-direction: column; min-height: 0;
+  background: #ece8e0; border-right: 1px solid var(--edge);
+  transform: translateX(-100%); visibility: hidden;
+  transition: transform 220ms var(--ease), visibility 220ms;
+}
+.scope-root.is-open .scope-bar { transform: none; visibility: visible; }
+.scope-root.is-reduced .scope-bar { transition: none; }
+.scope-root.is-narrow .scope-bar { width: min(300px, 100% - 40px); box-shadow: 8px 0 32px -20px rgba(21, 20, 19, .3); }
+.scope-root .scope-backdrop { position: absolute; inset: 0; z-index: 2; background: rgba(21, 20, 19, .16); }
+.scope-root .scope-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 16px 12px 10px 24px; }
+.lab-native-mac .scope-root .scope-head { padding-top: 48px; }
+.scope-root .scope-brand { font-size: 22px; font-weight: 650; letter-spacing: -.035em; }
+.scope-root .scope-icon-btn { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; color: var(--ink-2); }
+.scope-root.is-narrow .scope-icon-btn { width: 44px; height: 44px; }
+.scope-root .scope-icon-btn:hover { background: rgba(21, 20, 19, .065); }
+.scope-root .scope-toggle { position: absolute; left: 16px; top: 16px; z-index: 4; background: rgba(245, 242, 236, .94); }
+.lab-native-mac .scope-root .scope-toggle { top: 48px; }
+.scope-root .scope-icon-btn svg { width: 20px; height: 20px; }
+
+/* --- the switcher, and a dropdown the width of the bar ---------------------------------------- */
+.scope-root .scope-switcher { position: relative; flex: none; padding: 0 12px 10px; }
+.scope-root .scope-trigger {
+  width: 100%; min-height: 52px; display: flex; align-items: center; gap: 10px;
+  padding: 8px 8px 8px 10px; border-radius: 10px; text-align: left;
+  background: rgba(255, 255, 255, .42); border: 1px solid var(--edge);
+}
+.scope-root .scope-trigger:hover { background: rgba(255, 255, 255, .72); }
+.scope-root .scope-trigger[aria-expanded="true"] { background: #faf8f4; border-color: rgba(21, 20, 19, .2); }
+.scope-root .scope-trigger-glyph { display: grid; place-items: center; color: var(--ink-2); }
+.scope-root .scope-trigger-labels { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.scope-root .scope-trigger-name { font-size: 14px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scope-root .scope-trigger-summary { font-size: 11.5px; color: var(--quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scope-root .scope-trigger-caret { display: grid; place-items: center; color: var(--quiet); }
+.scope-root .scope-trigger-caret svg { width: 14px; height: 14px; }
+.scope-root .scope-trigger[aria-expanded="true"] .scope-trigger-caret svg { transform: rotate(180deg); }
+
+/* The popup answers to the bar's width, not the caret's — that is what makes it read as a dropdown. */
+.scope-root .scope-menu {
+  position: absolute; left: 12px; right: 12px; top: calc(100% - 4px); z-index: 6;
+  display: flex; flex-direction: column; max-height: min(420px, 60vh); overflow: hidden;
+  background: #faf8f4; border: 1px solid rgba(21, 20, 19, .14); border-radius: 12px;
+  box-shadow: 0 16px 36px -20px rgba(21, 20, 19, .34), 0 3px 8px -5px rgba(21, 20, 19, .16);
+}
+.scope-root .scope-search { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--edge); color: var(--quiet); }
+.scope-root .scope-search svg { width: 15px; height: 15px; }
+.scope-root .scope-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; outline: 0; }
+.scope-root .scope-search input::placeholder { color: var(--quiet); }
+.scope-root .scope-menu-list { flex: 1; min-height: 0; overflow-y: auto; padding: 5px; scrollbar-width: thin; scrollbar-color: #bcb7af transparent; }
+.scope-root .scope-option { display: flex; align-items: center; border-radius: 8px; }
+.scope-root .scope-option:hover { background: var(--wash); }
+.scope-root .scope-option-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 7px 4px 7px 8px; border-radius: 8px; text-align: left; }
+.scope-root .scope-option-glyph { display: grid; place-items: center; color: var(--quiet); }
+.scope-root .scope-option-glyph svg { width: 16px; height: 16px; }
+.scope-root .scope-option-main.is-current { font-weight: 600; }
+.scope-root .scope-option-main.is-current .scope-option-glyph { color: var(--ink); }
+.scope-root .scope-option-name { flex: none; max-width: 52%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.scope-root .scope-option-note { flex: 1; min-width: 0; text-align: right; font-size: 11px; color: var(--quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scope-root .scope-option-gear { display: grid; place-items: center; width: 34px; height: 44px; border-radius: 8px; color: var(--quiet); }
+.scope-root .scope-option-gear svg { width: 15px; height: 15px; }
+.scope-root .scope-option-gear:hover, .scope-root .scope-option-gear[aria-expanded="true"] { background: var(--wash-firm); color: var(--ink); }
+.scope-root.is-hover-gear .scope-option-gear { opacity: 0; transition: opacity 120ms var(--ease); }
+.scope-root.is-hover-gear .scope-option:hover .scope-option-gear,
+.scope-root.is-hover-gear .scope-option-gear:focus-visible,
+.scope-root.is-hover-gear .scope-option-gear[aria-expanded="true"] { opacity: 1; }
+.scope-root.is-reduced .scope-option-gear { transition: none; }
+.scope-root .scope-menu-empty { margin: 0; padding: 14px 13px; color: var(--quiet); }
+.scope-root .scope-menu-foot { flex: none; border-top: 1px solid var(--edge); padding: 5px; }
+.scope-root .scope-new-project { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 7px 8px; border-radius: 8px; text-align: left; font-size: 13px; }
+.scope-root .scope-new-project:hover { background: var(--wash); }
+.scope-root .scope-new-project svg { width: 16px; height: 16px; }
+
+/* --- the body: the current tab's contents ----------------------------------------------------- */
+.scope-root .scope-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 14px; scrollbar-width: thin; scrollbar-color: #bcb7af transparent; }
+.scope-root .scope-note { margin: 0 0 6px; padding: 0 8px; color: var(--quiet); font-size: 11.5px; }
+.scope-root .scope-new-thread { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 8px; border-radius: 8px; text-align: left; font-size: 13px; color: var(--ink-2); }
+.scope-root .scope-new-thread:hover:not(:disabled) { background: var(--wash); color: var(--ink); }
+.scope-root .scope-new-thread.is-pinned { background: rgba(255, 255, 255, .42); border: 1px solid var(--edge); margin-bottom: 6px; }
+.scope-root .scope-new-thread.is-pinned:hover:not(:disabled) { background: rgba(255, 255, 255, .78); }
+.scope-root .scope-new-thread svg { width: 16px; height: 16px; }
+.scope-root .scope-threads { display: flex; flex-direction: column; gap: 1px; }
+.scope-root .scope-thread { position: relative; display: flex; align-items: center; border-radius: 8px; }
+.scope-root .scope-thread:hover { background: var(--wash); }
+.scope-root .scope-thread-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 7px 8px; border-radius: 8px; text-align: left; }
+.scope-root .scope-thread-main svg { width: 16px; height: 16px; color: var(--quiet); }
+.scope-root .scope-thread-title { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scope-root .scope-thread-when { flex: none; font-size: 11px; color: var(--quiet); font-variant-numeric: tabular-nums; }
+.scope-root .scope-thread-main[aria-current="true"] { background: var(--wash-firm); }
+.scope-root .scope-thread-main[aria-current="true"] .scope-thread-title { font-weight: 600; }
+.scope-root .scope-thread-main[aria-current="true"] svg { color: var(--ink); }
+/* The time gives its place up to the two actions, rather than the row growing to hold both. */
+.scope-root .scope-thread-actions { position: absolute; right: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity 120ms var(--ease); }
+.scope-root.is-reduced .scope-thread-actions { transition: none; }
+.scope-root .scope-thread:hover .scope-thread-actions,
+.scope-root .scope-thread:focus-within .scope-thread-actions { opacity: 1; }
+.scope-root .scope-thread:hover .scope-thread-when,
+.scope-root .scope-thread:focus-within .scope-thread-when { opacity: 0; }
+.scope-root .scope-thread-action { display: grid; place-items: center; width: 34px; height: 36px; border-radius: 7px; color: var(--quiet); background: #ece8e0; }
+.scope-root .scope-thread-action:hover { background: var(--wash-firm); color: var(--ink); }
+.scope-root .scope-thread-action svg { width: 15px; height: 15px; }
+.scope-root.is-narrow .scope-thread-action { width: 44px; height: 44px; }
+.scope-root.is-narrow .scope-thread-actions { position: static; opacity: 1; }
+.scope-root.is-narrow .scope-thread:hover .scope-thread-when { opacity: 1; }
+
+/* A record tab shows what is waiting, in a sentence. The records themselves are in the workspace. */
+.scope-root .scope-section { padding: 4px 8px 0; }
+.scope-root .scope-section-headline { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.scope-root .scope-section-headline[data-tone="error"] { color: #7c392f; }
+.scope-root .scope-section-line { margin: 0 0 4px; color: var(--ink-2); font-size: 12px; }
+.scope-root .scope-section-hint { margin: 8px 0 12px; color: var(--quiet); font-size: 11.5px; }
+.scope-root .scope-section-action { min-height: 36px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--edge); background: #fffdfa; color: var(--ink-2); font-size: 12px; }
+.scope-root .scope-section-action:hover:not(:disabled) { background: #efebe4; border-color: rgba(21, 20, 19, .22); }
+.scope-root.is-narrow .scope-section-action { min-height: 44px; }
+.scope-root .scope-progress { margin: 14px 0 0; padding: 0 8px; color: var(--quiet); font-size: 11.5px; }
+
+/* --- the foot: what the projects you cannot see want, and Settings ----------------------------- */
+.scope-root .scope-foot { flex: none; padding: 8px 12px 0; }
+.scope-root .scope-foot .scope-progress { margin: 0 0 4px; padding: 0 4px; }
+.scope-root .scope-rollup { display: block; width: 100%; min-height: 32px; padding: 6px 8px; border-radius: 8px; text-align: left; color: var(--quiet); font-size: 11.5px; }
+.scope-root .scope-rollup:hover { background: var(--wash); color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.scope-root.is-narrow .scope-rollup { min-height: 44px; }
+.scope-root .scope-rail { flex: none; padding: 8px 12px 12px; border-top: 1px solid rgba(21, 20, 19, .08); margin-top: 8px; }
+.scope-root .scope-settings { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 8px; text-align: left; font-size: 13px; font-weight: 500; }
+.scope-root .scope-settings:hover, .scope-root .scope-settings[aria-expanded="true"] { background: rgba(21, 20, 19, .06); }
+.scope-root .scope-settings svg { width: 20px; height: 20px; }
+
+/* --- cards ------------------------------------------------------------------------------------ */
+.scope-root .lab-card { left: calc(var(--bar) + 12px); }
+.scope-root.is-narrow .lab-card { left: 12px; right: 12px; width: auto; }
+
+/* Glass: the bar is frosted paper over the translucent window (margins.css:152-157). */
+.lab-glass .scope-root .scope-bar { background: rgba(236, 232, 224, .70); backdrop-filter: blur(18px) saturate(1.1); }
+.lab-glass .scope-root .scope-menu { background: rgba(250, 248, 244, .92); backdrop-filter: blur(16px) saturate(1.05); }
+.lab-glass .scope-root .scope-thread-action { background: rgba(236, 232, 224, .9); }

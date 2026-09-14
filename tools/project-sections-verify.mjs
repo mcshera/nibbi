@@ -1,5 +1,6 @@
 // Browser acceptance with fixture data; every request stays inside this harness.
 import assert from 'node:assert/strict';
+import {chooseProject,closeSwitcher} from './choose-project.mjs';
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {resolve,extname} from 'node:path';
 import {chromium} from 'playwright';
@@ -54,7 +55,7 @@ async function fixture(viewport){
 async function ready(page,section){await page.waitForFunction(section=>nibbiApp.state().projectView?.section===section&&document.querySelector('#project-workspace').getAttribute('aria-busy')==='false',section);}
 async function open(page,project,section){
  if(await page.locator('#sidebar-toggle').isVisible()){await page.locator('#sidebar-toggle').click();await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);}
- const row=page.locator(`[data-project-id="${project}"]`);if(await row.getAttribute('aria-expanded')!=='true')await row.click();
+ await chooseProject(page,project);await closeSwitcher(page);
  await page.locator(`[data-section-project="${project}"][data-project-section="${section}"]`).click();await ready(page,section);
  assert.equal(await page.locator('#project-workspace-title').innerText(),project);
 }

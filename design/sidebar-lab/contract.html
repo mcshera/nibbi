@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>sidebar lab · option contract</title>
+<link rel="stylesheet" href="/public/styles.css">
+<link rel="stylesheet" href="/public/margins.css">
+<link rel="stylesheet" href="/public/project-workspace.css">
+<link rel="stylesheet" href="./lab.css">
+<style>body{overflow:auto}#stages{display:flex;gap:16px;align-items:flex-start;padding:12px}</style>
+</head><body><div id="stages"></div>
+<script type="module">
+import { createFrame, stylesReady } from './chrome.mjs';
+import { STATES, STATE_IDS, buildModel, FLAG_IDS, defaultFlags, DESKTOP, PHONE } from './states.mjs';
+import * as fixture from './fixture.mjs';
+
+const query = new URLSearchParams(location.search);
+const id = query.get('id');
+const keep = query.get('keep') === '1';   // leave the stages mounted so a failure can be inspected
+const out = { id, checks: [], failures: [], errors: [], warnings: [], measures: {} };
+addEventListener('error', e => out.errors.push(String(e.message)));
+const ok = m => out.checks.push(m);
+const fail = m => out.failures.push(m);
+const warn = m => out.warnings.push(m);
+const APP_ACTIONS = new Set(['selectProject','projectSection','repository','newProject','thread','newThread','fix','plan','play','review','providers','autoMode','spendCap','model','advancedSettings','microphone','voice','sounds','notifications','calm','glass','demo','tidy']);
+
+const luminance = rgb => { const c = rgb.map(v => { const s = v / 255; return s <= .03928 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+const parse = value => (value.match(/[\d.]+/g) || []).slice(0, 4).map(Number);
+function effectiveBackground(el) {
+  let node = el;
+  while (node && node !== document.documentElement) {
+    const bg = parse(getComputedStyle(node).backgroundColor);
+    if (bg.length >= 3 && (bg[3] === undefined || bg[3] > .5)) return bg.slice(0, 3);
+    node = node.parentElement;
+  }
+  return [245, 242, 236];
+}
+const contrast = (fg, bg) => { const a = luminance(fg) + .05, b = luminance(bg) + .05; return Math.max(a, b) / Math.min(a, b); };
+const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
+
+function makeStage(viewport, label) {
+  const wrap = document.createElement('div'); wrap.className = 'frame-wrap'; wrap.style.width = viewport.width + 'px';
+  const scale = document.createElement('div'); scale.className = 'frame-scale'; wrap.append(scale);
+  document.getElementById('stages').append(wrap);
+  const actions = [];
+  const frame = createFrame({ viewport, label, onAction: (name, project, value) => actions.push({ name, project, value }) });
+  scale.append(frame.el);
+  return { frame, actions };
+}
+
+// A baseline (an id starting with "_") is evidence, not a proposal: what it gets wrong is the finding.
+const baseline = id.startsWith('_');
+try {
+  const module = await import(`./options/${id}.mjs`);
+  const meta = module.meta;
+  if (!meta || meta.id !== id) fail(`meta.id must equal the file name (${id})`); else ok(`meta ${meta.name} · ${meta.pattern}`);
+  for (const key of ['name', 'tagline', 'pattern', 'answers']) if (!meta?.[key]) fail(`meta.${key} missing`);
+  if (!Array.isArray(meta?.risks) || meta.risks.length < 1) fail('meta.risks must name at least one risk');
+  if (!Array.isArray(meta?.flags)) fail('meta.flags must be an array of improvement ids');
+  for (const f of meta?.flags || []) if (!FLAG_IDS.includes(f)) fail(`meta.flags: unknown improvement "${f}"`);
+  if (!Array.isArray(meta?.pinned)) fail('meta.pinned must list the app ids this design keeps');
+
+  const desktop = makeStage({ ...DESKTOP }, 'desktop'), phone = makeStage({ ...PHONE }, 'phone');
+  const flags = defaultFlags(false);
+  let model = buildModel('home');
+  desktop.frame.setContext({ model, state: 'home', flags, viewport: { ...DESKTOP } });
+  phone.frame.setContext({ model, state: 'home', flags, viewport: { ...PHONE } });
+  const t0 = performance.now();
+  const D = module.mount(desktop.frame.host, { model, state: 'home', viewport: { ...DESKTOP }, reduced: false, flags, onAction: (n, p, v) => desktop.actions.push({ name: n, project: p, value: v }) });
+  out.measures.mountMs4 = Math.round(performance.now() - t0);
+  const P = module.mount(phone.frame.host, { model, state: 'home', viewport: { ...PHONE }, reduced: false, flags, onAction: (n, p, v) => phone.actions.push({ name: n, project: p, value: v }) });
+  for (const key of ['cue', 'setModel', 'setReduced', 'setFlags', 'setViewport', 'focus', 'destroy']) {
+    if (typeof D[key] !== 'function') fail(`controller.${key} missing`);
+  }
+  await stylesReady();   // the option's stylesheet is a <link>: measuring before it lands measures nothing
+  ok(`mounted at ${DESKTOP.width} and ${PHONE.width} in ${out.measures.mountMs4}ms`);
+
+  // Every state renders, and says what it should say.
+  const overflow = [], missing = [];
+  for (const state of STATES) {
+    for (const [name, stage, inst, vp] of [['desktop', desktop, D, state.viewport || DESKTOP], ['phone', phone, P, PHONE]]) {
+      const m = state.build();
+      stage.frame.setContext({ model: m, state: state.id, flags, viewport: vp });
+      inst.setViewport({ ...vp }); inst.setModel(m); inst.cue(state.id);
+      stage.frame.sync();
+      const host = stage.frame.host, frame = stage.frame.el;
+      if (frame.scrollWidth - frame.clientWidth > 1) {
+        const origin = frame.getBoundingClientRect().left;
+        const wide = [...frame.querySelectorAll('*')].filter(el => el.getBoundingClientRect().right - origin > frame.clientWidth + 1)
+          .map(el => (el.dataset.labRole || el.className || el.tagName) + '@' + Math.round(el.getBoundingClientRect().right - origin));
+        overflow.push(`${state.id}/${name} (${[...new Set(wide)].slice(0, 3).join(', ') || 'frame content'})`);
+      }
+      const bar = host.querySelector('[data-pin="workspace-sidebar"]') || host.firstElementChild;
+      if (bar && bar.scrollWidth - bar.clientWidth > 1) overflow.push(`${state.id}/${name}/bar`);
+      if (state.id !== 'collapsed' && !host.querySelector('[data-project-id]')) missing.push(`${state.id}/${name}: no [data-project-id]`);
+      if (state.id === 'home') {
+        const current = [...host.querySelectorAll('[data-thread-id][aria-current="true"]')];
+        if (current.length !== 1) missing.push(`${state.id}/${name}: expected one open conversation, found ${current.length}`);
+        else if (current[0].dataset.threadId !== 'home') missing.push(`${state.id}/${name}: the open conversation should be home`);
+      }
+      if (state.id === 'thread') {
+        const current = host.querySelector('[data-thread-id][aria-current="true"]');
+        if (current?.dataset.threadId !== 't-left-bar') missing.push(`${state.id}/${name}: the named thread is not marked open`);
+      }
+      if (state.id === 'builds') {
+        const page = [...host.querySelectorAll('[aria-current="page"]')];
+        if (page.length !== 1) missing.push(`${state.id}/${name}: expected one section marked current, found ${page.length}`);
+        else if (page[0].dataset.projectSection && page[0].dataset.projectSection !== 'builds') missing.push(`${state.id}/${name}: the wrong section is current`);
+      }
+      if (state.id === 'card') {
+        const card = host.querySelector('[data-lab-role="card"]:not([hidden])');
+        if (!card) missing.push(`${state.id}/${name}: no open card`);
+        else if (!card.contains(document.activeElement) && document.activeElement !== card) missing.push(`${state.id}/${name}: focus did not move into the card`);
+      }
+      if (state.id === 'collapsed' && name === 'desktop') {
+        const toggle = host.querySelector('[data-lab-role="toggle"]');
+        if (!toggle || !visible(toggle)) missing.push('collapsed/desktop: no visible way back');
+      }
+      if (state.id === 'drawer' && name === 'phone') {
+        if (!host.querySelector('[data-lab-role="backdrop"]:not([hidden])')) missing.push('drawer/phone: no backdrop behind the drawer');
+      }
+      // Targets and small-text contrast, in the state where the most is on screen.
+      if (state.id === 'many' || state.id === 'card') {
+        const min = vp.narrow ? 44 : 32;
+        for (const el of host.querySelectorAll('button, [role="button"], a[href]')) {
+          if (!visible(el) || el.dataset.labRole === 'backdrop') continue;
+          const h = el.getBoundingClientRect().height;
+          if (h + 0.5 >= min) continue;
+          const label = `${el.className || el.tagName}:${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 20)}`;
+          // The project and settings cards are the app's own controls, shared by every design: report,
+          // do not gate, or every option fails on the same 27px automation chips.
+          if (el.closest('[data-lab-role="card"]')) { warn(`${state.id}/${name}: card control "${label}" is ${Math.round(h)}px (app's own, needs ${min})`); continue; }
+          out.measures.smallestTarget = Math.min(out.measures.smallestTarget ?? 999, Math.round(h));
+          (baseline ? warn : m => missing.push(m))(`${state.id}/${name}: "${label}" is ${Math.round(h)}px, needs ${min}`);
+        }
+        for (const el of host.querySelectorAll('*')) {
+          if (!el.firstChild || el.firstChild.nodeType !== 3 || !el.textContent.trim() || !visible(el)) continue;
+          const style = getComputedStyle(el);
+          if (parseFloat(style.fontSize) > 12.5) continue;
+          const ratio = contrast(parse(style.color).slice(0, 3), effectiveBackground(el));
+          if (el.closest('[data-lab-role="card"]')) { if (ratio < 4.5) warn(`${state.id}/${name}: card text "${el.textContent.trim().slice(0, 20)}" is ${ratio.toFixed(2)}:1 (app's own)`); continue; }
+          out.measures.minContrast = Math.min(out.measures.minContrast ?? 99, Math.round(ratio * 100) / 100);
+          if (ratio < 4.5) (baseline ? warn : m => missing.push(m))(`${state.id}/${name}: "${el.textContent.trim().slice(0, 24)}" at ${style.fontSize} is ${ratio.toFixed(2)}:1`);
+        }
+      }
+    }
+  }
+  if (overflow.length) fail(`horizontal overflow in: ${[...new Set(overflow)].join(', ')}`); else ok('no horizontal overflow in any state at either size');
+  if (missing.length) for (const m of [...new Set(missing)].slice(0, 12)) fail(m); else ok('every state says what it should: open conversation, current section, card focus, a way back, a backdrop, targets and contrast');
+
+  // Escape closes the card before the bar, and gives focus back.
+  const settle = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 90)));
+  D.cue('card');
+  await settle();   // the card takes focus as it opens; pressing before that lands makes this flaky
+  const host = desktop.frame.host;
+  const card = host.querySelector('[data-lab-role="card"]:not([hidden])');
+  const press = () => (document.activeElement.closest('.lab-host') ? document.activeElement : host.querySelector('button'))
+    .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  if (card) {
+    press(); await settle();
+    if (host.querySelector('[data-lab-role="card"]:not([hidden])')) fail('Escape did not close the card');
+    else if (!host.contains(document.activeElement)) fail('Escape closed the card but lost focus');
+    else {
+      const barBefore = host.querySelector('[data-pin="workspace-sidebar"]');
+      if (barBefore && barBefore.getAttribute('aria-hidden') === 'true') fail('Escape closed the card and the bar at once');
+      else { press(); await settle(); ok('Escape closes the card first, then the bar'); }
+    }
+  }
+
+  // The protocol: every action a design dispatches is one the app already understands.
+  D.cue('home'); desktop.actions.length = 0;
+  const clickable = [
+    '[data-lab-role="chooser"]', '[data-project-id]', '[data-lab-role="chat"]',
+    '[data-thread-id]:not([aria-current="true"])', '[data-lab-role="new-thread"]',
+    '[data-project-section]', '[data-lab-role="new-project"]', '[data-lab-role="gear"]', '[data-lab-role="settings"]',
+  ];
+  for (const selector of clickable) {
+    const el = host.querySelector(selector);
+    if (el && !el.disabled && visible(el)) { el.click(); await new Promise(r => setTimeout(r, 0)); }
+  }
+  const names = [...new Set(desktop.actions.map(a => a.name))];
+  const bad = names.filter(n => !APP_ACTIONS.has(n) && !n.startsWith('lab:'));
+  if (bad.length) fail(`actions outside the app's vocabulary: ${bad.join(', ')} (prefix lab-only ones with "lab:")`);
+  else ok(`speaks the app's protocol: ${names.join(', ') || 'no action dispatched'}`);
+  out.measures.actions = names;
+  const thread = desktop.actions.find(a => a.name === 'thread');
+  if (thread && (!thread.project || !thread.value)) fail('thread must carry (projectId, threadId)');
+  const section = desktop.actions.find(a => a.name === 'projectSection');
+  if (section && !['builds', 'issues', 'plans'].includes(section.value)) fail('projectSection must carry a section name');
+
+  // Reduced motion: nothing is still moving a beat after a cue.
+  D.setReduced(true); D.cue('switch'); D.cue('collapsed');
+  await new Promise(r => setTimeout(r, 80));
+  const running = desktop.frame.host.getAnimations({ subtree: true }).filter(a => a.playState === 'running');
+  if (running.length) fail(`${running.length} animation(s) still running with reduced motion`); else ok('reduced motion settles at once');
+  D.setReduced(false);
+
+  // Scale: 60 projects with very long names.
+  const stress = fixture.stress(60);
+  const t1 = performance.now(); D.setModel(stress); const setMs = performance.now() - t1;
+  out.measures.setModelMs60 = Math.round(setMs);
+  const fresh = makeStage({ ...DESKTOP }, 'stress');
+  const t2 = performance.now();
+  const S = module.mount(fresh.frame.host, { model: stress, state: 'home', viewport: { ...DESKTOP }, reduced: false, flags, onAction: () => {} });
+  out.measures.mountMs60 = Math.round(performance.now() - t2);
+  if (out.measures.mountMs60 > 250) fail(`mounting 60 projects took ${out.measures.mountMs60}ms (budget 250)`);
+  else ok(`60 projects mount in ${out.measures.mountMs60}ms, setModel in ${out.measures.setModelMs60}ms`);
+  S.destroy();
+  if (fresh.frame.host.childElementCount) fail('destroy() left nodes behind');
+
+  // Improvements: the ones the design claims must actually change something.
+  D.setViewport({ ...DESKTOP }); D.setModel(buildModel('home')); D.cue('home');
+  for (const flag of meta.flags || []) {
+    const before = desktop.frame.host.innerHTML;
+    D.setFlags({ ...flags, [flag]: true });
+    const after = desktop.frame.host.innerHTML;
+    D.setFlags({ ...flags });
+    if (before === after && flag !== 'chatTab') fail(`meta.flags claims "${flag}" but turning it on changes nothing`);
+  }
+  ok(`improvements honoured: ${(meta.flags || []).join(', ') || 'none claimed'}`);
+
+  if (keep) { D.cue(query.get('state') || 'many'); window.__stage = { D, P, desktop, phone }; }
+  else {
+    D.destroy(); P.destroy();
+    if (desktop.frame.host.childElementCount) fail('destroy() left nodes behind on the desktop stage');
+  }
+} catch (error) { fail('exception: ' + (error.stack || error.message)); }
+window.__result = out;
+</script></body></html>

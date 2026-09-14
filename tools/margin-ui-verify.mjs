@@ -1,5 +1,6 @@
 // Bounded real built-app margin QA. Never connects to a live provider/account.
 import assert from 'node:assert/strict';
+import {openProjectCard} from './choose-project.mjs';
 import {mkdirSync,writeFileSync,readFileSync,readdirSync,existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
@@ -19,7 +20,7 @@ async function check(name,fn){if(process.env.NIBBI_MARGIN_QA_ONLY&&!new RegExp(p
 async function shot(page,name){await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});results.screenshots.push(name+'.png');flush();}
 const card=page=>page.locator('.margin-card:not([hidden])');
 const projectButton=(page,name)=>page.locator(`#project-rail button[data-project-id="${name}"]`);
-async function openProject(page,name){if(await page.locator('#project-rail .margin-compact').isVisible()){await page.locator('#project-rail .margin-compact').click();await card(page).locator(`button[data-project-id="${name}"]`).click();}else await projectButton(page,name).click();await card(page).waitFor();}
+async function openProject(page,name){await openProjectCard(page,name);}
 async function settings(page){if(await card(page).count())await page.keyboard.press('Escape');await page.locator('#status').click();await page.locator('#st-motion').waitFor({state:'visible'});}
 async function geometry(page){return page.evaluate(()=>{const rect=s=>{const el=document.querySelector(s);if(!el||!el.getClientRects().length)return null;const b=el.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height,right:b.right,bottom:b.bottom};};return {viewport:{width:innerWidth,height:innerHeight},documentWidth:document.documentElement.scrollWidth,rail:rect('#project-rail'),settings:rect('#settings-rail'),card:rect('.margin-card:not([hidden])'),modal:rect('dialog.platform-panel[open]'),composer:rect('#pill'),feed:rect('.feed'),character:window.nibbi?.state().geometry?.bodyBounds};});}
 async function baselineFit(page){const g=await geometry(page);const normalize=b=>b?{left:b.left??b.x,top:b.top??b.y,right:b.right??b.x+b.width,bottom:b.bottom??b.y+b.height}:null;const overlap=(a,b)=>a&&b&&Math.min(a.right,b.right)>Math.max(a.left,b.left)+1&&Math.min(a.bottom,b.bottom)>Math.max(a.top,b.top)+1;for(const rail of ['rail','settings'])for(const target of ['composer','character','feed'])assert(!overlap(normalize(g[rail]),normalize(g[target])),`${rail} overlaps ${target}: ${JSON.stringify(g)}`);assert(g.documentWidth<=g.viewport.width+1);return g;}

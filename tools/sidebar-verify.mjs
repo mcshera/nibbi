@@ -1,5 +1,6 @@
 // Built UI acceptance in a browser with all network requests intercepted.
 import assert from 'node:assert/strict';
+import {chooseProject,closeSwitcher,openProjectCard} from './choose-project.mjs';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
 import { chromium } from 'playwright';
@@ -52,21 +53,20 @@ try {
     await page.keyboard.press('Escape');assert.equal(await page.locator('#dock-menu').isVisible(),false,'Escape closes the panel');assert.equal(await page.evaluate(()=>document.activeElement?.id),'dock','Escape returns focus to the options button');
     assert.equal(await page.evaluate(()=>nibbi.state().character),'pool-velvet');
     assert.equal(await page.locator('.project-group').count(),3);
-    for(const project of projects){
-      const children=page.locator(`.project-section[data-section-project="${project.name}"]`);
-      assert.deepEqual(await children.evaluateAll(els=>els.map(el=>el.dataset.projectSection)),['builds','issues','plans']);
-    }
-    assert.equal(await page.locator('[data-project-id="paper-garden"]').getAttribute('aria-expanded'),'true','initial active project expands its sections');
+    // One project is in the bar at a time, so one strip. Every project is a row in the switcher.
+    assert.deepEqual(await page.locator('.project-section[data-project-section]').evaluateAll(els=>els.map(el=>el.dataset.projectSection)),['builds','issues','plans']);
+    assert.equal(await page.locator('.margin-switch-trigger').getAttribute('data-current-project'),'paper-garden','the switcher names the active project');
+    assert.equal(await page.locator('[data-project-id]').count(),projects.length,'every project is reachable from the switcher');
     await shot(page,`desktop-or-mobile-${w}x${h}`);
     await page.locator('#ask').fill('Keep this draft');
     if(w<900){await page.locator('#sidebar-toggle').click();await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);}
     await bounds(page,'#workspace-sidebar');await bounds(page,'#status');
     assert.equal(await page.locator('#settings-rail').evaluate(el=>el.closest('#workspace-sidebar')!==null),true);
-    await page.locator('[data-project-id="observatory"]').click();
+    await chooseProject(page,'observatory');
     assert.equal(await page.evaluate(()=>nibbiApp.state().project),'observatory');
-    assert.equal(await page.locator('.margin-card:not([hidden])').count(),0,'project selection reveals sections without opening settings');
+    assert.equal(await page.locator('.margin-card:not([hidden])').count(),0,'choosing a project does not open its settings');
     assert.equal(await page.locator('[data-section-project="observatory"]:visible').count(),3);
-    await page.getByRole('button',{name:'Project settings for observatory',exact:true}).click();
+    await openProjectCard(page,'observatory');
     await bounds(page,'.margin-card:not([hidden])');
     await page.keyboard.press('Escape');
     await page.locator('#status').click();await page.locator('#st-voice').waitFor({state:'visible'});
@@ -75,7 +75,7 @@ try {
     assert.equal(await page.locator('#ask').inputValue(),'Keep this draft');assert.equal(await page.locator('#workspace-sidebar').evaluate(el=>el.inert),true);
     assert.equal(await page.evaluate(()=>document.activeElement.id),'sidebar-toggle');
     await page.locator('#sidebar-toggle').press('Space');await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);
-    assert.equal(await page.locator('[data-project-id="observatory"]').getAttribute('aria-current'),'true');
+    assert.equal(await page.locator('.margin-switch-trigger').getAttribute('data-current-project'),'observatory');
     if(w<900){assert.equal(await page.locator('#pill').evaluate(el=>el.inert),true);await page.locator('.sidebar-backdrop').click({position:{x:w-5,y:h/2}});assert.equal(await page.locator('#pill').evaluate(el=>el.inert),false);}
     else {const pill=await bounds(page,'#pill');assert(pill.x>=256);}
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -84,7 +84,7 @@ try {
  const {page,context}=await fixture({width:1440,height:900});
  try {
  await check('draft, send context, chat and collapse persistence',async()=>{
-   await page.locator('[data-project-id="observatory"]').click();
+   await chooseProject(page,'observatory');await closeSwitcher(page);
    await page.locator('#ask').fill('A fixture message');await page.locator('#send').click();
    await page.waitForFunction(()=>nibbiApp.state().turns.length===1&&!nibbiApp.state().busy);
    assert.equal(JSON.parse(report.mutations.at(-1).body).project,'observatory');
