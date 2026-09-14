@@ -157,7 +157,7 @@ body.busy .pill { border-color: rgba(21,20,19,.06); }
 }
 .pill textarea::placeholder { color: #8f8a81; }
 /* "+": an ink-outlined ring that opens the options panel; filled while the panel is open, the plus turning into a close */
-.pill .dock { position: relative; flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid rgba(21,20,19,.5); background: transparent; color: var(--ink-2); display: grid; place-items: center; padding: 0; cursor: pointer; transition: background var(--t1), color var(--t1), border-color var(--t1); }
+.pill .dock { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid rgba(21,20,19,.5); background: transparent; color: var(--ink-2); display: grid; place-items: center; padding: 0; cursor: pointer; transition: background var(--t1), color var(--t1), border-color var(--t1); }
 .pill .dock svg { transition: transform var(--t2) var(--ease); }
 .pill .dock:hover { background: rgba(21,20,19,.06); border-color: var(--ink); color: var(--ink); }
 .pill .dock[aria-expanded="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
@@ -172,13 +172,8 @@ body.busy .pill { border-color: rgba(21,20,19,.06); }
 .dock-menu .ico:hover .mi, .dock-menu .mitem:hover .mi, .dock-menu .ico[aria-pressed="true"] .mi { color: var(--ink); }
 .dock-menu .mi-label, .dock-menu .mic-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dock-menu .ico:focus-visible, .dock-menu .mitem:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-/* plan first is armed: one 6px ink dot inside the "+". A cue, not a control — a pseudo-element, so it is invisible to assistive tech
-   (#plan-first's aria-pressed in the panel is the accessible truth) and has no hit target of its own; #dock's title names the mode on hover.
-   Tucked into the top-right diagonal (7px in, 8px at ≤640 where the button is 44px): the plus arms and the × they rotate into reach ~5.5px
-   from the centre, the dot's centre sits ~12px out, and the focus ring lives outside the border box — so it collides with neither.
-   Open, the button fills with ink, so the dot inverts to paper and stays visible. */
-.pill.plan-first .dock::after { content: ""; position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); pointer-events: none; }
-.pill.plan-first .dock[aria-expanded="true"]::after { background: var(--paper); }   /* no transition: the swap rides the panel opening, and a half-blended dot on the ink fill reads as dirt */
+/* plan first carries no mark on the "+" by owner preference: the placeholder says it while the field is empty,
+   #dock's title names it on hover, the field's aria-describedby states it, and #plan-first keeps aria-pressed in the panel. */
 /* send: an ink squircle */
 .pill .send { flex: none; width: 44px; height: 44px; border-radius: 14px; border: 0; background: var(--ink); display: grid; place-items: center; padding: 0; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
 .pill .send:hover { transform: scale(1.05); } .pill .send:active { transform: scale(.96); }
@@ -207,7 +202,6 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
   .pill { bottom: calc(18px + env(safe-area-inset-bottom)); border-radius: 30px; padding: 6px 6px 6px 8px; width: calc(100vw - 24px); gap: 6px; flex-wrap: wrap; }
   .pill textarea { font-size: 17px; padding: 8px 4px; }
   .pill .dock { width: 44px; height: 44px; }
-  .pill.plan-first .dock::after { top: 8px; right: 8px; }   /* the bigger touch target keeps the dot the same distance inside the ring */
   .pill .attach { flex: 1 0 100%; max-width: 100%; order: -1; overflow-x: auto; padding: 4px 8px 0; }   /* thumbnails take a row of their own above the field too */
   .pill.mic-on { padding-bottom: 34px; }
   .listen { left: 60px; right: 16px; bottom: 8px; font-size: 11px; }
