@@ -67,6 +67,12 @@ const S = {
   micEnabled: false, micPhase: 'off', micCapturing: false, voiceFinishing: false,
   planFirst: false,        // composer toggle: the next message becomes a reviewable plan
   activeRunId: null, steerable: false, liveTurn: null,
+  // A thread is a conversation inside a project. 'home' is the one that has always existed:
+  // on the daemon it is every message with no thread, so nothing had to be migrated.
+  thread: { project: null, id: 'home', title: 'Home' },
+  threads: new Map(),      // project\0threadId -> { turns, nodes, hydrated }
+  threadsByProject: new Map(),
+  liveThreadKey: null,
   lastActivity: performance.now(),
   restTimer: 0, sleepTimer: 0, chipTimer: 0,
   abort: null,
@@ -88,7 +94,8 @@ micBtn.before(planBtn);   // the menu lists plan first, then Hey Nibbi, then att
 const narrowField = matchMedia('(max-width: 640px)');
 function placeholderText() {
   const n = narrowField.matches;
-  return S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? (n ? 'Goal first — steps…' : 'Describe the goal — nibbi proposes steps first…') : (n ? 'Ask nibbi to build…' : 'Ask nibbi to build something...');
+  return S.thread.id !== 'home' && !S.playtest && !S.planFirst ? (n ? S.thread.title + '…' : 'Message “' + S.thread.title + '”…') :
+    S.playtest ? 'Playtesting ' + S.playtest + ' — tell nibbi what happened…' : S.planFirst ? (n ? 'Goal first — steps…' : 'Describe the goal — nibbi proposes steps first…') : (n ? 'Ask nibbi to build…' : 'Ask nibbi to build something...');
 }
 narrowField.addEventListener('change', () => { ask.placeholder = placeholderText(); autosize(); });
 function setPlanFirst(on) {
@@ -146,7 +153,13 @@ document.addEventListener('pointerdown', (e) => { if (!dockMenu.open || !(e.targ
 attachImageBtn.addEventListener('click', () => { attachFile.value = ''; attachFile.click(); });
 attachFile.addEventListener('change', () => { for (const f of attachFile.files || []) addImage(f); attachFile.value = ''; ask.focus(); });
 setPlanFirst(false);
-function watchProjectSummaries() { projectSummaries.watch([...new Set([...visibleProjectIds, ...(S.projectView ? [S.projectView.project] : [])])]); }
+function watchProjectSummaries() {
+  const wanted = [...new Set([...visibleProjectIds, ...(S.projectView ? [S.projectView.project] : [])])];
+  projectSummaries.watch(wanted);
+  // A project only lists its threads once it is expanded, so the read follows visibility.
+  for (const project of wanted) if (project && !threadsRead.has(project)) { threadsRead.add(project); void loadThreads(project); }
+}
+const threadsRead = new Set();
 function syncProjectComposer() {
   const available = !!S.projectView && innerHeight < 600;
   const expanded = S.projectComposerExpanded ?? innerHeight >= 600;
@@ -386,6 +399,83 @@ function addActs(T, acts, opts) {
   (opts && opts.into || T.body).appendChild(w);
 }
 
+const threadKey = (project, id) => (project || 'vault') + '\u0000' + (id || 'home');
+const activeThreadKey = () => threadKey(S.thread.project ?? activeProject(), S.thread.id);
+// The home thread keeps the original localStorage key, so upgrading loses nobody's transcript.
+const transcriptKey = () => S.thread.id === 'home' ? 'transcript' : 'transcript:' + S.thread.id;
+function threadState(key) {
+  if (!S.threads.has(key)) S.threads.set(key, { turns: [], nodes: [], hydrated: false });
+  return S.threads.get(key);
+}
+function threadTitle(project, id) {
+  if (id === 'home') return 'Home';
+  return (S.threadsByProject.get(project) || []).find((t) => t.id === id)?.title || 'Thread';
+}
+async function loadThreads(project) {
+  if (!project) return [];
+  try {
+    const { threads } = await api.get('/api/threads?project=' + encodeURIComponent(project));
+    S.threadsByProject.set(project, threads || []); syncMargins(); return threads || [];
+  } catch { return S.threadsByProject.get(project) || []; }
+}
+/** Rebuild a thread's conversation from the daemon. Pairs each reply to its user message by
+    runId, which is the only linkage the message log actually records. */
+async function hydrateThread(project, id) {
+  const state = threadState(threadKey(project, id));
+  if (state.hydrated) return;
+  state.hydrated = true;
+  let rows = [];
+  try { rows = await api.get('/api/history?n=60&threadId=' + encodeURIComponent(id) + (project && project !== 'vault' ? '&project=' + encodeURIComponent(project) : '')); }
+  catch { state.hydrated = false; return; }
+  const visible = (rows || []).filter((r) => r.channel === 'app' && r.text);
+  if (!visible.length) return;
+  const pending = [];
+  for (const row of visible) {
+    if (row.role === 'user') pending.push({ you: row.text, at: Date.parse(row.ts) || Date.now(), said: '', cost: 0, error: false });
+    else if (pending.length && !pending.at(-1).said) { const turn = pending.at(-1); turn.said = row.text; turn.cost = row.costUsd || 0; turn.error = !!row.isError; }
+    else pending.push({ you: null, at: Date.parse(row.ts) || Date.now(), said: row.text, cost: row.costUsd || 0, error: !!row.isError });
+  }
+  for (const row of pending.slice(-40)) {
+    const T = newTurn(row.you === null ? undefined : row.you, undefined, row.at);
+    T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true;
+    if (row.error) T.nib.classList.add('error');
+    T.at = row.at; setMeta(T, { costUsd: row.cost }); T.el.removeAttribute('aria-busy');
+  }
+  S.stick = true; scrollFeed(true);
+}
+/** Switching threads swaps the whole conversation. A turn that is still streaming keeps its
+    own (now detached) nodes, so it finishes correctly in the thread it belongs to. */
+async function openThread(project, id, { focus = true, closeView = true } = {}) {
+  const target = threadKey(project, id);
+  if (target === activeThreadKey() && S.thread.project === project) return;
+  // Choosing a thread is choosing the conversation, so it leaves a project section. Following
+  // a project's own selection must not, or expanding a project would close the section the
+  // owner opens next.
+  if (closeView && S.projectView) closeProjectView(false);
+  const current = threadState(activeThreadKey());
+  current.turns = S.turns; current.nodes = [...feed.children];
+  if (S.review) endReview();
+  persistTranscript();
+  S.thread = { project, id, title: threadTitle(project, id) };
+  LS.set('thread:' + (project || 'vault'), id);
+  // Talking in a project's thread is what makes that project the one you are working on.
+  // S.thread is set first, so selecting the project does not bounce back into here.
+  if (project && project !== 'vault' && activeProject() !== project) selectMarginProject(project);
+  const next = threadState(target);
+  S.turns = next.turns; feed.replaceChildren(...next.nodes);
+  setMode(S.turns.length ? 'talk' : 'idle');
+  ask.placeholder = placeholderText(); syncSendButton(); syncMargins();
+  if (focus) ask.focus();
+  await hydrateThread(project, id);
+  setMode(S.turns.length ? 'talk' : 'idle');
+}
+async function newThread(project) {
+  const created = await api.command('thread.create', {}, project);
+  await loadThreads(project);
+  await openThread(project, created.id);
+  toast('new thread');
+}
+
 let tidied = null;
 function tidy() {
   if (S.busy || !S.turns.length) return;
@@ -393,7 +483,7 @@ function tidy() {
   const saved = { turns: S.turns, nodes: [...feed.children] };
   for (const T of S.turns) T.el.classList.add('leave');
   setTimeout(() => { if (tidied === saved) feed.replaceChildren(); }, 240);
-  S.turns = []; tidied = saved; LS.set('transcript', null);
+  S.turns = []; tidied = saved; LS.set(transcriptKey(), null); threadState(activeThreadKey()).turns = S.turns;
   setMode('idle'); body.classList.remove('rest'); nibbi.lookFree(); nibbi.setMood('idle'); interactions.event('tidy'); hideChips();
   toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); persistTranscript(); } });
 }
@@ -404,7 +494,7 @@ function toast(msg, ms, act) { try { if (typeof clientLog === 'function') client
 
 /* ------------------------------------------------------------------ brain client */
 async function* sseTurn(message, images, signal, mode) {
-  const response = await fetch('/api/send', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': requestId() }, body: JSON.stringify({ message, project: activeProject(), stream: true, images, ...(mode === 'plan' ? { mode: 'plan' } : {}) }), signal });
+  const response = await fetch('/api/send', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': requestId() }, body: JSON.stringify({ message, project: activeProject(), threadId: S.thread.id, stream: true, images, ...(mode === 'plan' ? { mode: 'plan' } : {}) }), signal });
   if (response.ok && response.headers.get('content-type')?.includes('application/json')) { yield { ...(await response.json()), ev: 'done' }; return; }
   yield* parseSse(response);
 }
@@ -1135,7 +1225,7 @@ async function send(text, images, opts) {
   const mode = opts.mode === 'plan' || (S.planFirst && !isCommand) ? 'plan' : 'chat';   // plan mode: the brain proposes steps; nothing is dispatched until you approve
   if (mode === 'plan' && !S.demo && !registeredProject()) { toast('Pick a project first'); return; }
   if (mode === 'plan' && S.planFirst) setPlanFirst(false);
-  S.busy = true; body.classList.add('busy'); S.activeRunId = null; S.steerable = false; syncSendButton(); syncMargins();
+  S.busy = true; body.classList.add('busy'); S.activeRunId = null; S.steerable = false; S.liveThreadKey = activeThreadKey(); syncSendButton(); syncMargins();
   activity(); hideChips();
   ask.value = ''; autosize(); clearAttach(); sound('send');
   setMode('talk');
@@ -1475,6 +1565,8 @@ function syncMargins() {
       spend: liveNumber(a?.spend), spendCap: a ? (liveNumber(a.spendCap) ?? 0) : null,
       done, total: total > 0 ? total : null, planAvailable: sectionData?.plans ? !!(canonical?.total || sectionData.plans.hasNotes) : Array.isArray(ms) ? ms.length > 0 : undefined,
       playable: (S.playable || []).some(item => item.name === p.name),
+      threads: (S.threadsByProject.get(p.name) || []).filter(t => !t.archived)
+        .map(t => ({ ...t, active: S.thread.project === p.name && S.thread.id === t.id })),
       sections: Object.fromEntries(['builds','issues','plans'].map(section => [section, describeProjectSection(section, sectionData?.[section])])) };
   });
   const metadata = marginMetadata({ status, project: selected, busy: S.busy, link: S.link, demo: S.demo, sessionCost: S.sessionCost, sessionTurns: S.sessionTurns });
@@ -1506,6 +1598,13 @@ function selectMarginProject(id) {
   const p = (S.projects || []).find(p => p.name === id && p.kind !== 'brain');
   if (!p) throw new Error('This project is no longer available.');
   S.project = p.name; LS.set('project', p.name); renderProject(); activity();
+  if (S.thread.project !== p.name) {
+    void loadThreads(p.name).then(() => {
+      const remembered = LS.get('thread:' + p.name, 'home');
+      const known = (S.threadsByProject.get(p.name) || []).some(t => t.id === remembered && !t.archived);
+      if (!S.busy) void openThread(p.name, known ? remembered : 'home', { focus: false, closeView: false });
+    });
+  }
   return p.name;
 }
 async function handleMarginAction(action, id, value) {
@@ -1542,6 +1641,14 @@ async function handleMarginAction(action, id, value) {
     case 'calm': if (!reducedMotion.matches) { calmMotion = !calmMotion; LS.set('pocketCalm', calmMotion); syncMotionPreference(); } return;
     case 'glass': if (glassAvailable) { glassOn = !glassOn; LS.set('glass', glassOn); applyPaper(); syncMargins(); toast(glassOn ? 'glass window' : 'paper window'); } return;
     case 'demo': S.demo = !S.demo; syncMargins(); await refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); return;
+    case 'thread': {
+      if (S.busy) { toast(NAME + ' is answering in “' + threadTitle(S.thread.project, S.thread.id) + '” — one thing at a time'); return; }
+      margins.close(); await openThread(id, value); return;
+    }
+    case 'newThread': {
+      if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
+      margins.close(); await newThread(id); return;
+    }
     case 'tidy': margins.close(); tidy(); return;
     default: throw new Error('This control is not available.');
   }
@@ -1667,6 +1774,18 @@ async function refreshStatus() {
   syncMargins();
 }
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
+// The active project's remembered thread. Home restores from its stored transcript as before;
+// any other thread is rebuilt from the daemon, which is the only place threads are kept.
+(async () => {
+  const project = activeProject();
+  S.thread = { project, id: 'home', title: 'Home' };
+  threadState(threadKey(project, 'home')).hydrated = S.turns.length > 0;
+  await loadThreads(project);
+  const remembered = LS.get('thread:' + (project || 'vault'), 'home');
+  if (remembered && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) {
+    await openThread(project, remembered, { focus: false });
+  }
+})().catch((e) => clientLog('error', 'threads: ' + e.message));
 refreshStatus().then(connectEvents); setInterval(() => { if (!evReady) refreshStatus().then(connectEvents); }, 30000);
 function mostActiveProject(list) {
   const names = new Set(list.map((p) => p.name));
@@ -1975,11 +2094,11 @@ function restoreStep(T, row) {
 function persistTranscript() {
   try {
     const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
-    LS.set('transcript', { at: Date.now(), rows });
+    LS.set(transcriptKey(), { at: Date.now(), rows });
   } catch { /* quota */ }
 }
 function restoreTranscript() {
-  const t = LS.get('transcript', null); if (!t || !t.rows || !t.rows.length || Date.now() - t.at > 12 * 3600000) return;
+  const t = LS.get(transcriptKey(), null); if (!t || !t.rows || !t.rows.length || Date.now() - t.at > 12 * 3600000) return;
   setMode('talk');
   for (const r of t.rows) {
     const T = newTurn(r.you, undefined, r.at); T.plain = r.plain; T.bubble.classList.remove('live'); T.fixerId = r.fixerId; T.cost = r.cost;

@@ -10,6 +10,8 @@ const glyphs = {
   build: ['M4 7 12 3l8 4v10l-8 4-8-4V7Z', 'm4 7 8 4 8-4M12 11v10'],
   issue: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M12 7v6M12 16h.01'],
   plan: ['M5 3h14v18H5z', 'M9 8h6M9 12h6M9 16h4'],
+  thread: ['M4 5h16v10H9l-5 4V5Z'],
+  newThread: ['M12 6v8M8 10h8', 'M4 5h16v10H9l-5 4V5Z'],
   microphone: ['M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z', 'M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M9 21h6'],
   voice: ['M11 5 6 9H3v6h3l5 4V5Z', 'M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14'],
   model: ['m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z'],
@@ -17,6 +19,13 @@ const glyphs = {
   settings: ['M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M9.5 3h5l.5 2.4 1.8 1 2.3-.7 2.5 4.3-1.8 1.6v.8l1.8 1.6-2.5 4.3-2.3-.7-1.8 1-.5 2.4h-5L9 18.6l-1.8-1-2.3.7L2.4 14l1.8-1.6v-.8L2.4 10l2.5-4.3 2.3.7 1.8-1L9.5 3Z'],
 };
 const text = (value, fallback = '—') => value == null || value === '' ? fallback : String(value);
+const relative = at => {
+  if (!Number.isFinite(at)) return '';
+  const seconds = Math.max(0, (Date.now() - at) / 1000);
+  if (seconds < 90) return 'just now';
+  for (const [unit, size] of [['m', 60], ['h', 3600], ['d', 86400]]) { const n = Math.floor(seconds / size); if (n < (unit === 'd' ? 7 : unit === 'h' ? 24 : 60)) return n + unit; }
+  return Math.floor(seconds / 604800) + 'w';
+};
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const count = value => finite(value) ? Math.max(0, Math.floor(value)) : null;
 const money = value => finite(value) ? `$${Math.max(0, value).toLocaleString(undefined, {maximumFractionDigits: 2})}` : '—';
@@ -255,6 +264,10 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       top.append(node('span', 'project-section-name', label), badge); copy.append(top, detail);
       child.append(icon(glyph), copy); children.append(child); sectionButtons[section] = child; sectionLabels[section] = {badge, detail};
     }
+    const threads = node('div', 'project-threads');
+    const newThread = bind(button('', 'project-section project-thread-new', () => void dispatch('newThread', id)), 'newThread', id, () => !!model.busy);
+    newThread.append(icon('newThread'), node('span', 'project-section-copy', 'New thread'));
+    children.append(threads, newThread);
     const card = makeCard('Project');
     const options = button('', 'project-options', () => open(card, options)); options.append(icon('settings')); disclose(options, card);
     headingRow.append(row, options); group.append(headingRow, children);
@@ -302,7 +315,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       projectActions.append(el);
     }
     card.body.append(projectActions);
-    Object.assign(entry, {group, row, ring, name, summary, card, options, children, sectionButtons, sectionLabels, branch, goal, progressLabel, meter, fill, stats, modeButtons, cap});
+    Object.assign(entry, {group, row, ring, name, summary, card, options, children, threads, sectionButtons, sectionLabels, branch, goal, progressLabel, meter, fill, stats, modeButtons, cap});
     list.append(group); projects.set(id, entry); return entry;
   }
   function select(entry, source) {
@@ -340,6 +353,18 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       const selected = model.view?.project === data.id && model.view?.section === section;
       if (selected) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
     }
+    const rows = Array.isArray(data.threads) ? data.threads : [];
+    const existing = new Map([...entry.threads.children].map(el => [el.dataset.threadId, el]));
+    entry.threads.replaceChildren(...rows.map(thread => {
+      const el = existing.get(thread.id) || button('', 'project-section project-thread', () => void dispatch('thread', data.id, thread.id));
+      el.dataset.threadId = thread.id; el.dataset.threadProject = data.id;
+      const when = thread.lastAt ? relative(Date.parse(thread.lastAt)) : '';
+      el.replaceChildren(icon('thread'), node('span', 'project-section-copy', text(thread.title, 'Thread')),
+        node('span', 'project-thread-when', when));
+      el.setAttribute('aria-label', `${text(thread.title, 'Thread')} thread in ${text(data.name)}${when ? ', last message ' + when : ''}`);
+      if (thread.active) el.setAttribute('aria-current', 'true'); else el.removeAttribute('aria-current');
+      return el;
+    }));
     entry.card.heading.textContent = text(data.name, 'Untitled project');
     entry.branch.textContent = `Working branch · ${text(data.branch, 'not available')}`;
     entry.goal.textContent = text(data.goal, 'No goal set');
@@ -406,6 +431,9 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     if (event.key === 'Tab' && sidebarOpen && narrow.matches) {
       const scope = opened?.el || sidebar;
       const items = [...scope.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"]')].filter(el => el.getClientRects().length && !el.closest('[hidden]'));
+      // While the sidebar is still sliding open nothing has laid out yet, so the list can be
+      // momentarily empty. Tab must not escape a modal sidebar just because it is mid-transition.
+      if (!items.length) { event.preventDefault(); return; }
       const first = items[0], last = items.at(-1);
       if (event.shiftKey && (document.activeElement === first || !items.includes(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement))) { event.preventDefault(); first?.focus(); }

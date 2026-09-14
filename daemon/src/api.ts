@@ -10,6 +10,7 @@ import { status, snapshot, autoView, projectsView, milestones, runEvents, artifa
 import { listFixers, getFixerDiff, buildReport, playStatus, allowedRunActions } from './fixer.js';
 import { games, updateProject } from './projects.js';
 import { readChat, readAround, searchChat } from './history.js';
+import { listThreads, requireThread } from './threads.js';
 import { runTurn, setMasterModel, type TurnOptions } from './session.js';
 import { handleCommand } from './commands.js';
 import { goals, schedules } from './scheduler.js';
@@ -63,7 +64,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     json(res, result.ok ? 200 : 400, result.ok ? { ...(result.data as object), ok: true } : { error: result.error.message }); return true;
   }
   if (path === '/api/send' && method === 'POST') {
-    const input = z.object({ message: z.string().max(100_000).default(''), project: z.string().optional(), stream: z.boolean().default(false), mode: z.enum(['chat', 'plan']).optional(), historySource: z.literal('test').optional(), images: z.array(z.object({ media_type: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), data: z.string().max(8_000_000) })).max(4).optional() }).parse(await jsonBody(req));
+    const input = z.object({ message: z.string().max(100_000).default(''), project: z.string().optional(), threadId: z.string().max(40).optional(), stream: z.boolean().default(false), mode: z.enum(['chat', 'plan']).optional(), historySource: z.literal('test').optional(), images: z.array(z.object({ media_type: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), data: z.string().max(8_000_000) })).max(4).optional() }).parse(await jsonBody(req));
     if (input.historySource !== undefined) ownerOnly(req);
     if (!input.message.trim() && !input.images?.length) throw new HttpError(400, 'Empty message');
     const key = String(req.headers['idempotency-key'] ?? randomUUID()); const claim = runtime().claimCommand(key, input);
@@ -73,9 +74,10 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     }
     const send = input.stream ? sse(res) : undefined; const ping = send ? setInterval(() => { if (!res.destroyed) res.write(': ping\n\n'); }, 15_000) : undefined;
     try {
-      const cmd = await handleCommand(input.message, notify, { project: input.project, idempotencyKey: key + ':slash' });
+      const thread = requireThread(input.project, input.threadId);
+      const cmd = await handleCommand(input.message, notify, { project: input.project, idempotencyKey: key + ':slash', threadId: thread });
       const toolFrame = (payload: Record<string, unknown>): void => { const { type, ...rest } = payload; send?.('tool', { ...rest, phase: type === 'tool.finished' ? 'finished' : 'started', at: Date.now() }); };
-      const turnOptions: TurnOptions = { historySource: input.historySource, onStart: (runId: string) => send?.('start', { runId }), onReady: (runId: string, info: { steerable: boolean }) => send?.('ready', { runId, ...info }), onToolEvent: toolFrame };
+      const turnOptions: TurnOptions = { threadId: thread, historySource: input.historySource, onStart: (runId: string) => send?.('start', { runId, threadId: thread }), onReady: (runId: string, info: { steerable: boolean }) => send?.('ready', { runId, threadId: thread, ...info }), onToolEvent: toolFrame };
       // Local-fallback frames exist only where that feature is compiled in; assigning keeps this file identical across builds.
       Object.assign(turnOptions, { onFallback: (info: unknown) => send?.('fallback', info as Record<string, unknown>) });
       let result: Record<string, unknown>;
@@ -85,6 +87,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
         const planned = await proposePlan(input.project, input.message || '(image)', { runTurn, channel: 'app', onDelta: text => send?.('delta', { t: text }), images: input.images, turnOptions });
         result = { ...planned.result, proposal: publicProposal(planned.proposal) };
       } else result = { ...await runTurn(input.message || '(image)', undefined, 'app', undefined, text => send?.('delta', { t: text }), undefined, input.images, true, { project: input.project, ...turnOptions }) };
+      result.threadId = thread;
       runtime().finishCommand(key, result);
       if (send) { send('done', result); res.end(); } else json(res, result.isError ? 409 : 200, result);
     } catch (error) {
@@ -173,7 +176,8 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     case '/api/growth': json(res, 200, runtime().replay(0, 5000).filter(event => event.type.startsWith('skill.')).reverse().map(event => ({ hash: String(event.payload.revision ?? '').slice(0, 8), at: event.at, msg: event.type + ': ' + event.payload.id }))); break;
     case '/api/play': if (q.has('action') && q.get('action') !== 'status') throw new HttpError(405, 'Preview changes require POST'); json(res, 200, playStatus(q.get('project') ?? '')); break;
     case '/api/preview': json(res, 200, previewStatus(q.get('id') ?? '')); break;
-    case '/api/history': { const n = Number(q.get('n')) || 80; json(res, 200, q.has('q') ? searchChat(q.get('q')!, n) : q.has('around') ? readAround(q.get('around')!, n) : readChat(n, q.get('before') ?? undefined, q.get('project') ?? undefined)); break; }
+    case '/api/history': { const n = Number(q.get('n')) || 80; json(res, 200, q.has('q') ? searchChat(q.get('q')!, n) : q.has('around') ? readAround(q.get('around')!, n) : readChat(n, q.get('before') ?? undefined, q.get('project') ?? undefined, q.get('threadId') ?? undefined)); break; }
+    case '/api/threads': json(res, 200, { threads: listThreads(q.get('project') ?? undefined) }); break;
     case '/api/vault-tree': {
       const path = q.get('path') ? scopedPath(config.vaultDir, q.get('path')!) : config.vaultDir; json(res, 200, readdirSync(path, { withFileTypes: true }).filter(entry => !entry.name.startsWith('.') && !entry.isSymbolicLink()).map(entry => ({ name: entry.name, directory: entry.isDirectory() }))); break;
     }
