@@ -1,0 +1,318 @@
+{
+  "environment": "local Chrome via Playwright; geometry in CSS pixels at the page's real viewport (?scale=1). Not a device benchmark, and it certifies neither Safari/WKWebView nor the native Tauri shell.",
+  "checks": [
+    {
+      "name": "No horizontal overflow: 9 states × 5 sizes"
+    },
+    {
+      "name": "Every state marks the open conversation, the current section, the card, the way back and the backdrop"
+    },
+    {
+      "name": "Every control in the bar is at least 44px on a phone and 32px on a desktop"
+    },
+    {
+      "name": "Text at 12px and under is at least 4.5:1 against its own background"
+    },
+    {
+      "name": "Every design dispatches only what handleMarginAction already understands",
+      "_today": "selectProject thread newThread projectSection newProject",
+      "scope": "thread newThread projectSection",
+      "peer": "selectProject thread newThread projectSection newProject",
+      "spine": "selectProject thread newThread projectSection newProject"
+    },
+    {
+      "name": "Escape closes the card first and keeps focus, then closes the bar"
+    },
+    {
+      "name": "With reduced motion nothing is still animating a beat after a cue"
+    },
+    {
+      "name": "60 projects mount in under 250ms",
+      "_today": "2ms",
+      "scope": "2ms",
+      "peer": "2ms",
+      "spine": "1ms"
+    },
+    {
+      "name": "destroy() leaves nothing behind"
+    },
+    {
+      "name": "The lab page itself has no horizontal overflow at 420px"
+    },
+    {
+      "name": "No console or page errors"
+    }
+  ],
+  "measured": {
+    "_today": {
+      "minContrast": 4.33,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolled": false
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 2,
+        "scrolled": true
+      },
+      "tabsToNewThread": 14,
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-collapse",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#sidebar-progress",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        ".project-options",
+        "[data-project-section]",
+        ".project-section-badge",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [],
+      "workspaceLeft": "256px",
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4
+      },
+      "mountMs60": 2,
+      "setModelMs60": 1,
+      "destroyClean": true
+    },
+    "scope": {
+      "minContrast": 5.52,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolled": false
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 3,
+        "scrolled": false
+      },
+      "tabsToNewThread": 11,
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-collapse",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#sidebar-progress",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        "[data-project-section]",
+        ".project-section-badge",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [
+        ".project-options"
+      ],
+      "workspaceLeft": "256px",
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4
+      },
+      "mountMs60": 2,
+      "setModelMs60": 0,
+      "destroyClean": true
+    },
+    "peer": {
+      "minContrast": 5.52,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolled": false
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 2,
+        "scrolled": true
+      },
+      "tabsToNewThread": 12,
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-collapse",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#sidebar-progress",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        ".project-options",
+        "[data-project-section]",
+        ".project-section-badge",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [],
+      "workspaceLeft": "256px",
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4
+      },
+      "mountMs60": 2,
+      "setModelMs60": 2,
+      "destroyClean": true
+    },
+    "spine": {
+      "minContrast": 5.52,
+      "labOnlyActions": [],
+      "clicksToSecondThread": {
+        "clicks": 1,
+        "scrolled": false
+      },
+      "clicksToOtherProjectThread": {
+        "clicks": 2,
+        "scrolled": false
+      },
+      "tabsToNewThread": 12,
+      "pinnedKept": [
+        "#workspace-sidebar",
+        "#sidebar-toggle",
+        ".sidebar-backdrop",
+        "#project-rail",
+        "#settings-rail",
+        "#status",
+        "#st-voice",
+        "#st-platform",
+        "#st-motion",
+        ".margin-card",
+        ".margin-card-scroll",
+        ".margin-close",
+        ".margin-new",
+        "[data-project-id]",
+        ".project-options",
+        "[data-project-section]",
+        ".project-section-badge",
+        ".project-thread-new"
+      ],
+      "pinnedMissing": [
+        ".sidebar-collapse",
+        "#sidebar-progress"
+      ],
+      "workspaceLeft": "256px",
+      "newThreadWithoutScrolling": {
+        "1180x820/4 projects": true,
+        "1180x820/12 projects": true,
+        "390x844/4 projects": true,
+        "390x844/12 projects": true
+      },
+      "conversationsAboveTheFold": {
+        "1180x820/4 projects": 4,
+        "1180x820/12 projects": 4,
+        "390x844/4 projects": 4,
+        "390x844/12 projects": 4
+      },
+      "mountMs60": 1,
+      "setModelMs60": 1,
+      "destroyClean": true
+    }
+  },
+  "errors": [],
+  "warnings": [
+    "_today :: \"1d\" 4.33:1 (in 45 state/size combinations)",
+    "_today :: \"Projects\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"2 merged today · 5 t\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"v2\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"No issues\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"56/58 tasks\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"Ship the lobby\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"3h\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"24m\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"2d\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"ship · 100% of plan \" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"suggest\" 4.33:1 (in 40 state/size combinations)",
+    "_today :: \"off\" 4.33:1 (in 35 state/size combinations)",
+    "_today :: \"71 need attention\" 4.33:1 (in 35 state/size combinations)",
+    "_today :: \"3 running\" 4.33:1 (in 35 state/size combinations)",
+    "_today :: Close sidebar 40px<44 (in 19 state/size combinations)",
+    "_today :: \"main\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"No builds\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"Notes\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"Written plan\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"3 active\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"off · 0% of plan\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"suggest · 20% of pla\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"stage · 40% of plan\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"off · 60% of plan\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"suggest · 80% of pla\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"stage · 0% of plan\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"off · 20% of plan\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: \"suggest · 40% of pla\" 4.33:1 (in 5 state/size combinations)",
+    "_today :: Project settings for shi 40px<44 (in 3 state/size combinations)",
+    "_today :: Project settings for bat 40px<44 (in 3 state/size combinations)",
+    "_today :: Project settings for nib 40px<44 (in 3 state/size combinations)",
+    "_today :: Project settings for tes 40px<44 (in 3 state/size combinations)",
+    "_today :: Open sidebar 40px<44 (in 2 state/size combinations)"
+  ],
+  "failed": false,
+  "pinnedCatalogue": [
+    "#workspace-sidebar",
+    "#sidebar-toggle",
+    ".sidebar-collapse",
+    ".sidebar-backdrop",
+    "#project-rail",
+    "#settings-rail",
+    "#sidebar-progress",
+    "#status",
+    "#st-voice",
+    "#st-platform",
+    "#st-motion",
+    ".margin-card",
+    ".margin-card-scroll",
+    ".margin-close",
+    ".margin-new",
+    "[data-project-id]",
+    ".project-options",
+    "[data-project-section]",
+    ".project-section-badge",
+    ".project-thread-new"
+  ]
+}
