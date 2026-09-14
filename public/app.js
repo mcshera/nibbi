@@ -447,11 +447,13 @@ async function hydrateThread(project, id) {
     own (now detached) nodes, so it finishes correctly in the thread it belongs to. */
 async function openThread(project, id, { focus = true, closeView = true } = {}) {
   const target = threadKey(project, id);
-  if (target === activeThreadKey() && S.thread.project === project) return;
   // Choosing a thread is choosing the conversation, so it leaves a project section. Following
   // a project's own selection must not, or expanding a project would close the section the
   // owner opens next.
+  // This has to happen before the already-open check: the Chat tab asks for the conversation that
+  // is already open, and what it is really asking for is to stop looking at Builds.
   if (closeView && S.projectView) closeProjectView(false);
+  if (target === activeThreadKey() && S.thread.project === project) { if (focus) ask.focus(); return; }
   const current = threadState(activeThreadKey());
   current.turns = S.turns; current.nodes = [...feed.children];
   if (S.review) endReview();

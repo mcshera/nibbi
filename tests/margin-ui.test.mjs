@@ -105,6 +105,15 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('.project-section[aria-current="page"]').getAttribute('data-section-project'), 'alpha');
     await page.evaluate(() => {model.view=null;ui.update(model);});
     assert.equal(await page.locator('.project-section[data-project-section][aria-current]').count(), 0);
+    // The Chat tab asks for the conversation that is already open. What it is really asking for is
+    // to stop looking at a record section, so it must dispatch even when nothing about the thread
+    // changes — openThread leaves the section before it notices the thread is unchanged.
+    await page.evaluate(() => {model.view={project:'alpha',section:'builds'};model.projects[0].threads=[{id:'home',title:'Home',lastAt:new Date().toISOString(),active:true}];ui.update(model);});
+    const beforeChat = await page.evaluate(() => calls.length);
+    await page.locator('.margin-tab[data-margin-tab="chat"]').click();
+    assert.equal(await page.evaluate(() => calls.length), beforeChat + 1, 'the Chat tab dispatches even when its conversation is already the open one');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action:'thread',id:'alpha',value:'home'});
+    await page.evaluate(() => {model.view=null;ui.update(model);});
     await openMenu();
     assert.equal(await (await gear('alpha')).getAttribute('aria-label'), 'Project settings for Alpha <img src=x onerror=alert(1)>');
     const callsBeforeSettings = await page.evaluate(() => calls.length);
