@@ -1,0 +1,169 @@
+/* scope — one project at a time. The switcher names it, the strip ranks Chat first, the body is
+   whichever tab is current. Every rule is scoped so three bars can share one page.
+   Quiet type is #5f5b55, not the app's --ink-3 (#6f6b65): on this paper that is 4.33:1, under the
+   4.5:1 floor at these sizes. */
+.sidebar-lab-scope {
+  --bar: 256px;
+  --quiet: #5f5b55;
+  --edge: rgba(21, 20, 19, .09);
+  --wash: rgba(21, 20, 19, .045);
+  --wash-firm: rgba(21, 20, 19, .075);
+  position: absolute; inset: 0;
+  font: 12.5px/1.5 Geist, system-ui, sans-serif; color: var(--ink);
+}
+.sidebar-lab-scope button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.sidebar-lab-scope button:disabled { opacity: .42; cursor: default; }
+.sidebar-lab-scope :is(button, input):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sidebar-lab-scope svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* --- the shell ------------------------------------------------------------------------------- */
+.sidebar-lab-scope .scope-bar {
+  position: absolute; inset: 0 auto 0 0; z-index: 3; width: var(--bar);
+  display: flex; flex-direction: column; min-height: 0;
+  background: #ece8e0; border-right: 1px solid var(--edge);
+  transform: translateX(-100%); visibility: hidden;
+  transition: transform 220ms var(--ease), visibility 220ms;
+}
+.sidebar-lab-scope.is-open .scope-bar { transform: none; visibility: visible; }
+.sidebar-lab-scope.is-reduced .scope-bar { transition: none; }
+.sidebar-lab-scope.is-narrow .scope-bar { width: min(300px, 100% - 40px); box-shadow: 8px 0 32px -20px rgba(21, 20, 19, .3); }
+.sidebar-lab-scope .scope-backdrop { position: absolute; inset: 0; z-index: 2; background: rgba(21, 20, 19, .16); }
+.sidebar-lab-scope .scope-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 16px 12px 10px 24px; }
+.lab-native-mac .sidebar-lab-scope .scope-head { padding-top: 48px; }
+.sidebar-lab-scope .scope-brand { font-size: 22px; font-weight: 650; letter-spacing: -.035em; }
+.sidebar-lab-scope .scope-icon-btn { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; color: var(--ink-2); }
+.sidebar-lab-scope.is-narrow .scope-icon-btn { width: 44px; height: 44px; }
+.sidebar-lab-scope .scope-icon-btn:hover { background: rgba(21, 20, 19, .065); }
+.sidebar-lab-scope .scope-toggle { position: absolute; left: 16px; top: 16px; z-index: 4; background: rgba(245, 242, 236, .94); }
+.lab-native-mac .sidebar-lab-scope .scope-toggle { top: 48px; }
+.sidebar-lab-scope .scope-icon-btn svg { width: 20px; height: 20px; }
+
+/* --- the switcher, and a dropdown the width of the bar ---------------------------------------- */
+.sidebar-lab-scope .scope-switcher { position: relative; flex: none; padding: 0 12px 10px; }
+.sidebar-lab-scope .scope-trigger {
+  width: 100%; min-height: 52px; display: flex; align-items: center; gap: 10px;
+  padding: 8px 8px 8px 10px; border-radius: 10px; text-align: left;
+  background: rgba(255, 255, 255, .42); border: 1px solid var(--edge);
+}
+.sidebar-lab-scope .scope-trigger:hover { background: rgba(255, 255, 255, .72); }
+.sidebar-lab-scope .scope-trigger[aria-expanded="true"] { background: #faf8f4; border-color: rgba(21, 20, 19, .2); }
+.sidebar-lab-scope .scope-trigger-glyph { display: grid; place-items: center; color: var(--ink-2); }
+.sidebar-lab-scope .scope-trigger-labels { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-lab-scope .scope-trigger-name { font-size: 14px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-lab-scope .scope-trigger-summary { font-size: 11.5px; color: var(--quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-lab-scope .scope-trigger-caret { display: grid; place-items: center; color: var(--quiet); }
+.sidebar-lab-scope .scope-trigger-caret svg { width: 14px; height: 14px; }
+.sidebar-lab-scope .scope-trigger[aria-expanded="true"] .scope-trigger-caret svg { transform: rotate(180deg); }
+
+/* The popup answers to the bar's width, not the caret's — that is what makes it read as a dropdown. */
+.sidebar-lab-scope .scope-menu {
+  position: absolute; left: 12px; right: 12px; top: calc(100% - 4px); z-index: 6;
+  display: flex; flex-direction: column; max-height: min(420px, 60vh); overflow: hidden;
+  background: #faf8f4; border: 1px solid rgba(21, 20, 19, .14); border-radius: 12px;
+  box-shadow: 0 16px 36px -20px rgba(21, 20, 19, .34), 0 3px 8px -5px rgba(21, 20, 19, .16);
+}
+.sidebar-lab-scope .scope-search { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--edge); color: var(--quiet); }
+.sidebar-lab-scope .scope-search svg { width: 15px; height: 15px; }
+.sidebar-lab-scope .scope-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; outline: 0; }
+.sidebar-lab-scope .scope-search input::placeholder { color: var(--quiet); }
+.sidebar-lab-scope .scope-menu-list { flex: 1; min-height: 0; overflow-y: auto; padding: 5px; scrollbar-width: thin; scrollbar-color: #bcb7af transparent; }
+.sidebar-lab-scope .scope-option { display: flex; align-items: center; border-radius: 8px; }
+.sidebar-lab-scope .scope-option:hover { background: var(--wash); }
+.sidebar-lab-scope .scope-option-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 7px 4px 7px 8px; border-radius: 8px; text-align: left; }
+.sidebar-lab-scope .scope-option-glyph { display: grid; place-items: center; color: var(--quiet); }
+.sidebar-lab-scope .scope-option-glyph svg { width: 16px; height: 16px; }
+.sidebar-lab-scope .scope-option-main.is-current { font-weight: 600; }
+.sidebar-lab-scope .scope-option-main.is-current .scope-option-glyph { color: var(--ink); }
+.sidebar-lab-scope .scope-option-name { flex: none; max-width: 52%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.sidebar-lab-scope .scope-option-note { flex: 1; min-width: 0; text-align: right; font-size: 11px; color: var(--quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-lab-scope .scope-option-gear { display: grid; place-items: center; width: 34px; height: 44px; border-radius: 8px; color: var(--quiet); }
+.sidebar-lab-scope .scope-option-gear svg { width: 15px; height: 15px; }
+.sidebar-lab-scope .scope-option-gear:hover, .sidebar-lab-scope .scope-option-gear[aria-expanded="true"] { background: var(--wash-firm); color: var(--ink); }
+.sidebar-lab-scope.is-hover-gear .scope-option-gear { opacity: 0; transition: opacity 120ms var(--ease); }
+.sidebar-lab-scope.is-hover-gear .scope-option:hover .scope-option-gear,
+.sidebar-lab-scope.is-hover-gear .scope-option-gear:focus-visible,
+.sidebar-lab-scope.is-hover-gear .scope-option-gear[aria-expanded="true"] { opacity: 1; }
+.sidebar-lab-scope.is-reduced .scope-option-gear { transition: none; }
+.sidebar-lab-scope .scope-menu-empty { margin: 0; padding: 14px 13px; color: var(--quiet); }
+.sidebar-lab-scope .scope-menu-foot { flex: none; border-top: 1px solid var(--edge); padding: 5px; }
+.sidebar-lab-scope .scope-new-project { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 7px 8px; border-radius: 8px; text-align: left; font-size: 13px; }
+.sidebar-lab-scope .scope-new-project:hover { background: var(--wash); }
+.sidebar-lab-scope .scope-new-project svg { width: 16px; height: 16px; }
+
+/* --- the strip. Chat leads it; four tabs across 256px need two rows. -------------------------- */
+.sidebar-lab-scope .scope-tabs { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 0 12px 8px; }
+.sidebar-lab-scope .scope-tab {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; justify-content: center;
+  min-height: 46px; padding: 6px 9px; border-radius: 8px; text-align: left;
+  border-bottom: 2px solid transparent; color: var(--ink-2);
+}
+.sidebar-lab-scope .scope-tab:hover { background: var(--wash); }
+.sidebar-lab-scope .scope-tab[aria-current="page"] { background: var(--wash-firm); border-bottom-color: var(--ink); color: var(--ink); }
+.sidebar-lab-scope .scope-tab-name { font-size: 13px; font-weight: 550; }
+.sidebar-lab-scope .scope-tab[aria-current="page"] .scope-tab-name { font-weight: 650; }
+.sidebar-lab-scope .scope-tab-sub { max-width: 100%; font-size: 11px; color: var(--quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-lab-scope .scope-tab-sub[data-tone="attention"] { color: var(--ink); font-weight: 600; }
+.sidebar-lab-scope .scope-tab-sub[data-tone="error"] { color: #7c392f; font-weight: 600; }
+
+/* --- the body: the current tab's contents ----------------------------------------------------- */
+.sidebar-lab-scope .scope-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 14px; scrollbar-width: thin; scrollbar-color: #bcb7af transparent; }
+.sidebar-lab-scope .scope-note { margin: 0 0 6px; padding: 0 8px; color: var(--quiet); font-size: 11.5px; }
+.sidebar-lab-scope .scope-new-thread { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 8px; border-radius: 8px; text-align: left; font-size: 13px; color: var(--ink-2); }
+.sidebar-lab-scope .scope-new-thread:hover:not(:disabled) { background: var(--wash); color: var(--ink); }
+.sidebar-lab-scope .scope-new-thread.is-pinned { background: rgba(255, 255, 255, .42); border: 1px solid var(--edge); margin-bottom: 6px; }
+.sidebar-lab-scope .scope-new-thread.is-pinned:hover:not(:disabled) { background: rgba(255, 255, 255, .78); }
+.sidebar-lab-scope .scope-new-thread svg { width: 16px; height: 16px; }
+.sidebar-lab-scope .scope-threads { display: flex; flex-direction: column; gap: 1px; }
+.sidebar-lab-scope .scope-thread { position: relative; display: flex; align-items: center; border-radius: 8px; }
+.sidebar-lab-scope .scope-thread:hover { background: var(--wash); }
+.sidebar-lab-scope .scope-thread-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 7px 8px; border-radius: 8px; text-align: left; }
+.sidebar-lab-scope .scope-thread-main svg { width: 16px; height: 16px; color: var(--quiet); }
+.sidebar-lab-scope .scope-thread-title { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-lab-scope .scope-thread-when { flex: none; font-size: 11px; color: var(--quiet); font-variant-numeric: tabular-nums; }
+.sidebar-lab-scope .scope-thread-main[aria-current="true"] { background: var(--wash-firm); }
+.sidebar-lab-scope .scope-thread-main[aria-current="true"] .scope-thread-title { font-weight: 600; }
+.sidebar-lab-scope .scope-thread-main[aria-current="true"] svg { color: var(--ink); }
+/* The time gives its place up to the two actions, rather than the row growing to hold both. */
+.sidebar-lab-scope .scope-thread-actions { position: absolute; right: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity 120ms var(--ease); }
+.sidebar-lab-scope.is-reduced .scope-thread-actions { transition: none; }
+.sidebar-lab-scope .scope-thread:hover .scope-thread-actions,
+.sidebar-lab-scope .scope-thread:focus-within .scope-thread-actions { opacity: 1; }
+.sidebar-lab-scope .scope-thread:hover .scope-thread-when,
+.sidebar-lab-scope .scope-thread:focus-within .scope-thread-when { opacity: 0; }
+.sidebar-lab-scope .scope-thread-action { display: grid; place-items: center; width: 34px; height: 36px; border-radius: 7px; color: var(--quiet); background: #ece8e0; }
+.sidebar-lab-scope .scope-thread-action:hover { background: var(--wash-firm); color: var(--ink); }
+.sidebar-lab-scope .scope-thread-action svg { width: 15px; height: 15px; }
+.sidebar-lab-scope.is-narrow .scope-thread-action { width: 44px; height: 44px; }
+.sidebar-lab-scope.is-narrow .scope-thread-actions { position: static; opacity: 1; }
+.sidebar-lab-scope.is-narrow .scope-thread:hover .scope-thread-when { opacity: 1; }
+
+/* A record tab shows what is waiting, in a sentence. The records themselves are in the workspace. */
+.sidebar-lab-scope .scope-section { padding: 4px 8px 0; }
+.sidebar-lab-scope .scope-section-headline { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.sidebar-lab-scope .scope-section-headline[data-tone="error"] { color: #7c392f; }
+.sidebar-lab-scope .scope-section-line { margin: 0 0 4px; color: var(--ink-2); font-size: 12px; }
+.sidebar-lab-scope .scope-section-hint { margin: 8px 0 12px; color: var(--quiet); font-size: 11.5px; }
+.sidebar-lab-scope .scope-section-action { min-height: 36px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--edge); background: #fffdfa; color: var(--ink-2); font-size: 12px; }
+.sidebar-lab-scope .scope-section-action:hover:not(:disabled) { background: #efebe4; border-color: rgba(21, 20, 19, .22); }
+.sidebar-lab-scope.is-narrow .scope-section-action { min-height: 44px; }
+.sidebar-lab-scope .scope-progress { margin: 14px 0 0; padding: 0 8px; color: var(--quiet); font-size: 11.5px; }
+
+/* --- the foot: what the projects you cannot see want, and Settings ----------------------------- */
+.sidebar-lab-scope .scope-foot { flex: none; padding: 8px 12px 0; }
+.sidebar-lab-scope .scope-foot .scope-progress { margin: 0 0 4px; padding: 0 4px; }
+.sidebar-lab-scope .scope-rollup { display: block; width: 100%; min-height: 32px; padding: 6px 8px; border-radius: 8px; text-align: left; color: var(--quiet); font-size: 11.5px; }
+.sidebar-lab-scope .scope-rollup:hover { background: var(--wash); color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.sidebar-lab-scope.is-narrow .scope-rollup { min-height: 44px; }
+.sidebar-lab-scope .scope-rail { flex: none; padding: 8px 12px 12px; border-top: 1px solid rgba(21, 20, 19, .08); margin-top: 8px; }
+.sidebar-lab-scope .scope-settings { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 8px; text-align: left; font-size: 13px; font-weight: 500; }
+.sidebar-lab-scope .scope-settings:hover, .sidebar-lab-scope .scope-settings[aria-expanded="true"] { background: rgba(21, 20, 19, .06); }
+.sidebar-lab-scope .scope-settings svg { width: 20px; height: 20px; }
+
+/* --- cards ------------------------------------------------------------------------------------ */
+.sidebar-lab-scope .lab-card { left: calc(var(--bar) + 12px); }
+.sidebar-lab-scope.is-narrow .lab-card { left: 12px; right: 12px; width: auto; }
+
+/* Glass: the bar is frosted paper over the translucent window (margins.css:152-157). */
+.lab-glass .sidebar-lab-scope .scope-bar { background: rgba(236, 232, 224, .70); backdrop-filter: blur(18px) saturate(1.1); }
+.lab-glass .sidebar-lab-scope .scope-menu { background: rgba(250, 248, 244, .92); backdrop-filter: blur(16px) saturate(1.05); }
+.lab-glass .sidebar-lab-scope .scope-thread-action { background: rgba(236, 232, 224, .9); }

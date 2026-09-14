@@ -77,6 +77,7 @@ try {
       const report = await page.evaluate(({ stateId, narrow }) => {
         const rows = [];
         for (const id of sidebarLab.options) {
+          sidebarLab.show(id);   // bare mode stacks the frames; only the shown one can be hit-tested
           const host = sidebarLab.hostEl(id), frame = sidebarLab.frameEl(id);
           if (!host || !frame) { rows.push({ id, missing: true }); continue; }
           const vp = sidebarLab.viewportOf(id);
@@ -160,6 +161,7 @@ try {
     const APP = new Set(['selectProject','projectSection','repository','newProject','thread','newThread','fix','plan','play','review','providers','autoMode','spendCap','model','advancedSettings','microphone','voice','sounds','notifications','calm','glass','demo','tidy']);
     const report = {};
     for (const id of sidebarLab.options) {
+      sidebarLab.show(id);
       sidebarLab.cue('home'); sidebarLab.clearActions();
       const host = sidebarLab.hostEl(id);
       for (const selector of ['[data-lab-role="chooser"]', '[data-project-id]', '[data-lab-role="chat"]', '[data-thread-id]:not([aria-current="true"])', '[data-lab-role="new-thread"]', '[data-project-section]', '[data-lab-role="new-project"]', '[data-lab-role="gear"]', '[data-lab-role="settings"]']) {
@@ -185,19 +187,27 @@ try {
 
   const escape = await page.evaluate(async () => {
     const report = {};
+    const settle = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 90)));
     for (const id of sidebarLab.options) {
+      sidebarLab.show(id);
       sidebarLab.cue('card');
+      await settle();   // the card takes focus on open; pressing before that lands makes this flaky
       const host = sidebarLab.hostEl(id);
       const bar = host.querySelector('[data-pin="workspace-sidebar"]') || host.firstElementChild;
       const press = () => (host.contains(document.activeElement) ? document.activeElement : host.querySelector('button'))
         ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-      press(); await new Promise(r => setTimeout(r, 30));
+      press(); await settle();
       const cardClosed = !host.querySelector('[data-lab-role="card"]:not([hidden])');
       const barStillOpen = !bar || bar.getAttribute('aria-hidden') !== 'true';
       const focusKept = host.contains(document.activeElement);
-      press(); await new Promise(r => setTimeout(r, 260));
-      const barClosed = !bar || bar.getAttribute('aria-hidden') === 'true' || !window.__lab.visible(bar);
-      report[id] = { cardClosed, barStillOpen, focusKept, barClosed };
+      const widthBefore = bar ? bar.getBoundingClientRect().width : 0;
+      press(); await new Promise(r => setTimeout(r, 300));
+      // "Got out of the way" — not "vanished". A design may keep a strip of itself when collapsed
+      // (spine does, deliberately), so the bar passes if it is hidden OR has given the page back room.
+      const widthAfter = bar ? bar.getBoundingClientRect().width : 0;
+      const barClosed = !bar || bar.getAttribute('aria-hidden') === 'true' || !window.__lab.visible(bar)
+        || widthAfter < widthBefore - 8;
+      report[id] = { cardClosed, barStillOpen, focusKept, barClosed, widthBefore: Math.round(widthBefore), widthAfter: Math.round(widthAfter) };
     }
     return report;
   });
@@ -226,6 +236,7 @@ try {
     const settle = () => new Promise(r => setTimeout(r, 280));   // the bar slides for 220ms; measuring mid-slide lies
     // How many clicks from home, and whether the bar has to be scrolled to see the target after them.
     const clicksTo = async (id, targetSelector, candidates) => {
+      sidebarLab.show(id);
       sidebarLab.cue('home');
       await settle();
       const host = sidebarLab.hostEl(id);
@@ -242,7 +253,15 @@ try {
         let moved = false;
         for (const selector of candidates) {
           for (const el of host.querySelectorAll(selector)) {
-            if (!el.disabled && window.__lab.reachable(el, host) && el.getAttribute('aria-expanded') !== 'true') { el.click(); moved = true; break; }
+            if (el.disabled || el.getAttribute('aria-expanded') === 'true') continue;
+            if (!window.__lab.reachable(el, host)) {
+              // A row clipped by the bar's own scroll is still reachable — you scroll to it. Count that.
+              el.scrollIntoView({ block: 'nearest' });
+              await new Promise(r => setTimeout(r, 60));
+              if (!window.__lab.reachable(el, host)) continue;
+              scrolled = true;
+            }
+            el.click(); moved = true; break;
           }
           if (moved) break;
         }
@@ -252,6 +271,7 @@ try {
       return { clicks: null, scrolled };
     };
     for (const id of sidebarLab.options) {
+      sidebarLab.show(id);
       const row = {};
       row.clicksToSecondThread = await clicksTo(id, '[data-thread-project="battalion"][data-thread-id="t-left-bar"]',
         ['[data-lab-role="chat"]', '[data-project-id="battalion"]', '[data-lab-role="chooser"]']);
@@ -290,10 +310,18 @@ try {
     for (const [stateId, label] of [['home', '4'], ['many', '12']]) {
       await sizePage.evaluate(id => sidebarLab.cue(id), stateId);
       await sizePage.waitForTimeout(300);
-      const row = await sizePage.evaluate(() => {
+      const row = await sizePage.evaluate(async () => {
         const report = {};
         for (const id of sidebarLab.options) {
+          sidebarLab.show(id);
+          // At rest: a design may cue this moment with its chooser open (scope shows twelve projects
+          // that way). The question here is what the bar offers once you have stopped switching.
           const host = sidebarLab.hostEl(id);
+          const chooser = host.querySelector('[data-lab-role="chooser"][aria-expanded="true"], [data-lab-role="chooser"]:not([hidden])');
+          if (chooser) {
+            (host.querySelector('button') || chooser).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+            await new Promise(r => setTimeout(r, 120));
+          }
           report[id] = {
             newThread: window.__lab.reachable(host.querySelector('[data-lab-role="new-thread"]'), host),
             threadsAboveFold: [...host.querySelectorAll('[data-thread-id]')].filter(el => window.__lab.reachable(el, host)).length,

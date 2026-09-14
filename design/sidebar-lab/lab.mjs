@@ -4,7 +4,7 @@
 import { STATES, stateById, buildModel, FLAGS, FLAG_IDS, ENVIRONMENT, defaultFlags, DESKTOP, PHONE } from './states.mjs';
 import { createFrame, stylesReady } from './chrome.mjs';
 
-export const OPTION_IDS = ['_today'];   // the three designs join at integration
+export const OPTION_IDS = ['_today', 'scope', 'peer', 'spine'];
 
 const params = new URLSearchParams(location.search);
 const bare = params.get('scale') === '1';
@@ -28,7 +28,16 @@ const studiesEl = document.getElementById('studies');
 const phonesEl = document.getElementById('phones');
 const noteEl = document.getElementById('bench-note');
 const template = document.getElementById('study-template');
-const studies = new Map();   // id -> { meta, desktop: {frame, inst, scale}, phone: {...}, actionEl }
+const studies = new Map();   // id -> { meta, card, desktop: {frame, inst}, phone: {...}, actionEl }
+// In bare mode every frame is full size, so stacking them would push all but the first out of the
+// viewport — and elementFromPoint, which the checks use to ask "could you actually click this?",
+// only answers inside the viewport. So bare mode shows one at a time.
+let shown = null;
+function show(id) {
+  if (!bare) return;
+  shown = id;
+  for (const [key, study] of studies) study.card?.classList.toggle('is-shown', key === id);
+}
 const actions = [];
 
 function record(id, name, projectId, value) {
@@ -154,7 +163,7 @@ async function build() {
         Object.assign(document.createElement('p'), { className: 'study-fail', textContent: `${entry.id} failed to load: ${entry.error.message}` }));
       continue;
     }
-    const study = { meta, actionEl, model: buildModel(state) };
+    const study = { meta, actionEl, card, model: buildModel(state) };
     studies.set(entry.id, study);
     const onAction = (name, projectId, value) => record(entry.id, name, projectId, value);
     // desktop
@@ -176,6 +185,7 @@ async function build() {
       study.phone.inst = mountSafe(entry.module, pf.host, { id: entry.id, model: buildModel(state), state, viewport: { ...PHONE }, reduced: env.reduced, flags, onAction });
     }
   }
+  show(ids[0]);
   syncAll();
   const rescale = () => { for (const study of studies.values()) for (const kind of ['desktop', 'phone']) if (study[kind]) scaleFrame(study[kind]); };
   requestAnimationFrame(rescale);
@@ -202,6 +212,9 @@ window.sidebarLab = {
   get flags() { return { ...flags }; },
   get env() { return { ...env }; },
   cue(id) { state = id; syncAll(); },
+  /** Bare mode only: bring one option into the viewport so it can be measured and hit-tested. */
+  show(id) { show(id); return shown; },
+  get shown() { return shown; },
   setFlags(next) { flags = { ...defaultFlags(false), ...next }; syncAll({ cue: false }); },
   setEnvironment(next) { env = { ...env, ...next }; document.documentElement.classList.toggle('reduced', env.reduced); syncAll({ cue: false }); },
   resync(options) { syncAll(options); },

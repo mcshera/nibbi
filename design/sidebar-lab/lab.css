@@ -115,5 +115,7 @@ html.bare .masthead, html.bare .intro, html.bare .howto, html.bare .bench, html.
 html.bare .section-head, html.bare .phones, html.bare .study-head, html.bare .study-body, html.bare .lab-frame-label { display: none; }
 html.bare .shell { padding: 0; max-width: none; }
 html.bare .studies { display: block; padding: 0; gap: 0; }
+html.bare .study { display: none; }
+html.bare .study.is-shown { display: block; }
 html.bare .study { border: 0; border-radius: 0; background: none; }
 html.bare .frame-wrap { border: 0; height: auto !important; }
