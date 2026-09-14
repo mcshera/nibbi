@@ -317,7 +317,10 @@ try {
           // At rest: a design may cue this moment with its chooser open (scope shows twelve projects
           // that way). The question here is what the bar offers once you have stopped switching.
           const host = sidebarLab.hostEl(id);
-          const chooser = host.querySelector('[data-lab-role="chooser"][aria-expanded="true"], [data-lab-role="chooser"]:not([hidden])');
+          // Open means: a trigger reporting expanded, or a panel that is not hidden. The trigger
+          // itself is always present, so matching that alone would dismiss the bar instead.
+          const chooser = host.querySelector('[data-lab-role="chooser"][aria-expanded="true"]')
+            || [...host.querySelectorAll('[data-lab-role="chooser"]:not([hidden])')].find(el => el.tagName !== 'BUTTON');
           if (chooser) {
             (host.querySelector('button') || chooser).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
             await new Promise(r => setTimeout(r, 120));
