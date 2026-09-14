@@ -18,7 +18,8 @@ if (flag('native-mac')) query.set('nativeMac', '1');
 const { server, url } = await listen(0);
 const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
 try {
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 });
+  // dpr 1: these sheets are already ~7000px wide, and dpr 2 quadruples the bytes for nothing.
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errors.push(m.text()); });

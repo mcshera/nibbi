@@ -410,6 +410,16 @@ try {
 } finally {
   results.errors = [...new Set(results.errors)];
   results.pinnedCatalogue = PINNED.map(([app]) => app);
+  // The baseline's findings repeat across every state and size. Keep one line per distinct finding
+  // with the count, so the file says "this is everywhere" without saying it 688 times.
+  const tally = new Map();
+  for (const w of results.warnings) {
+    const [where, what] = [w.slice(0, w.indexOf(':')), w.slice(w.indexOf(':') + 1).trim()];
+    const key = `${where.split(' · ')[0]} :: ${what}`;
+    tally.set(key, (tally.get(key) || 0) + 1);
+  }
+  results.warnings = [...tally].sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => `${key}${n > 1 ? ` (in ${n} state/size combinations)` : ''}`);
   await writeFile(out + 'browser-results.json', JSON.stringify(results, null, 2));
   await browser.close(); server.close();
   console.log(results.failed ? 'RESULT: FAILED' : 'RESULT: all browser checks passed');
