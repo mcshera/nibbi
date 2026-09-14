@@ -62,7 +62,6 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-evidence-code { max-height: 420px; overflow: auto; overscroll-behavior: contain; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; padding: 12px; margin: 0 0 12px; background: rgba(21,20,19,.045); border-radius: 6px; }
 .project-evidence-panel .diff { margin: 0; max-width: 100%; }
 .project-activity { color: var(--ink-2); }
-.project-build-return { display: none; }
 .project-list-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding-bottom: 8px; }
 .project-search { flex: 1; min-width: 170px; }
 .project-search input, .project-field input, .project-field textarea, .project-field select { width: 100%; box-sizing: border-box; min-height: 44px; border: 1px solid #c3beb4; border-radius: 6px; padding: 10px 12px; color: var(--ink); background: #faf8f4; caret-color: var(--ink); }
@@ -122,8 +121,6 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
   .project-filter { padding-inline: 8px; }
 }
 @media (max-width: 540px) {
-  .project-build-list.has-selection > .project-build:not(.is-selected), .project-build-list.has-selection > .project-group-title { display: none; }
-  .project-build-return { display: block; }
   .project-list-tools .project-filter { padding-inline: 0; }
   .project-record-summary > strong { min-width: 62%; }
   .project-milestone > summary { gap: 12px; }
@@ -219,3 +216,36 @@ body.glass .project-notice[data-kind="success"] { background: rgba(231, 235, 225
 body.glass .project-confirmation { background: rgba(238, 231, 220, .90); }
 body.glass .project-workspace .diffv .dbody { background: rgba(251, 250, 247, .90); }
 body.glass .project-action:hover:not(:disabled) { background: rgba(233, 229, 221, .92); }
+
+/* Builds as a lobby: one build staged with its decision, the rest queued beside it.
+   The queue rows are the same <details> as the staged one, minus their evidence. */
+.project-build-list.has-selection > .project-group-title { display: none; }
+.project-build-stage > .project-build { border-bottom: 0; }
+.project-build-stage .project-build-label strong { font-size: 20px; line-height: 1.3; }
+.project-build-stage > .project-build > summary::after { display: none; }   /* it cannot collapse */
+.project-lobby-cta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px; }
+.project-lobby-cta .project-action { min-height: 48px; padding: 12px 18px; border-radius: 14px; font-size: 13px !important; }
+.project-lobby-cta .project-action.primary { font-weight: 600; }
+.project-lobby-keys { flex-basis: 100%; margin: 2px 0 0; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.project-build-rail { display: flex; flex-direction: column; gap: 6px; }
+.project-build-rail .project-build { border-bottom: 0; }
+.project-build-rail .project-build > summary { flex-direction: column; align-items: stretch; gap: 3px; padding: 10px 12px; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface, #faf8f4); }
+.project-build-rail .project-build > summary:hover { background: rgba(21,20,19,.05); }
+.project-build-rail .project-build > summary::after { display: none; }   /* a queue row is chosen, not unfolded */
+.project-build-rail .project-build-label { gap: 2px; }
+/* The rail is a queue, so each row carries only what picks it out: a title and its state.
+   Branch, checks and delivery all belong to the build once it is staged. */
+.project-build-rail .project-build-label strong { font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.project-build-rail .project-build-label .project-muted, .project-build-rail .project-build-branch { display: none; }
+.project-build-rail .project-build-status { font-size: 11.5px; white-space: normal; color: var(--ink-3); }
+@media (min-width: 900px) {
+  .project-build-list.has-selection { display: grid; grid-template-columns: minmax(0, 1fr) 236px; column-gap: 28px; align-items: start; }
+  .project-build-stage { grid-column: 1; min-width: 0; }
+  .project-build-rail { grid-column: 2; }
+}
+@media (max-width: 899px) {
+  .project-build-rail { margin-top: 20px; }
+  .project-lobby-cta .project-action { flex: 1 1 auto; justify-content: center; }
+}
+/* A phone shows the staged build alone; "Back to build list" is the way back to the queue. */
+@media (max-width: 540px) { .project-build-rail { display: none; } }

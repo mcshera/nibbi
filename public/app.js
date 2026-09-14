@@ -1581,6 +1581,10 @@ async function handleProjectAction(action, project, value) {
     const result = await api.get('/api/fixer-log?id=' + id + (value.attemptId ? '&attemptId=' + encodeURIComponent(value.attemptId) : ''));
     return value.kind === 'checks' ? {verification: result.fixer?.verification, entries: result.entries} : result;
   }
+  // Reading a preview and opening its URL stay above the busy guard: a playtest already
+  // running is worth reaching while Nibbi is mid-turn, and neither call changes anything.
+  if (action === 'previewStatus') return api.get('/api/preview?id=' + encodeURIComponent(value.id));
+  if (action === 'openUrl') { openUrl(value.url); return true; }
   if (S.busy) throw new Error('Nibbi is still working. You can keep browsing while it finishes.');
   if (S.demo && ['projectCommand','buildCommand','githubCommand'].includes(action)) throw new Error('Leave demo mode before changing project work.');
   selectMarginProject(project);

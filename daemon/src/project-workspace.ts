@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { config } from './config.js';
 import { runtime } from './store.js';
 import { listFixers, allowedRunActions, type Fixer } from './fixer.js';
+import { previewStatus } from './previews.js';
 import { parseProjectDocument, pinDocument, planPath, type RoadmapTask } from './roadmap.js';
 import { issueDocument } from './project-issues.js';
 import { editDocuments, readDocument, WorkspaceConflict, type WorkspaceDocument } from './workspace-documents.js';
@@ -28,7 +29,7 @@ function reportedActivity(run: Fixer): string | undefined {
     : String(payload.text ?? '');
   return value.replace(/\x1b\[[0-9;]*m/g, '').trim().slice(-400) || undefined;
 }
-const runView = (run: Fixer): Fixer & { github: Record<string, any>; allowedActions: string[]; groupStatus: string; currentActivity?: string } => ({ ...run, github: githubBuildSummary(run.id), allowedActions: allowedRunActions(run), groupStatus: phase(run.status), currentActivity: reportedActivity(run) });
+const runView = (run: Fixer): Fixer & { github: Record<string, any>; allowedActions: string[]; preview: Record<string, any>; groupStatus: string; currentActivity?: string } => ({ ...run, github: githubBuildSummary(run.id), allowedActions: allowedRunActions(run), preview: previewStatus(run.id), groupStatus: phase(run.status), currentActivity: reportedActivity(run) });
 function buildCounts(runs: ReturnType<typeof runView>[]): Record<string, any> {
   const counts = { total: runs.length, active: 0, review: 0, failed: 0, history: 0, toPush: 0, pullRequests: 0, attention: 0, readyPR: 0, byStatus: {} as Record<string, number> };
   for (const run of runs) {
