@@ -76,14 +76,18 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   if (!left || !right) throw new Error('Margin UI requires #project-rail and #settings-rail');
   let model = {projects: [], settings: {}, busy: false}, opened = null, cardTrigger = null, destroyed = false, serial = 0;
   let menuOpen = false, query = '';
+  // The app calls update() on every snapshot and event. Replacing the strip and the body each time
+  // throws away DOM nobody asked to lose and keeps the main thread busy while the workspace works,
+  // so each renders only when what it renders from has actually changed.
+  let tabsKey = '', bodyKey = '';
   const projects = new Map(), pending = new Set(), bindings = new Set(), cards = new Set();
   let visibleKey = '';
   function notifyVisibility() {
-    // Closed bar: nothing. Open: the project you are in. Dropdown open: all of them, because every
-    // row in the list says what its project wants from you, and that needs its summary.
-    const ids = !sidebarOpen ? []
-      : menuOpen ? [...projects.keys()]
-      : [String(model.activeProject ?? '')].filter(id => projects.has(id));
+    // Only the project you are in. Widening this to every project while the list is open made the
+    // rows more informative and cost a read for each one; those reads land later as "records
+    // updated" and replace a panel someone is part-way through. The rows say what the app already
+    // knows and fill in as it learns more, which is worth more than a list that interrupts.
+    const ids = sidebarOpen ? [String(model.activeProject ?? '')].filter(id => projects.has(id)) : [];
     const key = JSON.stringify(ids); if (key === visibleKey) return; visibleKey = key;
     queueMicrotask(() => { if (!destroyed) onVisibility?.(ids); });
   }
@@ -178,6 +182,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   function open(card, source) {
     if (opened === card) { close(); return; }
     close(); opened = card; cardTrigger = source;
+    // The list stays open behind the card. Closing it would hide the gear the card was opened from,
+    // and Escape has to be able to put focus back on it.
     card.el.hidden = false;
     source?.setAttribute('aria-expanded', 'true');
     // Modeless: focus the card, but do not trap keyboard users in it.
@@ -352,9 +358,6 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     menuOpen = true; menu.hidden = false;
     trigger.setAttribute('aria-expanded', 'true');
     renderMenu();
-    // Only the current project's summary is worth reading while the bar is closed; once the list is
-    // open, every project's line is on screen, so they all become worth fetching.
-    notifyVisibility();
     if (focusCurrent) (list.querySelector('.is-active') || list.querySelector('[data-project-id]'))?.focus({preventScroll: true});
   }
   function closeMenu(restore) {
@@ -363,7 +366,6 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     query = ''; search.value = '';
     trigger.setAttribute('aria-expanded', 'false');
     if (restore) trigger.focus({preventScroll: true});
-    notifyVisibility();
     return true;
   }
   function menuKeys(event) {
@@ -422,8 +424,12 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   const SECTIONS = [['builds','Builds','build'],['issues','Issues','issue'],['plans','Plans','plan']];
   function renderTabs() {
-    const entry = activeEntry(); if (!entry) { tabs.replaceChildren(); return; }
+    const entry = activeEntry(); if (!entry) { tabs.replaceChildren(); tabsKey = ''; return; }
     const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
+    const key = JSON.stringify([data.id, view, !!model.busy, (Array.isArray(data.threads) ? data.threads : []).length,
+      SECTIONS.map(([section]) => [data.sections?.[section]?.badge, data.sections?.[section]?.tone, data.sections?.[section]?.accessible])]);
+    if (key === tabsKey) return;
+    tabsKey = key;
     const cells = [];
     const threads = Array.isArray(data.threads) ? data.threads : [];
     const chatSaid = model.busy ? 'nibbi is answering' : `${threads.length} conversation${threads.length === 1 ? '' : 's'}`;
@@ -458,13 +464,20 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     return el;
   }
   function renderBody() {
-    const entry = activeEntry(); if (!entry) { body.replaceChildren(); return; }
+    const entry = activeEntry(); if (!entry) { body.replaceChildren(); bodyKey = ''; return; }
     const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
+    const key = JSON.stringify([data.id, view, !!model.busy,
+      (Array.isArray(data.threads) ? data.threads : []).map(t => [t.id, t.title, t.lastAt, !!t.active]),
+      view ? [data.sections?.[view]?.badge, data.sections?.[view]?.detail, data.sections?.[view]?.tone,
+        data.inFlight, data.staged, data.pending, data.done, data.total, data.goal, data.planAvailable] : null]);
+    if (key === bodyKey) return;
+    bodyKey = key;
     body.replaceChildren(...(view ? sectionBody(data, view) : chatBody(data, entry)));
   }
   function chatBody(data, entry) {
     const parts = [];
-    const fresh = bind(button('', 'project-section project-thread-new', () => void dispatch('newThread', data.id)), 'newThread', data.id, () => !!model.busy);
+    const fresh = button('', 'project-section project-thread-new', () => void dispatch('newThread', data.id));
+    fresh.disabled = !!model.busy;   // rebuilt each time it changes, so it is not bound: bindings are for lasting elements
     fresh.append(icon('newThread'), node('span', 'project-section-copy', 'New thread'));
     fresh.title = model.busy ? 'Not while nibbi is answering' : 'Start a new conversation';
     const threads = node('div', 'project-threads');
@@ -493,8 +506,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     wrap.append(node('p', 'margin-section-line', waitingLine(data, section)));
     wrap.append(node('p', 'margin-section-hint', 'The full list is open beside the bar.'));
     const [action, label] = {builds: ['review', 'Review'], issues: ['repository', 'Repository & GitHub'], plans: ['plan', 'Plan']}[section];
-    const go = bind(button(label, 'margin-pill', () => void dispatch(action, data.id, undefined, globalError)), action, data.id,
-      () => !!model.busy || action === 'plan' && data.planAvailable === false);
+    const go = button(label, 'margin-pill', () => void dispatch(action, data.id, undefined, globalError));
+    go.disabled = !!model.busy || action === 'plan' && data.planAvailable === false;
     wrap.append(go);
     return [wrap];
   }

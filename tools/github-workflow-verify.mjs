@@ -16,7 +16,14 @@ async function ready(page,section){await page.waitForFunction(section=>nibbiApp.
 async function open(page,project,section){await sidebar(page);await chooseProject(page,project);if(section==='repository'){await openProjectCard(page,project);await page.locator('.margin-card:not([hidden])').getByRole('button',{name:'Repository & GitHub',exact:true}).click();}else{await closeSwitcher(page);await page.locator(`[data-section-project="${project}"][data-project-section="${section}"]`).click();}await ready(page,section);}
 async function latest(page){const update=page.locator('.github-notice').getByRole('button',{name:'Show updates',exact:true});if(await update.isVisible())await update.click();}
 async function refreshGithub(page){await page.getByRole('button',{name:'Refresh GitHub',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.github-panel')?.getAttribute('aria-busy')==='false');await latest(page);}
-async function review(page){await page.getByRole('button',{name:'Review operation',exact:true}).click();await page.locator('.github-review').waitFor();}
+async function review(page){
+ // Reviewing reads the records again, and that read can come back newer than the panel, in which
+ // case the panel offers the update instead of the review — saying, correctly, that the draft is
+ // preserved. Take the update and ask again rather than treating a benign state as a failure.
+ await page.getByRole('button',{name:'Review operation',exact:true}).click();
+ try{await page.locator('.github-review').waitFor({timeout:4000});}
+ catch{await latest(page);await page.getByRole('button',{name:'Review operation',exact:true}).click();await page.locator('.github-review').waitFor();}
+}
 async function confirm(page,name){await page.getByRole('button',{name,exact:true}).click();await page.locator('.github-review').waitFor({state:'detached'});await page.waitForFunction(()=>document.querySelector('.github-panel')?.getAttribute('aria-busy')==='false');await latest(page);}
 async function buildPanel(page,id){await open(page,'paper-garden','builds');const updates=page.locator('.project-notice:not(.github-notice)').getByRole('button',{name:'Show updates',exact:true});if(await updates.isVisible())await updates.click();const row=page.locator(`[data-build-id="${id}"]`);if(!await row.evaluate(el=>el.open))await row.locator(':scope > summary').click();await row.getByRole('button',{name:'GitHub',exact:true}).click();await row.locator('.github-panel').waitFor();await page.waitForFunction(()=>document.querySelector('.github-panel')?.getAttribute('aria-busy')==='false');await latest(page);return row;}
 async function shot(page,name){
