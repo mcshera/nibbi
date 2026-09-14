@@ -40,9 +40,15 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   el.setAttribute('aria-labelledby', 'project-workspace-title');
   const head = node('header', 'project-workspace-head');
   const title = node('h1', '', 'Project'); title.id = 'project-workspace-title'; title.tabIndex = -1;
-  const back = button('Back to chat', 'project-text-button', () => onClose?.()); head.append(title, back);
+  head.append(title);
   const tabs = node('nav', 'project-tabs'); tabs.setAttribute('aria-label', 'Project sections');
   const tabButtons = {};
+  // Chat is a tab here for the same reason it is one in the bar: leaving a record section is going
+  // back to the conversation, not dismissing a page. "Back to chat" said that as a link; this says
+  // it as the thing it is, and the bar and the workspace now name the same four places.
+  const chatTab = button('', 'project-tab project-tab-chat', () => onClose?.());
+  chatTab.append(node('span', 'project-tab-name', 'Chat'), node('span', 'project-tab-count', ''));
+  chatTab.dataset.workspaceSection = 'chat'; tabs.append(chatTab);
   for (const [section, label] of Object.entries(labels)) {
     const b = button('', 'project-tab', () => onNavigate?.(current.project, section));
     b.append(node('span', 'project-tab-name', label), node('span', 'project-tab-count', 'Loading'));

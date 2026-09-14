@@ -1,6 +1,7 @@
 // Phase 3 acceptance: live tool transcript, plan review before dispatch, mid-run steering, narrow-screen fit.
 // Real candidate backend (tools/project-workflow-fixture.mjs) with deterministic providers: the fixer provider writes a fixture file, the lead returns fixed text without tools.
 import assert from 'node:assert/strict';
+import {chooseProject,closeSwitcher} from './choose-project.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFileSync,writeFileSync,mkdirSync,existsSync,readdirSync,rmSync} from 'node:fs';
 import {resolve,join} from 'node:path';
@@ -53,7 +54,7 @@ async function shot(page,name){await page.waitForFunction(()=>{const s=window.ni
 async function ready(page,section){await page.waitForFunction(section=>nibbiApp.state().projectView?.section===section&&document.querySelector('#project-workspace').getAttribute('aria-busy')==='false',section);}
 async function open(page,project,section){
  if(await page.locator('#sidebar-toggle').isVisible()){await page.locator('#sidebar-toggle').click();await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);}
- const row=page.locator(`[data-project-id="${project}"]`);if(await row.getAttribute('aria-expanded')!=='true')await row.click();
+ await chooseProject(page,project);await closeSwitcher(page);
  await page.locator(`[data-section-project="${project}"][data-project-section="${section}"]`).click();await ready(page,section);
  const updates=page.locator('.project-notice').getByRole('button',{name:'Show updates',exact:true});if(await updates.isVisible())await updates.click();
 }

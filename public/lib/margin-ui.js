@@ -16,6 +16,8 @@ const glyphs = {
   voice: ['M11 5 6 9H3v6h3l5 4V5Z', 'M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14'],
   model: ['m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z'],
   notifications: ['M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3Z', 'M10 20h4M12 2v2'],
+  search: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z', 'm16.2 16.2 3.8 3.8'],
+  caret: ['m6 9 6 6 6-6'],
   settings: ['M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M9.5 3h5l.5 2.4 1.8 1 2.3-.7 2.5 4.3-1.8 1.6v.8l1.8 1.6-2.5 4.3-2.3-.7-1.8 1-.5 2.4h-5L9 18.6l-1.8-1-2.3.7L2.4 14l1.8-1.6v-.8L2.4 10l2.5-4.3 2.3.7 1.8-1L9.5 3Z'],
 };
 const text = (value, fallback = '—') => value == null || value === '' ? fallback : String(value);
@@ -72,11 +74,16 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   const left = document.getElementById('project-rail');
   const right = document.getElementById('settings-rail');
   if (!left || !right) throw new Error('Margin UI requires #project-rail and #settings-rail');
-  let model = {projects: [], settings: {}, busy: false}, opened = null, trigger = null, destroyed = false, serial = 0;
+  let model = {projects: [], settings: {}, busy: false}, opened = null, cardTrigger = null, destroyed = false, serial = 0;
+  let menuOpen = false, query = '';
   const projects = new Map(), pending = new Set(), bindings = new Set(), cards = new Set();
   let visibleKey = '';
   function notifyVisibility() {
-    const ids = sidebarOpen ? [...projects.values()].filter(entry => !entry.children.hidden).map(entry => entry.id) : [];
+    // Closed bar: nothing. Open: the project you are in. Dropdown open: all of them, because every
+    // row in the list says what its project wants from you, and that needs its summary.
+    const ids = !sidebarOpen ? []
+      : menuOpen ? [...projects.keys()]
+      : [String(model.activeProject ?? '')].filter(id => projects.has(id));
     const key = JSON.stringify(ids); if (key === visibleKey) return; visibleKey = key;
     queueMicrotask(() => { if (!destroyed) onVisibility?.(ids); });
   }
@@ -104,7 +111,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   function restoreWorkspace() { for (const el of inerted) el.inert = false; inerted.clear(); }
   function setSidebar(value, focus = false) {
     const shouldFocus = focus || (!value && sidebar.contains(document.activeElement));
-    if (!value) close();
+    if (!value) { close(); closeMenu(false); }
     sidebarOpen = value;
     if (!narrow.matches) {
       desktopOpen = value;
@@ -161,16 +168,16 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   function close(restore = false) {
     if (!opened) return;
-    const lastTrigger = trigger;
+    const lastTrigger = cardTrigger;
     opened.el.hidden = true;
     if (opened.confirm) opened.confirm.hidden = true;
-    trigger?.setAttribute('aria-expanded', 'false');
-    opened = null; trigger = null;
+    cardTrigger?.setAttribute('aria-expanded', 'false');
+    opened = null; cardTrigger = null;
     if (restore && lastTrigger?.isConnected) lastTrigger.focus({preventScroll: true});
   }
   function open(card, source) {
     if (opened === card) { close(); return; }
-    close(); opened = card; trigger = source;
+    close(); opened = card; cardTrigger = source;
     card.el.hidden = false;
     source?.setAttribute('aria-expanded', 'true');
     // Modeless: focus the card, but do not trap keyboard users in it.
@@ -197,14 +204,40 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     if (!card.el.id) card.el.id = `margin-popover-${++serial}`;
     el.setAttribute('aria-haspopup', 'dialog'); el.setAttribute('aria-controls', card.el.id); el.setAttribute('aria-expanded', 'false');
   }
-  const newProject = () => { close(); void dispatch('newProject'); };
+  const newProject = () => { closeMenu(false); close(); void dispatch('newProject'); };
   const add = bind(button('', 'margin-project margin-new', newProject), 'newProject');
   add.append(icon('plus'), node('span', 'margin-project-name', 'New project'));
-  const projectsTitle = node('h2', 'sidebar-section-title', 'Projects');
   const progressStatus = node('p', 'margin-muted sidebar-progress', progressLine(undefined));
   progressStatus.id = 'sidebar-progress'; progressStatus.setAttribute('role', 'status');
-  progressStatus.style.margin = '-4px 12px 10px';
-  left.append(add, projectsTitle, progressStatus, list, empty, globalError);
+
+  // The switcher. One project is current; the rest are a list you visit. Its popup answers to the
+  // bar's width, not the caret's, which is what makes it read as a dropdown rather than a menu button.
+  const switcher = node('div', 'margin-switcher');
+  const trigger = button('', 'margin-project margin-switch-trigger', () => (menuOpen ? closeMenu(true) : openMenu(false)));
+  trigger.setAttribute('aria-haspopup', 'true'); trigger.setAttribute('aria-expanded', 'false');
+  const triggerRing = node('span', 'project-folder'); triggerRing.append(icon('folder'));
+  const triggerLabels = node('span', 'margin-project-labels');
+  const triggerName = node('span', 'margin-project-name');
+  const triggerSummary = node('span', 'margin-project-summary');
+  triggerLabels.append(triggerName, triggerSummary);
+  const triggerCaret = node('span', 'project-caret'); triggerCaret.append(icon('caret'));
+  trigger.append(triggerRing, triggerLabels, triggerCaret);
+  const menu = node('div', 'margin-switch-menu'); menu.hidden = true;
+  menu.setAttribute('aria-label', 'Projects');
+  const searchWrap = node('div', 'margin-switch-search');
+  const search = document.createElement('input');
+  search.type = 'text'; search.placeholder = 'Find a project'; search.autocomplete = 'off'; search.spellcheck = false;
+  search.setAttribute('aria-label', 'Find a project');
+  search.addEventListener('input', () => { query = search.value; renderMenu(); });
+  searchWrap.append(icon('search'), search);
+  menu.append(searchWrap, list, empty, add);
+  switcher.append(trigger, menu);
+
+  // The strip: four glyphs, and the one you are on opens up to say its name and what is waiting.
+  const tabs = node('nav', 'margin-tabs'); tabs.setAttribute('aria-label', 'Project sections');
+  const body = node('div', 'margin-body');
+  const rollup = node('p', 'margin-muted margin-rollup'); rollup.hidden = true;
+  left.append(switcher, tabs, body, progressStatus, rollup, globalError);
 
   const settings = makeCard('Settings', 'right');
   const metadata = node('dl', 'margin-metadata');
@@ -242,35 +275,25 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     else bind(el, action, undefined, () => action === 'notifications' && model.settings.notificationsSupported === false);
   }
 
+  /** A row in the dropdown: the project, what it wants from you in words, and its settings. */
   function createProject(id) {
     const entry = {id, data: {}, dirty: false};
     const group = node('div', 'project-group');
     const headingRow = node('div', 'project-heading-row');
-    const row = button('', 'margin-project', () => select(entry, row));
+    const row = button('', 'margin-project', () => select(entry));
     row.dataset.projectId = id;
     const ring = node('span', 'project-folder'); ring.append(icon('folder'));
     const labels = node('span', 'margin-project-labels'); const name = node('span', 'margin-project-name');
     const summary = node('span', 'margin-project-summary'); labels.append(name, summary); row.append(ring, labels);
-    const caret = node('span', 'project-caret'); caret.append(icon('chevron')); row.append(caret);
-    const children = node('div', 'project-sections'); children.id = `project-sections-${++serial}`; children.hidden = true;
-    row.setAttribute('aria-controls', children.id); row.setAttribute('aria-expanded', 'false');
-    const sectionButtons = {};
-    const sectionLabels = {};
-    for (const [section, label, glyph] of [['builds','Builds','build'],['issues','Issues','issue'],['plans','Plans','plan']]) {
-      const child = button('', 'project-section', () => void dispatch('projectSection', id, section));
-      child.dataset.projectSection = section; child.dataset.sectionProject = id;
-      const copy = node('span', 'project-section-copy'), top = node('span', 'project-section-top');
-      const badge = node('span', 'project-section-badge'), detail = node('span', 'project-section-detail'); detail.hidden = true;
-      top.append(node('span', 'project-section-name', label), badge); copy.append(top, detail);
-      child.append(icon(glyph), copy); children.append(child); sectionButtons[section] = child; sectionLabels[section] = {badge, detail};
-    }
-    const threads = node('div', 'project-threads');
-    const newThread = bind(button('', 'project-section project-thread-new', () => void dispatch('newThread', id)), 'newThread', id, () => !!model.busy);
-    newThread.append(icon('newThread'), node('span', 'project-section-copy', 'New thread'));
-    children.append(threads, newThread);
     const card = makeCard('Project');
     const options = button('', 'project-options', () => open(card, options)); options.append(icon('settings')); disclose(options, card);
-    headingRow.append(row, options); group.append(headingRow, children);
+    headingRow.append(row, options); group.append(headingRow);
+    buildProjectCard(entry, card, id);
+    Object.assign(entry, {group, row, ring, name, summary, card, options});
+    list.append(group); projects.set(id, entry); return entry;
+  }
+  /** Everything inside the project card. Unchanged from the tree: this is not what the bar is about. */
+  function buildProjectCard(entry, card, id) {
     const branch = node('p', 'margin-muted'), goal = node('p', 'margin-goal');
     const progressLabel = node('p', 'margin-muted');
     const meter = node('div', 'margin-progress'); meter.setAttribute('aria-hidden', 'true'); const fill = node('span'); meter.append(fill);
@@ -315,56 +338,199 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       projectActions.append(el);
     }
     card.body.append(projectActions);
-    Object.assign(entry, {group, row, ring, name, summary, card, options, children, threads, sectionButtons, sectionLabels, branch, goal, progressLabel, meter, fill, stats, modeButtons, cap});
-    list.append(group); projects.set(id, entry); return entry;
+    Object.assign(entry, {branch, goal, progressLabel, meter, fill, stats, modeButtons, cap});
   }
-  function select(entry, source) {
+  function select(entry) {
+    closeMenu(false); close();
+    void dispatch('selectProject', entry.id);
+  }
+
+  // ---- the dropdown -------------------------------------------------------------------------
+  function openMenu(focusCurrent) {
+    if (!sidebarOpen) return;
     close();
-    entry.children.hidden = !entry.children.hidden;
-    source.setAttribute('aria-expanded', String(!entry.children.hidden));
-    if (!entry.children.hidden) void dispatch('selectProject', entry.id);
-    renderProject(entry, entry.data); notifyVisibility();
+    menuOpen = true; menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    renderMenu();
+    // Only the current project's summary is worth reading while the bar is closed; once the list is
+    // open, every project's line is on screen, so they all become worth fetching.
+    notifyVisibility();
+    if (focusCurrent) (list.querySelector('.is-active') || list.querySelector('[data-project-id]'))?.focus({preventScroll: true});
+  }
+  function closeMenu(restore) {
+    if (!menuOpen) return false;
+    menuOpen = false; menu.hidden = true;
+    query = ''; search.value = '';
+    trigger.setAttribute('aria-expanded', 'false');
+    if (restore) trigger.focus({preventScroll: true});
+    notifyVisibility();
+    return true;
+  }
+  function menuKeys(event) {
+    const rows = [...list.querySelectorAll('[data-project-id]')].filter(el => !el.hidden);
+    if (!rows.length) return;
+    const here = rows.indexOf(document.activeElement);
+    const go = el => { event.preventDefault(); el?.focus({preventScroll: true}); };
+    if (event.key === 'ArrowDown') go(rows[here + 1] || rows[0]);
+    else if (event.key === 'ArrowUp') go(here <= 0 ? rows[rows.length - 1] : rows[here - 1]);
+    else if (event.key === 'Enter' && event.target === search) { event.preventDefault(); rows[0].click(); }
+    else if (event.target !== search && event.key === 'Home') go(rows[0]);
+    else if (event.target !== search && event.key === 'End') go(rows[rows.length - 1]);
+  }
+
+  // ---- what a project wants from you, in words. Never a dot. --------------------------------
+  function attentionOf(data) {
+    const builds = data.sections?.builds;
+    if (builds && (builds.tone === 'error' || builds.tone === 'attention')) return builds.badge;
+    if (count(data.inFlight)) return `${count(data.inFlight)} in flight`;
+    const issues = data.sections?.issues?.badge;
+    if (issues && /^\d+ open/.test(issues)) return issues;
+    return '';
+  }
+  function rollupLine() {
+    const others = (model.projects || []).filter(p => String(p.id) !== String(model.activeProject) && attentionOf(p));
+    if (!others.length) return '';
+    return others.length === 1 ? `${text(others[0].name, 'Another project')} needs you` : `${others.length} others need you`;
+  }
+  const activeEntry = () => projects.get(String(model.activeProject)) || [...projects.values()][0] || null;
+
+  function renderMenu() {
+    const q = query.trim().toLowerCase();
+    let shown = 0;
+    for (const entry of projects.values()) {
+      const match = !q || String(entry.data.name ?? entry.id).toLowerCase().includes(q);
+      entry.group.hidden = !match;
+      if (match) shown++;
+    }
+    empty.hidden = shown > 0 || !menuOpen;
+    if (menuOpen && !shown) empty.textContent = 'No project matches.';
+  }
+  function renderSwitcher() {
+    const entry = activeEntry();
+    const data = entry?.data || {};
+    const name = text(data.name, 'No project');
+    const summary = `${text(data.branch, 'no branch')} · ${attentionOf(data) || 'quiet'}`;
+    // Not data-project-id: that belongs to the rows you can choose. The trigger names the one
+    // you are already in, and the two must not be the same selector.
+    trigger.dataset.currentProject = entry?.id || '';
+    triggerName.textContent = name;
+    triggerSummary.textContent = summary;
+    const others = rollupLine();
+    trigger.setAttribute('aria-label', `${name}. ${summary}. Switch project${others ? `. ${others}` : ''}`);
+    trigger.title = others ? `Switch project — ${others}` : `${name} — ${summary}`;
+    rollup.textContent = others; rollup.hidden = !others;
+  }
+  const SECTIONS = [['builds','Builds','build'],['issues','Issues','issue'],['plans','Plans','plan']];
+  function renderTabs() {
+    const entry = activeEntry(); if (!entry) { tabs.replaceChildren(); return; }
+    const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
+    const cells = [];
+    const threads = Array.isArray(data.threads) ? data.threads : [];
+    const chatSaid = model.busy ? 'nibbi is answering' : `${threads.length} conversation${threads.length === 1 ? '' : 's'}`;
+    const chat = button('', 'project-section margin-tab', () => {
+      const thread = threads.find(t => t.active) || threads[0];
+      if (thread) void dispatch('thread', data.id, thread.id);
+    });
+    chat.dataset.marginTab = 'chat';
+    cells.push(paintTab(chat, 'thread', 'Chat', chatSaid, !view, null));
+    for (const [section, label, glyph] of SECTIONS) {
+      const info = data.sections?.[section] || {};
+      const tab = button('', 'project-section margin-tab', () => void dispatch('projectSection', data.id, section));
+      tab.dataset.projectSection = section; tab.dataset.sectionProject = data.id; tab.dataset.marginTab = section;
+      tab.title = text(info.accessible, label);
+      cells.push(paintTab(tab, glyph, label, text(info.badge, 'Loading…'), view === section, info.tone || 'quiet'));
+    }
+    tabs.replaceChildren(...cells);
+  }
+  function paintTab(el, glyph, label, said, current, tone) {
+    el.classList.toggle('is-current', current);
+    el.append(icon(glyph));
+    if (current) {
+      const copy = node('span', 'project-section-copy');
+      copy.append(node('span', 'project-section-name', label));
+      const badge = node('span', 'project-section-badge', said);
+      if (tone) badge.dataset.tone = tone;
+      copy.append(badge); el.append(copy);
+      el.setAttribute('aria-current', 'page');
+    } else el.removeAttribute('aria-current');
+    el.setAttribute('aria-label', `${label}. ${said}`);
+    if (!el.title) el.title = `${label} — ${said}`;
+    return el;
+  }
+  function renderBody() {
+    const entry = activeEntry(); if (!entry) { body.replaceChildren(); return; }
+    const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
+    body.replaceChildren(...(view ? sectionBody(data, view) : chatBody(data, entry)));
+  }
+  function chatBody(data, entry) {
+    const parts = [];
+    const fresh = bind(button('', 'project-section project-thread-new', () => void dispatch('newThread', data.id)), 'newThread', data.id, () => !!model.busy);
+    fresh.append(icon('newThread'), node('span', 'project-section-copy', 'New thread'));
+    fresh.title = model.busy ? 'Not while nibbi is answering' : 'Start a new conversation';
+    const threads = node('div', 'project-threads');
+    threads.append(...(Array.isArray(data.threads) ? data.threads : []).map(thread => {
+      const el = button('', 'project-section project-thread', () => void dispatch('thread', data.id, thread.id));
+      el.dataset.threadId = thread.id; el.dataset.threadProject = data.id;
+      const when = thread.lastAt ? relative(Date.parse(thread.lastAt)) : '';
+      el.append(icon('thread'), node('span', 'project-section-copy', text(thread.title, 'Thread')),
+        node('span', 'project-thread-when', when));
+      el.setAttribute('aria-label', `${text(thread.title, 'Thread')} thread in ${text(data.name)}${when ? ', last message ' + when : ''}`);
+      if (thread.active) el.setAttribute('aria-current', 'true');
+      return el;
+    }));
+    // New thread leads the conversations: it is the thing you reach for, not the thing you scroll past.
+    parts.push(fresh, threads);
+    return parts;
+  }
+  /** A section tab shows what is waiting, in a sentence. The records themselves fill the workspace. */
+  function sectionBody(data, section) {
+    const info = data.sections?.[section] || {};
+    const wrap = node('div', 'margin-section');
+    const headline = node('p', 'margin-section-headline', text(info.badge, 'Loading…'));
+    headline.dataset.tone = info.tone || 'quiet';
+    wrap.append(headline);
+    if (info.detail) wrap.append(node('p', 'margin-section-line', info.detail));
+    wrap.append(node('p', 'margin-section-line', waitingLine(data, section)));
+    wrap.append(node('p', 'margin-section-hint', 'The full list is open beside the bar.'));
+    const [action, label] = {builds: ['review', 'Review'], issues: ['repository', 'Repository & GitHub'], plans: ['plan', 'Plan']}[section];
+    const go = bind(button(label, 'margin-pill', () => void dispatch(action, data.id, undefined, globalError)), action, data.id,
+      () => !!model.busy || action === 'plan' && data.planAvailable === false);
+    wrap.append(go);
+    return [wrap];
+  }
+  function waitingLine(data, section) {
+    if (section === 'builds') {
+      const bits = [];
+      if (count(data.inFlight)) bits.push(`${count(data.inFlight)} in flight`);
+      if (count(data.staged)) bits.push(`${count(data.staged)} staged`);
+      if (count(data.pending)) bits.push(`${count(data.pending)} pending`);
+      return bits.length ? bits.join(' · ') : 'Nothing is queued.';
+    }
+    if (section === 'issues') {
+      const open = String(data.sections?.issues?.badge || '').match(/^(\d+) open/);
+      return open ? `${open[1]} open.` : 'Nothing is open.';
+    }
+    const done = count(data.done), total = count(data.total);
+    if (done !== null && total !== null && total > 0) {
+      const left = Math.max(0, total - done);
+      return left ? `${left} task${left === 1 ? '' : 's'} left.` : 'Every task is done.';
+    }
+    return text(data.goal, 'No plan written yet.');
   }
   function renderProject(entry, data) {
     entry.data = data;
-    const active = data.id === model.activeProject || !!data.active;
+    const active = String(data.id) === String(model.activeProject) || !!data.active;
     const p = progress(data), mode = text(data.mode, 'off');
     const inflight = count(data.inFlight), pendingCount = count(data.pending), staged = count(data.staged);
-    const summary = [mode, p.fraction === null ? null : `${Math.round(p.fraction * 100)}% of plan`, inflight ? `${inflight} in flight` : null].filter(Boolean).join(' · ');
+    const note = attentionOf(data) || text(data.branch, '');
     entry.name.textContent = text(data.name, 'Untitled project');
-    entry.summary.textContent = summary;
+    entry.summary.textContent = note;
     entry.row.classList.toggle('is-active', active); entry.row.classList.toggle('is-off', mode === 'off');
     entry.row.setAttribute('aria-current', active ? 'true' : 'false');
-    entry.row.setAttribute('aria-label', `${text(data.name, 'Untitled project')}. ${summary}`);
-    entry.row.title = `${text(data.name)} — ${summary}`;
+    entry.row.setAttribute('aria-label', `${text(data.name, 'Untitled project')}${note ? ', ' + note : ''}${active ? ', current project' : ''}`);
+    entry.row.title = `${text(data.name)}${note ? ' — ' + note : ''}`;
     entry.options.setAttribute('aria-label', `Project settings for ${text(data.name, 'Untitled project')}`);
     entry.options.title = 'Project settings';
-    if (!entry.initialized) { entry.initialized = true; entry.children.hidden = !active; }
-    if (!entry.children.hidden) entry.summary.textContent = text(data.branch, 'Project');
-    entry.row.setAttribute('aria-expanded', String(!entry.children.hidden));
-    for (const [section, el] of Object.entries(entry.sectionButtons)) {
-      const info = data.sections?.[section];
-      const {badge, detail} = entry.sectionLabels[section];
-      badge.textContent = info?.badge || 'Loading…';
-      badge.dataset.tone = info?.tone || 'quiet';
-      detail.textContent = info?.detail || ''; detail.hidden = !detail.textContent;
-      el.title = info?.accessible || 'Loading project information';
-      el.setAttribute('aria-label', `${section[0].toUpperCase() + section.slice(1)} for ${text(data.name)}${info?.accessible ? '. ' + info.accessible : ''}`);
-      const selected = model.view?.project === data.id && model.view?.section === section;
-      if (selected) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
-    }
-    const rows = Array.isArray(data.threads) ? data.threads : [];
-    const existing = new Map([...entry.threads.children].map(el => [el.dataset.threadId, el]));
-    entry.threads.replaceChildren(...rows.map(thread => {
-      const el = existing.get(thread.id) || button('', 'project-section project-thread', () => void dispatch('thread', data.id, thread.id));
-      el.dataset.threadId = thread.id; el.dataset.threadProject = data.id;
-      const when = thread.lastAt ? relative(Date.parse(thread.lastAt)) : '';
-      el.replaceChildren(icon('thread'), node('span', 'project-section-copy', text(thread.title, 'Thread')),
-        node('span', 'project-thread-when', when));
-      el.setAttribute('aria-label', `${text(thread.title, 'Thread')} thread in ${text(data.name)}${when ? ', last message ' + when : ''}`);
-      if (thread.active) el.setAttribute('aria-current', 'true'); else el.removeAttribute('aria-current');
-      return el;
-    }));
     entry.card.heading.textContent = text(data.name, 'Untitled project');
     entry.branch.textContent = `Working branch · ${text(data.branch, 'not available')}`;
     entry.goal.textContent = text(data.goal, 'No goal set');
@@ -394,8 +560,12 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       entry.group.remove(); entry.card.el.remove(); cards.delete(entry.card); projects.delete(id);
       for (const b of bindings) if (entry.card.el.contains(b.el)) bindings.delete(b);
     }
-    empty.hidden = seen.size > 0;
+    empty.hidden = seen.size > 0 || !menuOpen;
     empty.textContent = next.projectsLoaded === false ? 'Loading projects…' : 'No projects yet. Create one to get started.';
+    // One project is in the bar at a time, so the switcher, the strip and the body are rendered once.
+    const focusKey = document.activeElement?.dataset?.marginTab;
+    renderSwitcher(); renderTabs(); renderBody(); renderMenu();
+    if (focusKey) tabs.querySelector(`[data-margin-tab="${focusKey}"]`)?.focus({preventScroll: true});
     const line = progressLine(model.progress);
     if (progressStatus.textContent !== line) progressStatus.textContent = line;
     const s = model.settings;
@@ -420,11 +590,15 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     notifyVisibility();
   }
   const outside = event => {
-    if (!opened || opened.el.contains(event.target) || trigger?.contains(event.target)) return;
+    if (menuOpen && !switcher.contains(event.target)) closeMenu(false);
+    if (!opened || opened.el.contains(event.target) || cardTrigger?.contains(event.target)) return;
     close();
   };
   const keyboard = event => {
     if (event.key === 'Escape' && opened) {event.preventDefault(); event.stopImmediatePropagation(); close(true); return;}
+    if (event.key === 'Escape' && menuOpen) {event.preventDefault(); event.stopImmediatePropagation(); closeMenu(true); return;}
+    if (event.key === 'Tab' && menuOpen && menu.contains(event.target) === false && !narrow.matches) closeMenu(false);
+    if (menuOpen && menu.contains(event.target)) menuKeys(event);
     if (event.key === 'Escape' && sidebarOpen && !document.querySelector('dialog[open]')) {
       event.preventDefault(); event.stopImmediatePropagation(); setSidebar(false, true); return;
     }
@@ -444,7 +618,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   refreshDisabled();
   setSidebar(narrow.matches ? false : desktopOpen);
   return {
-    update, close: () => { close(); if (narrow.matches) setSidebar(false); }, setSidebar,
+    update, close: () => { close(); closeMenu(false); if (narrow.matches) setSidebar(false); }, setSidebar,
     destroy() {
       close(); destroyed = true;
       document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keyboard, true);
