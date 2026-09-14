@@ -24,7 +24,15 @@ const clipText = (value, max) => { const text = String(value ?? ''); return text
 const boundedInput = input => { if (input == null) return ''; if (typeof input !== 'object') return clipText(input, LOG_INPUT_MAX); let json = ''; try { json = Object.keys(input).length > 1 ? JSON.stringify(input, null, 1) : ''; } catch { json = ''; } return clipText(json || inputLine(input), LOG_INPUT_MAX); };
 const logKindLabel = { 'tool.attempted': 'attempt', 'process.output': 'output', 'text.delta': 'text', 'run.updated': 'run', 'run.started': 'run', 'run.finished': 'run', 'turn.steered': 'steer', 'run.steered': 'steer', 'verification.finished': 'checks', 'web.searched': 'web', 'web.fetched': 'web', 'mcp.called': 'mcp' };
 const entryText = entry => { const text = entry.text ?? entry.message ?? entry.content; if (text != null && text !== '') return String(text); try { return JSON.stringify(entry); } catch { return ''; } };
-const commandLabels = { 'run.stop': 'Stop build', 'run.retry': 'Start replacement build', 'run.verify': 'Verify', 'run.discard': 'Discard', 'run.steer': 'Guide build', 'preview.start': 'Preview', 'preview.stop': 'Stop preview', 'run.merge': 'Merge locally' };
+const commandLabels = { 'run.stop': 'Stop build', 'run.retry': 'Start replacement build', 'run.verify': 'Verify', 'run.discard': 'Discard', 'run.steer': 'Guide build', 'preview.start': 'Playtest', 'preview.stop': 'Stop playtest', 'run.merge': 'Approve & merge' };
+// Builds read as a lobby: the work waiting on a decision comes first, then what is still
+// running, then what is settled. One build is staged at a time and the rest wait in a queue.
+const DECISION_ORDER = ['review', 'toPush', 'pullRequests', 'attention', 'active', 'history'];
+const groupLabels = { review: 'Awaiting local review', toPush: 'Ready to push', pullRequests: 'Pull requests', attention: 'Needs attention', active: 'Active work', history: 'History' };
+// The staged build owns these, so the secondary row must not offer them twice.
+const STAGE_COMMANDS = ['preview.start', 'preview.stop', 'run.merge', 'run.discard'];
+const lobbyWidth = matchMedia('(min-width: 900px)');
+const byDecision = runs => DECISION_ORDER.flatMap(group => runs.filter(run => buildListGroup(run) === group));
 
 /** Section views retain their own drafts, filters and reading position. The app owns commands. */
 export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate, onAction, onClose, onData, load = loadProjectSection } = {}) {
@@ -324,7 +332,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     }
     return list;
   }
-  function buildEvidence(run, detail) {
+  function buildEvidence(run, detail, { queue = [], index = 0, onSelectBuild } = {}) {
     const view = getView(), key = run.id, active = view.evidence.get(key) || { kind: 'summary' };
     const tabs = node('div', 'project-evidence-tabs'); tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', `Evidence for ${run.title || run.id}`);
     const panel = node('div', 'project-evidence-panel'); panel.setAttribute('aria-live', 'polite');
@@ -372,7 +380,8 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     for (const [kind, label] of [['summary', 'Summary'], ['changes', 'Changes'], ['checks', 'Checks'], ['github','GitHub'], ['log', 'Log']]) {
       const b = button(label, 'project-filter', () => void select(kind)); b.dataset.kind = kind; tabs.append(b);
     }
-    detail.append(tabs, panel); paint();
+    const cta = node('div', 'project-lobby-cta');
+    detail.append(cta, tabs, panel); paint();
     const controls = node('div', 'project-toolbar-actions');
     const confirmation = node('div', 'project-confirmation'); confirmation.hidden = true;
     const executeBuild = async (v, command) => {
@@ -388,8 +397,39 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       row.append(action(`Confirm ${verb}`, v => executeBuild(v, command), { primary: true, key: `confirm-${run.id}-${command}` }), button('Cancel', 'project-action', () => { view.confirmation = null; confirmation.hidden = true; }));
       confirmation.append(row);
     };
+    const allowed = run.allowedActions || [];
+    // Playtest starts this build's own preview server and opens it, the way /preview does.
+    const playtest = async v => {
+      const started = await onAction?.('buildCommand', v.selection.project, { id: run.id, command: 'preview.start' });
+      if (started?.ok === false) throw new Error(started.error?.message || 'Could not start the playtest.');
+      let status = null;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        status = await onAction?.('previewStatus', v.selection.project, { id: run.id });
+        if (status?.url || !status?.running) break;
+        await new Promise(done => setTimeout(done, 500));
+      }
+      if (status?.error) throw new Error(status.error);
+      if (status?.url) { await onAction?.('openUrl', v.selection.project, { url: status.url }); show(v, `Playtest running at ${status.url}`, 'success'); }
+      else show(v, 'The playtest is still starting. Press Playtest again to check on it.');
+      if (isCurrent(v)) await refresh({ preserveMessage: true });
+    };
+    const openPlaytest = async v => {
+      const status = await onAction?.('previewStatus', v.selection.project, { id: run.id });
+      if (!status?.url) { show(v, 'The playtest has no address yet.'); return; }
+      await onAction?.('openUrl', v.selection.project, { url: status.url });
+    };
+    if (allowed.includes('preview.start')) cta.append(action('Playtest', playtest, { primary: true, key: `${run.id}-playtest` }));
+    if (allowed.includes('preview.stop')) {
+      cta.append(action('Open playtest', openPlaytest, { primary: true, mutating: false, key: `${run.id}-open-playtest` }));
+      cta.append(action('Stop playtest', v => executeBuild(v, 'preview.stop'), { key: `${run.id}-preview.stop` }));
+    }
+    const canPlaytest = allowed.includes('preview.start') || allowed.includes('preview.stop');
+    if (allowed.includes('run.merge')) cta.append(action('Approve & merge', v => { confirmBuild('run.merge'); show(v, 'Confirm this build action below.'); }, { primary: !canPlaytest, key: `${run.id}-run.merge` }));
+    if (allowed.includes('run.discard')) cta.append(action('Discard', v => { confirmBuild('run.discard'); show(v, 'Confirm this build action below.'); }, { key: `${run.id}-run.discard` }));
+    if (queue.length > 1 && onSelectBuild) cta.append(action('Next build', () => onSelectBuild(queue[(index + 1) % queue.length].id), { mutating: false, key: `${run.id}-next` }));
+    if (cta.children.length) cta.append(node('p', 'project-lobby-keys', 'j/k next · a approve · x discard · p playtest'));
     controls.append(action(buildGroup(run) === 'review' ? 'Review changes' : buildGroup(run) === 'failed' ? 'Inspect failure' : buildGroup(run) === 'active' ? 'View activity' : 'View result', () => select(buildGroup(run) === 'failed' || buildGroup(run) === 'active' ? 'log' : 'changes'), { mutating: false }));
-    for (const command of run.allowedActions || []) if (commandLabels[command]) controls.append(action(commandLabels[command], async v => {
+    for (const command of allowed) if (commandLabels[command] && !STAGE_COMMANDS.includes(command)) controls.append(action(commandLabels[command], async v => {
       if (command === 'run.steer') {
         beginForm({ heading: `Guide build: ${run.title || run.id}`, fields: [{ name: 'text', label: 'Instruction', multiline: true, required: true }], buildCommand: true, payload: { id: run.id, command }, submit: 'Send instruction', success: 'Build instruction sent.' });
         return;
@@ -400,32 +440,66 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     detail.append(controls, confirmation);
     if (view.confirmation?.runId === run.id && run.allowedActions?.includes(view.confirmation.command)) confirmBuild(view.confirmation.command);
   }
+  /** One build as a row. The staged build carries its evidence and decision; the rest are
+      the queue, and clicking one stages it rather than expanding it in place. */
+  function buildRow(run, { staged = false, queue = [], index = 0, select } = {}) {
+    const summary = node('summary'), left = node('span', 'project-build-label');
+    left.append(node('strong', '', run.title || run.issue || run.id));
+    if (run.branch) left.append(node('span', 'project-build-branch', `${run.branch} → ${run.github?.baseBranch || run.targetBranch || 'Target unavailable'}`));
+    left.append(node('span', 'project-muted', [`Checks: ${verification(run)}`, dateLabel(run.endedAt || run.startedAt)].filter(Boolean).join(' · ')));
+    left.append(node('span', 'project-muted project-build-delivery', githubDeliveryLabel(run)));
+    const status = node('span', 'project-build-status', workflow(run)); status.dataset.status = run.status;
+    summary.append(left, status);
+    const row = disclosure(`build-${run.id}`, summary, 'project-build', staged);
+    row.dataset.buildId = run.id; row.open = staged;
+    if (staged) row.classList.add('is-selected'); else row.setAttribute('aria-current', 'false');
+    summary.addEventListener('click', event => {
+      event.preventDefault();                       // a build is staged, never expanded in place
+      if (!staged) select?.(run.id);                // and the staged one cannot collapse itself
+    });
+    if (staged) { const detail = node('div', 'project-build-detail'); buildEvidence(run, detail, { queue, index, onSelectBuild: select }); row.append(detail); }
+    return row;
+  }
   function renderBuilds() {
-    const view = getView(), runs = view.data.runs || [], count = group => runs.filter(run => buildMatchesFilter(run,group)).length;
-    content.append(toolbar(`${runs.length} build${runs.length === 1 ? '' : 's'}`, [action('Repository & GitHub',()=>onNavigate?.(view.selection.project,'repository'),{mutating:false}),action('New build', () => onAction?.('newBuild', current.project), { primary: true })]), formHost());
-    const extra = [['toPush','To push',count('toPush')],['pullRequests','Pull requests',count('pullRequests')],['attention','Needs attention',count('attention')]];
-    content.append(filters([['all', 'All', runs.length], ['active', 'Active', count('active')], ['review', 'Review', count('review')],...extra,['history', 'History',count('history')]], 'Build status'));
-    if (!runs.length) { content.append(empty(view.data.status === 'partial' ? 'Build history is incomplete' : 'No builds yet', 'Start a build to give Nibbi something to work on for this project.')); return; }
+    const view = getView(), runs = view.data.runs || [], count = group => runs.filter(run => buildMatchesFilter(run, group)).length;
+    const waiting = runs.filter(run => ['review', 'toPush', 'pullRequests', 'attention'].includes(buildListGroup(run))).length;
+    const summary = runs.length
+      ? [waiting ? `${waiting} waiting on you` : 'nothing waiting on you', count('active') ? `${count('active')} building` : '', `${runs.length} in all`].filter(Boolean).join(' · ')
+      : 'No builds yet';
+    content.append(toolbar(summary, [action('Repository & GitHub', () => onNavigate?.(view.selection.project, 'repository'), { mutating: false }), action('New build', () => onAction?.('newBuild', current.project), { primary: true })]), formHost());
+    const extra = [['toPush', 'To push', count('toPush')], ['pullRequests', 'Pull requests', count('pullRequests')], ['attention', 'Needs attention', count('attention')]];
+    content.append(filters([['all', 'All', runs.length], ['active', 'Active', count('active')], ['review', 'Review', count('review')], ...extra, ['history', 'History', count('history')]], 'Build status'));
+    if (!runs.length) { content.append(empty('No builds yet', 'Start a build to give Nibbi something to work on for this project.')); return; }
+
+    const queue = byDecision(runs.filter(run => buildMatchesFilter(run, view.filter)));
+    if (!queue.length) { content.append(empty(`No ${view.filter === 'review' ? 'builds awaiting review' : `${view.filter} builds`}`, 'Choose another filter to see the rest of this project’s work.')); return; }
+
+    // The cursor survives a build leaving the queue: keep the position, not the identity.
+    if (view.selectedBuild && !queue.some(run => run.id === view.selectedBuild)) view.selectedBuild = null;
+    if (!view.selectedBuild && lobbyWidth.matches) view.selectedBuild = (queue[Math.min(view.queueIndex ?? 0, queue.length - 1)] || queue[0]).id;
+    const index = queue.findIndex(run => run.id === view.selectedBuild);
+    if (index >= 0) view.queueIndex = index;
+
+    const select = id => { view.listScroll = body.scrollTop; view.selectedBuild = id; render(true); };
     const returnToList = () => { view.selectedBuild = null; render(true); body.scrollTop = view.listScroll ?? body.scrollTop; };
-    if (view.selectedBuild) content.append(button('Back to build list', 'project-text-button project-build-return', returnToList));
-    const list = node('div', 'project-build-list'); if (view.selectedBuild) list.classList.add('has-selection');
-    const groupLabels = { active: 'Active work', review: 'Awaiting local review', attention: 'Needs attention',toPush:'Ready to push',pullRequests:'Pull requests', history: 'History' };
-    let shown = 0;
-    for (const group of ['active', 'attention','toPush','pullRequests','review','history']) {
-      const records = runs.filter(run => buildListGroup(run) === group && buildMatchesFilter(run,view.filter)); if (!records.length) continue;
-      list.append(node('h2', 'project-group-title', `${groupLabels[group]} · ${records.length}`));
-      for (const run of records) {
-        shown++; const summary = node('summary'), left = node('span', 'project-build-label'); left.append(node('strong', '', run.title || run.issue || run.id));
-        if (run.branch) left.append(node('span','project-build-branch',`${run.branch} → ${run.github?.baseBranch || run.targetBranch || 'Target unavailable'}`));
-        left.append(node('span', 'project-muted', [`Checks: ${verification(run)}`, dateLabel(run.endedAt || run.startedAt)].filter(Boolean).join(' · ')));
-        left.append(node('span','project-muted project-build-delivery',githubDeliveryLabel(run)));
-        const status = node('span', 'project-build-status', workflow(run)); status.dataset.status = run.status; summary.append(left, status);
-        const row = disclosure(`build-${run.id}`, summary, 'project-build'); row.dataset.buildId = run.id; if (view.selectedBuild === run.id) row.classList.add('is-selected');
-        summary.addEventListener('click', () => { if (!row.open) { view.listScroll = body.scrollTop; view.selectedBuild = run.id; list.classList.add('has-selection'); for (const child of list.querySelectorAll('.project-build')) child.classList.toggle('is-selected', child === row); if (!content.querySelector('.project-build-return')) { const back = button('Back to build list', 'project-text-button project-build-return', returnToList); list.before(back); } } });
-        const detail = node('div', 'project-build-detail'); buildEvidence(run, detail); row.append(detail); list.append(row);
+    const list = node('div', 'project-build-list');
+    if (index >= 0) {
+      list.classList.add('has-selection');
+      content.append(button(lobbyWidth.matches ? 'All builds' : 'Back to build list', 'project-text-button project-build-return', returnToList));
+      const stage = node('div', 'project-build-stage');
+      stage.append(buildRow(queue[index], { staged: true, queue, index, select }));
+      const rail = node('div', 'project-build-rail');
+      rail.setAttribute('aria-label', 'Other builds in the queue');
+      for (const [position, run] of queue.entries()) if (position !== index) rail.append(buildRow(run, { select }));
+      list.append(stage, rail);
+    } else {
+      for (const group of DECISION_ORDER) {
+        const records = queue.filter(run => buildListGroup(run) === group); if (!records.length) continue;
+        list.append(node('h2', 'project-group-title', `${groupLabels[group]} · ${records.length}`));
+        for (const run of records) list.append(buildRow(run, { select }));
       }
     }
-    content.append(shown ? list : empty(`No ${view.filter === 'review' ? 'builds awaiting review' : `${view.filter} builds`}`, 'Choose another filter to see the rest of this project’s work.'));
+    content.append(list);
   }
   function reorderControl(records, item, actionName, milestoneId) {
     const view = getView(), index = records.findIndex(record => record.id === item.id), row = node('div', 'project-order-actions');
@@ -515,6 +589,32 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   }
   // Applying deferred records is explicit. Blur can occur between pointerdown and
   // click, when activeElement is briefly body; replacing rows there drops clicks.
+  // Builds keys, matching the chat reviewer: move through the queue and decide without
+  // reaching for the mouse. Typing anywhere in the workspace keeps its own keys.
+  body.addEventListener('keydown', event => {
+    if (!current || current.section !== 'builds' || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+    const target = event.target;
+    if (target?.closest?.('input, textarea, select, [contenteditable], .project-inline-form, .github-form')) return;
+    const view = getView(), runs = view.data?.runs || [];
+    const queue = byDecision(runs.filter(run => buildMatchesFilter(run, view.filter)));
+    const index = queue.findIndex(run => run.id === view.selectedBuild);
+    const stage = index >= 0 ? content.querySelector('.project-build-stage .project-build.is-selected') : null;
+    const press = label => { const b = [...(stage?.querySelectorAll('.project-lobby-cta .project-action') || [])].find(x => x.textContent === label); if (b && !b.disabled) { b.click(); return true; } return false; };
+    const move = step => {
+      if (!queue.length) return;
+      const next = index < 0 ? 0 : (index + step + queue.length) % queue.length;
+      view.listScroll = body.scrollTop; view.selectedBuild = queue[next].id; render(true);
+      content.querySelector('.project-build-stage .project-build.is-selected summary')?.scrollIntoView({ block: 'nearest' });
+    };
+    if (event.key === 'j' || event.key === 'ArrowRight') { event.preventDefault(); move(1); return; }
+    if (event.key === 'k' || event.key === 'ArrowLeft') { event.preventDefault(); move(-1); return; }
+    if (!stage) return;
+    if (event.key === 'p') { if (press('Playtest') || press('Open playtest')) event.preventDefault(); return; }
+    if (event.key === 'a') { if (press('Approve & merge')) { event.preventDefault(); content.querySelector('.project-confirmation .project-action')?.focus({ preventScroll: true }); } return; }
+    if (event.key === 'x') { if (press('Discard')) { event.preventDefault(); content.querySelector('.project-confirmation .project-action')?.focus({ preventScroll: true }); } return; }
+    // Escape is not ours: the sidebar claims it first and closes itself. A confirmation is
+    // cancelled with its own Cancel button, and the queue is left with "All builds".
+  });
   body.addEventListener('scroll', () => { if (current) getView().scroll = body.scrollTop; }, { passive: true });
   async function refresh({ preserveMessage = false } = {}) {
     if (!current || el.hidden) return;

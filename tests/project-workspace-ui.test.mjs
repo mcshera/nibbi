@@ -106,11 +106,11 @@ test('project workspace preserves editing context and shows canonical linked wor
     assert.match(await page.locator('[data-build-id="run-review"] .project-evidence-panel').innerText(), /-old\n\+new/);
     await page.locator('[data-build-id="run-review"]').getByRole('button', { name: 'Checks', exact: true }).click();
     assert.match(await page.locator('[data-build-id="run-review"] .project-evidence-panel').innerText(), /Verification: Passed/);
-    await page.locator('[data-build-id="run-review"]').getByRole('button', { name: 'Merge locally', exact: true }).click();
+    await page.locator('[data-build-id="run-review"]').getByRole('button', { name: 'Approve & merge', exact: true }).click();
     assert.equal(await page.evaluate(() => calls.filter(call => call.name === 'buildCommand').length), 0, 'Opening confirmation cannot mutate a build');
     await page.getByRole('button', { name: 'Confirm merge', exact: true }).click();
     assert.equal(await page.evaluate(() => calls.filter(call => call.name === 'buildCommand' && call.value.command === 'run.merge').length), 1);
-    assert.equal(await page.locator('[data-build-id="run-history"]').getByRole('button', { name: 'Merge locally', exact: true }).count(), 0);
+    assert.equal(await page.locator('[data-build-id="run-history"]').getByRole('button', { name: 'Approve & merge', exact: true }).count(), 0);
     await page.locator('[data-filter="attention"]').click();
     assert.equal(await page.locator('.project-build').count(), 1);
     await open('plans');
