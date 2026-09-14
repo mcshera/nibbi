@@ -146,19 +146,21 @@ try {
   if (missing.length) for (const m of [...new Set(missing)].slice(0, 12)) fail(m); else ok('every state says what it should: open conversation, current section, card focus, a way back, a backdrop, targets and contrast');
 
   // Escape closes the card before the bar, and gives focus back.
+  const settle = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 90)));
   D.cue('card');
+  await settle();   // the card takes focus as it opens; pressing before that lands makes this flaky
   const host = desktop.frame.host;
   const card = host.querySelector('[data-lab-role="card"]:not([hidden])');
   const press = () => (document.activeElement.closest('.lab-host') ? document.activeElement : host.querySelector('button'))
     .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   if (card) {
-    press();
+    press(); await settle();
     if (host.querySelector('[data-lab-role="card"]:not([hidden])')) fail('Escape did not close the card');
     else if (!host.contains(document.activeElement)) fail('Escape closed the card but lost focus');
     else {
       const barBefore = host.querySelector('[data-pin="workspace-sidebar"]');
       if (barBefore && barBefore.getAttribute('aria-hidden') === 'true') fail('Escape closed the card and the bar at once');
-      else { press(); ok('Escape closes the card first, then the bar'); }
+      else { press(); await settle(); ok('Escape closes the card first, then the bar'); }
     }
   }
 
