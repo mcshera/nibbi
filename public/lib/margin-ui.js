@@ -426,7 +426,10 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   function renderTabs() {
     const entry = activeEntry(); if (!entry) { tabs.replaceChildren(); tabsKey = ''; return; }
     const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
-    const key = JSON.stringify([data.id, view, !!model.busy, (Array.isArray(data.threads) ? data.threads : []).length,
+    // The workspace also opens "repository", which the strip has no tab for and the bar has no
+    // summary of. Anything outside the three record sections falls back to the conversations.
+    const summarised = view && SECTIONS.some(([section]) => section === view) ? view : null;
+    const key = JSON.stringify([data.id, view, summarised, !!model.busy, (Array.isArray(data.threads) ? data.threads : []).length,
       SECTIONS.map(([section]) => [data.sections?.[section]?.badge, data.sections?.[section]?.tone, data.sections?.[section]?.accessible])]);
     if (key === tabsKey) return;
     tabsKey = key;
@@ -466,13 +469,16 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   function renderBody() {
     const entry = activeEntry(); if (!entry) { body.replaceChildren(); bodyKey = ''; return; }
     const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
-    const key = JSON.stringify([data.id, view, !!model.busy,
+    // The workspace also opens "repository", which the strip has no tab for and the bar has no
+    // summary of. Anything outside the three record sections falls back to the conversations.
+    const summarised = view && SECTIONS.some(([section]) => section === view) ? view : null;
+    const key = JSON.stringify([data.id, view, summarised, !!model.busy,
       (Array.isArray(data.threads) ? data.threads : []).map(t => [t.id, t.title, t.lastAt, !!t.active]),
-      view ? [data.sections?.[view]?.badge, data.sections?.[view]?.detail, data.sections?.[view]?.tone,
+      summarised ? [data.sections?.[summarised]?.badge, data.sections?.[summarised]?.detail, data.sections?.[summarised]?.tone,
         data.inFlight, data.staged, data.pending, data.done, data.total, data.goal, data.planAvailable] : null]);
     if (key === bodyKey) return;
     bodyKey = key;
-    body.replaceChildren(...(view ? sectionBody(data, view) : chatBody(data, entry)));
+    body.replaceChildren(...(summarised ? sectionBody(data, summarised) : chatBody(data, entry)));
   }
   function chatBody(data, entry) {
     const parts = [];
@@ -505,7 +511,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     if (info.detail) wrap.append(node('p', 'margin-section-line', info.detail));
     wrap.append(node('p', 'margin-section-line', waitingLine(data, section)));
     wrap.append(node('p', 'margin-section-hint', 'The full list is open beside the bar.'));
-    const [action, label] = {builds: ['review', 'Review'], issues: ['repository', 'Repository & GitHub'], plans: ['plan', 'Plan']}[section];
+    const [action, label] = {builds: ['review', 'Review'], issues: ['repository', 'Repository & GitHub'], plans: ['plan', 'Plan']}[section] || [];
+    if (!action) return [wrap];
     const go = button(label, 'margin-pill', () => void dispatch(action, data.id, undefined, globalError));
     go.disabled = !!model.busy || action === 'plan' && data.planAvailable === false;
     wrap.append(go);
