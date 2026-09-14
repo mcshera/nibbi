@@ -1,0 +1,59 @@
+/* Plain scaffolding. Every rule is scoped so three options can share one page. */
+.sidebar-lab-_template { --bar-w: 256px; position: absolute; inset: 0; font: 12.5px/1.5 Geist, system-ui, sans-serif; color: var(--ink); }
+.sidebar-lab-_template button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
+.sidebar-lab-_template button:disabled { opacity: .42; cursor: default; }
+.sidebar-lab-_template button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sidebar-lab-_template .lab-bar { position: absolute; inset: 0 auto 0 0; width: var(--bar-w); display: flex; flex-direction: column; background: #ece8e0; border-right: 1px solid rgba(21,20,19,.09); transform: translateX(-100%); visibility: hidden; transition: transform 220ms var(--ease); z-index: 3; }
+.sidebar-lab-_template .lab-bar.is-open { transform: none; visibility: visible; }
+.sidebar-lab-_template.is-reduced .lab-bar { transition: none; }
+.sidebar-lab-_template.is-narrow .lab-bar { width: min(300px, 100% - 40px); box-shadow: 8px 0 32px -20px rgba(21,20,19,.3); }
+.sidebar-lab-_template .lab-bar-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 12px 24px; flex: none; }
+.lab-native-mac .sidebar-lab-_template .lab-bar-head { padding-top: 48px; }
+.sidebar-lab-_template .lab-brand { font-size: 22px; font-weight: 650; letter-spacing: -.035em; }
+.sidebar-lab-_template .lab-collapse, .sidebar-lab-_template .lab-toggle { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 8px; color: var(--ink-2); }
+.sidebar-lab-_template.is-narrow .lab-collapse, .sidebar-lab-_template.is-narrow .lab-toggle { width: 44px; height: 44px; }
+.sidebar-lab-_template .lab-toggle { position: absolute; left: 16px; top: 16px; z-index: 4; background: rgba(245,242,236,.94); }
+.lab-native-mac .sidebar-lab-_template .lab-toggle { top: 48px; }
+.sidebar-lab-_template .lab-collapse:hover, .sidebar-lab-_template .lab-toggle:hover { background: rgba(21,20,19,.065); }
+.sidebar-lab-_template svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; fill: none; flex: none; }
+.sidebar-lab-_template .lab-rail { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 16px; scrollbar-width: thin; }
+/* --ink-3 on this paper is 4.33:1 — under 4.5 for 12px text. The bar's quiet type needs one step darker. */
+.sidebar-lab-_template .lab-heading { margin: 26px 12px 10px; font-size: 12px; font-weight: 550; color: #5f5b55; }
+.sidebar-lab-_template .lab-progress { margin: -4px 12px 10px; color: #5f5b55; font-size: 11.5px; }
+.sidebar-lab-_template .lab-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; border-radius: 8px; text-align: left; }
+.sidebar-lab-_template .lab-row:hover { background: rgba(21,20,19,.045); }
+.sidebar-lab-_template .lab-new { background: rgba(255,255,255,.38); min-height: 44px; gap: 10px; }
+.sidebar-lab-_template .lab-heading-row { display: flex; align-items: center; }
+.sidebar-lab-_template .lab-project { flex: 1; min-width: 0; }
+.sidebar-lab-_template .lab-project.is-active { background: rgba(21,20,19,.075); }
+.sidebar-lab-_template .lab-labels { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.sidebar-lab-_template .lab-name { font-size: 13px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-lab-_template .lab-summary, .sidebar-lab-_template .lab-when, .sidebar-lab-_template .lab-badge { color: #5f5b55; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-lab-_template .lab-caret svg { width: 12px; height: 12px; }
+.sidebar-lab-_template .lab-project[aria-expanded="true"] .lab-caret svg { transform: rotate(90deg); }
+.sidebar-lab-_template .lab-gear { display: grid; place-items: center; width: 34px; height: 44px; border-radius: 8px; color: var(--ink-3); }
+.sidebar-lab-_template .lab-gear svg { width: 16px; height: 16px; }
+.sidebar-lab-_template .lab-gear:hover, .sidebar-lab-_template .lab-gear[aria-expanded="true"] { background: rgba(21,20,19,.07); color: var(--ink); }
+.sidebar-lab-_template .lab-children { display: flex; flex-direction: column; gap: 2px; padding: 4px 4px 8px 30px; }
+.sidebar-lab-_template .lab-children .lab-row { min-height: 44px; padding: 7px 8px; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.sidebar-lab-_template .lab-children svg { width: 16px; height: 16px; }
+.sidebar-lab-_template .lab-thread-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.sidebar-lab-_template .lab-thread[aria-current="true"] { background: rgba(21,20,19,.075); }
+.sidebar-lab-_template .lab-thread[aria-current="true"] .lab-thread-name { font-weight: 600; }
+.sidebar-lab-_template .lab-new-thread .lab-thread-name { color: var(--ink-3); }
+.sidebar-lab-_template .lab-section-copy { flex: 1; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.sidebar-lab-_template .lab-badge[data-tone="attention"], .sidebar-lab-_template .lab-badge[data-tone="error"] { color: var(--ink); font-weight: 600; }
+.sidebar-lab-_template .lab-badge[data-tone="error"] { color: #7c392f; }
+.sidebar-lab-_template .lab-section[aria-current="page"] { background: rgba(21,20,19,.08); font-weight: 600; color: var(--ink); }
+.sidebar-lab-_template .lab-rollup { margin: 0 0 8px; padding: 0 12px; color: #5f5b55; font-size: 11.5px; }
+/* Improvement 5: on a pointer device the gear waits to be wanted. Touch always shows it. */
+.sidebar-lab-_template.is-hover-gear .lab-gear { opacity: 0; transition: opacity 120ms var(--ease); }
+.sidebar-lab-_template.is-hover-gear .lab-heading-row:hover .lab-gear,
+.sidebar-lab-_template.is-hover-gear .lab-gear:focus-visible,
+.sidebar-lab-_template.is-hover-gear .lab-gear[aria-expanded="true"] { opacity: 1; }
+.sidebar-lab-_template .lab-foot { flex: none; padding: 12px; border-top: 1px solid rgba(21,20,19,.08); }
+.sidebar-lab-_template .lab-foot-button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; }
+.sidebar-lab-_template .lab-foot-button:hover, .sidebar-lab-_template .lab-foot-button[aria-expanded="true"] { background: rgba(21,20,19,.06); }
+.sidebar-lab-_template .lab-backdrop { position: absolute; inset: 0; z-index: 2; background: rgba(21,20,19,.16); border: 0; }
+.sidebar-lab-_template .lab-card { left: calc(var(--bar-w) + 12px); }
+.sidebar-lab-_template.is-narrow .lab-card { left: 12px; right: 12px; width: auto; }
