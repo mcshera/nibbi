@@ -59,7 +59,6 @@ const S = {
   busy: false,
   turns: [],
   projectView: null,
-  projectComposerExpanded: null,
   sessionCost: 0, sessionTurns: 0,
   status: null,            // last /api/status
   fixers: [],              // last /api/fixers
@@ -79,11 +78,14 @@ const S = {
 };
 if (S.voiceOn) body.classList.add('voice-on');
 let visibleProjectIds = [];
-const projectSummaries = createProjectSummaryStore({ onChange: (project, summaries) => { projectWorkspace.setSummaries?.(project, summaries); syncMargins(); } });
+const projectSummaries = createProjectSummaryStore({ onChange: () => syncMargins() });
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
-const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: closeProjectView, onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
-const composeToggle = document.createElement('button'); composeToggle.type = 'button'; composeToggle.id = 'project-compose-toggle'; composeToggle.className = 'project-compose-toggle'; composeToggle.hidden = true; composeToggle.setAttribute('aria-controls', 'ask attach'); ask.before(composeToggle);
-composeToggle.onclick = () => { S.projectComposerExpanded = body.classList.contains('project-compose-compact'); layout(false); if (S.projectComposerExpanded) ask.focus(); };
+const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
+const chatLauncher = document.createElement('button');
+chatLauncher.type = 'button'; chatLauncher.id = 'project-chat-launcher'; chatLauncher.className = 'project-chat-launcher';
+chatLauncher.textContent = 'Chat with Nibbi'; chatLauncher.hidden = true; chatLauncher.setAttribute('aria-controls', 'pill');
+chatLauncher.onclick = () => focusComposer(); document.body.append(chatLauncher);
+function focusComposer() { closeProjectView(false); ask.focus(); }
 /* "Plan first": the next message becomes a reviewable plan (numbered steps → approve → builds) instead of a chat turn */
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
 planBtn.innerHTML = '<svg class="mi" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="4" cy="4.5" r="1.4" fill="currentColor"/><circle cx="4" cy="9" r="1.4" fill="currentColor"/><circle cx="4" cy="13.5" r="1.4" fill="currentColor"/><path d="M8 4.5h6M8 9h6M8 13.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="mi-label">Plan first</span><span class="mic-switch" aria-hidden="true"><span class="mic-thumb"></span></span>';
@@ -109,7 +111,7 @@ function setPlanFirst(on) {
   syncDockTitle();
   autosize();   // the placeholder changed length: re-fit the field's height (a long hint may wrap) and re-place the feed above the pill
 }
-planBtn.onclick = () => { setPlanFirst(!S.planFirst); ask.focus(); toast(S.planFirst ? 'plan first — the next message becomes a reviewable plan' : 'plan first off', 2200); };
+planBtn.onclick = () => { setPlanFirst(!S.planFirst); focusComposer(); toast(S.planFirst ? 'plan first — the next message becomes a reviewable plan' : 'plan first off', 2200); };
 /* the ink dock: one "+" opens a small panel above it holding the mode toggles and attach. A mode that is on takes no room in the bar:
    Hey Nibbi speaks through the #listen strip, plan first through the placeholder and one CSS dot on the "+" (.pill.plan-first).
    The "+" keeps its accessible name ("Message options") — only its hover title names what is on; the panel rows carry aria-pressed. */
@@ -151,7 +153,7 @@ dockMenu.addEventListener('click', (e) => { const item = e.target instanceof Ele
 dockMenu.addEventListener('focusout', (e) => { if (dockPress) return; const to = e.relatedTarget; if (to instanceof Node && (dockMenu.contains(to) || to === dockBtn)) return; closeDock(false); });
 document.addEventListener('pointerdown', (e) => { if (!dockMenu.open || !(e.target instanceof Node)) return; if (dockMenu.contains(e.target) || dockBtn.contains(e.target)) return; closeDock(false); }, true);
 attachImageBtn.addEventListener('click', () => { attachFile.value = ''; attachFile.click(); });
-attachFile.addEventListener('change', () => { for (const f of attachFile.files || []) addImage(f); attachFile.value = ''; ask.focus(); });
+attachFile.addEventListener('change', () => { for (const f of attachFile.files || []) addImage(f); attachFile.value = ''; focusComposer(); });
 setPlanFirst(false);
 function watchProjectSummaries() {
   const wanted = [...new Set([...visibleProjectIds, ...(S.projectView ? [S.projectView.project] : [])])];
@@ -161,29 +163,23 @@ function watchProjectSummaries() {
 }
 const threadsRead = new Set();
 function syncProjectComposer() {
-  const available = !!S.projectView && innerHeight < 600;
-  const expanded = S.projectComposerExpanded ?? innerHeight >= 600;
-  const compact = available && !expanded;
-  composeToggle.hidden = !available; body.classList.toggle('project-compose-compact', compact);
-  composeToggle.setAttribute('aria-expanded', String(!compact));
-  const draft = ask.value.trim();
-  composeToggle.textContent = compact ? draft ? 'Draft: ' + draft.replace(/\s+/g, ' ') : pendingImages.length ? `${pendingImages.length} attachment${pendingImages.length === 1 ? '' : 's'} · Write a message` : 'Ask Nibbi…' : 'Hide draft';
-  composeToggle.title = compact ? 'Open composer; your draft and attachments are preserved' : 'Collapse composer while reading';
+  chatLauncher.hidden = !S.projectView;
+  pill.inert = !!S.projectView;
 }
 
 /* ------------------------------------------------------------------ layout: where nibbi sits */
 function workspaceLeft() { return parseFloat(getComputedStyle(body).getPropertyValue('--workspace-left')) || 0; }
-function idleRadius() { return Math.max(56, Math.min(150, Math.min(innerWidth - workspaceLeft(), innerHeight) * 0.16)); }
+function idleRadius() { return Math.max(70, Math.min(185, Math.min(innerWidth - workspaceLeft(), innerHeight) * 0.20)); }
 function layout(snap) {
   // Initialization runs before the attachment state is declared.
-  if (typeof composeToggle !== 'undefined') syncProjectComposer();
+  if (typeof chatLauncher !== 'undefined') syncProjectComposer();
   const W = innerWidth, H = innerHeight, r0 = idleRadius();
   const center = (W + workspaceLeft()) / 2;
   const pillTop = pill.getBoundingClientRect().top || (H - 124);
   let pose;
   if (S.mode === 'talk' || S.projectView) {
     const compactProject = S.projectView && H < 520;
-    const r = compactProject ? 24 : Math.max(34, Math.min(52, r0 * 0.34, H * 0.06));
+    const r = compactProject ? 32 : Math.max(48, Math.min(78, r0 * 0.48, H * 0.09));
     const cy = (compactProject ? 18 : 30) + r * 1.15;
     pose = { x: center, y: cy, r };
     document.documentElement.style.setProperty('--feed-top', Math.round(cy + r * 1.1 + 10) + 'px');
@@ -192,7 +188,7 @@ function layout(snap) {
     pose = { x: center, y: H * (focused ? 0.47 : 0.49) - (H < 600 ? 20 : 0), r: r0 };
   }
   const hasAgents = body.classList.contains('has-agents');
-  document.documentElement.style.setProperty('--agents-bottom', Math.round(H - pillTop - 3) + 'px');   // perched on the pill's top edge
+  document.documentElement.style.setProperty('--agents-bottom', Math.round(S.projectView ? 80 : H - pillTop - 3) + 'px');   // perched on the pill's top edge
   document.documentElement.style.setProperty('--feed-bottom', Math.round(H - pillTop + 18 + (hasAgents ? 52 : 0)) + 'px');
   if (snap) nibbi.snapTarget(pose); else nibbi.setTarget(pose);
 }
@@ -381,7 +377,7 @@ function setMeta(T, r) {
   // Local provenance lives above the reply, including while tokens stream.
   if (r && r.raw) bits.push(String(r.raw).replace(/^\s*error:\s*/i, '').slice(0, 90));
   T.meta.textContent = bits.filter(Boolean).join(' · '); T.meta.prepend(tm, document.createTextNode(bits.filter(Boolean).length ? ' · ' : ''));
-  const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; ask.focus(); autosize(); };
+  const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; focusComposer(); autosize(); };
   const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => { navigator.clipboard?.writeText(T.acc); toast('copied'); };
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
   T.meta.append(document.createTextNode(' · '), quote, document.createTextNode(' · '), copy, document.createTextNode(' · '), again);
@@ -453,7 +449,7 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   // This has to happen before the already-open check: the Chat tab asks for the conversation that
   // is already open, and what it is really asking for is to stop looking at Builds.
   if (closeView && S.projectView) closeProjectView(false);
-  if (target === activeThreadKey() && S.thread.project === project) { if (focus) ask.focus(); return; }
+  if (target === activeThreadKey() && S.thread.project === project) { if (focus) focusComposer(); return; }
   const current = threadState(activeThreadKey());
   current.turns = S.turns; current.nodes = [...feed.children];
   if (S.review) endReview();
@@ -467,7 +463,7 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   S.turns = next.turns; feed.replaceChildren(...next.nodes);
   setMode(S.turns.length ? 'talk' : 'idle');
   ask.placeholder = placeholderText(); syncSendButton(); syncMargins();
-  if (focus) ask.focus();
+  if (focus) focusComposer();
   await hydrateThread(project, id);
   setMode(S.turns.length ? 'talk' : 'idle');
 }
@@ -588,7 +584,7 @@ function fixerActs(f, opts) {
   const a = []; const st = f.status;
   if (st === 'staged' && githubBuild(f)) a.push({ label: 'Review GitHub delivery', run: () => inspectGithubBuild(f) }, { label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) });
   if (st === 'staged' && !githubBuild(f)) a.push({ label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) }, { label: 'approve & merge', confirm: 'merge into ' + (opts && opts.target || 'the branch') + ' — sure?', warn: true, run: () => send('/approve ' + f.id) });
-  if (st === 'running' || st === 'installing') a.push({ label: 'steer', run: () => { ask.value = '/steer ' + f.id + ' '; ask.focus(); autosize(); } }, { label: 'stop', confirm: 'stop it — sure?', warn: true, run: () => send('/stop ' + f.id) });
+  if (st === 'running' || st === 'installing') a.push({ label: 'steer', run: () => { ask.value = '/steer ' + f.id + ' '; focusComposer(); autosize(); } }, { label: 'stop', confirm: 'stop it — sure?', warn: true, run: () => send('/stop ' + f.id) });
   if (st === 'queued') a.push({ label: 'unqueue', confirm: 'drop it from the queue?', run: () => api.post('/api/fix-unqueue', { id: f.id }).then(() => toast('unqueued')).catch((e) => toast(e.message)) });
   if (st === 'failed') a.push({ label: 'log', run: () => send('/log ' + f.id) }, { label: 'Start replacement build', run: () => api.post('/api/fix-requeue', { id: f.id }).then(() => toast('requeued')).catch((e) => toast(e.message)) });
   if (st === 'merged') a.push({ label: 'what changed', run: () => send('/diff ' + f.id) });
@@ -726,14 +722,14 @@ async function runLocalCommand(name, arg, opts) {
       const existing = template && (S.projects || []).find(p => p.name === name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
       const r = existing ? { slug: existing.name, repo: existing.repo } : await api.post('/api/project-create', { mode: 'new', name });
       markStep(st, 'done'); await refreshProjects(); S.project = r.slug; LS.set('project', r.slug);
-      if (!template) return { text: '**' + md.esc(name) + '** exists now — `' + r.repo + '`, git initialised and registered. It\'s the active project.\n\nWant a starting point?', acts: [{ label: 'web app (vite)', run: () => send('/new ' + name + ' web') }, { label: 'game (rules + plan)', run: () => send('/new ' + name + ' game') }, { label: 'plan it', run: () => { ask.value = 'Plan ' + name + ': '; ask.focus(); autosize(); } }] };
+      if (!template) return { text: '**' + md.esc(name) + '** exists now — `' + r.repo + '`, git initialised and registered. It\'s the active project.\n\nWant a starting point?', acts: [{ label: 'web app (vite)', run: () => send('/new ' + name + ' web') }, { label: 'game (rules + plan)', run: () => send('/new ' + name + ' game') }, { label: 'plan it', run: () => { ask.value = 'Plan ' + name + ': '; focusComposer(); autosize(); } }] };
       const st2 = addStep(T, 'laying down the ' + template + ' template' + (template === 'web' ? ' + npm install' : ''));
       const result = await api.command('project.scaffold', { template }, r.slug);
       const files = result.files, code = 0; markStep(st2, 'done');
       if (template === 'game') { const st3 = addStep(T, 'writing plans/' + r.slug + '.md'); try { await api.post('/nibbi/vault-write', { log: 'plan | ' + r.slug + ': roadmap skeleton created from Nibbi (/new game)', path: 'plans/' + r.slug + '.md', content: '# ' + name + ' — Roadmap\n\n**Vision:** (one sentence — Nibbi will refine this with you)\n\n## M1: Rules on paper\n- [ ] Write design.md pillars and core loop\n- [ ] Write rules.md: setup, turn, winning\n- [ ] First hand-played session logged in playtests/\n\n## M2: Simulation\n- [ ] Card/component data as JSON\n- [ ] src/sim.js plays a full game with random policies\n- [ ] Balance report from 1000 sims\n\n## M3: Playable digital slice\n- [ ] Web hot-seat client\n- [ ] Playtest mode reports flow into issues.md\n' }); markStep(st3, 'done'); } catch { markStep(st3, 'fail'); } await refreshProjects(); }
       await refreshProjects();
       const ok = code === 0;
-      return { ok, text: ok ? '**' + md.esc(name) + '** is a ' + (template === 'web' ? 'web app' : 'game') + ' now — `' + r.repo + '`' + (files.length ? ' (' + files.map((f) => '`' + f + '`').join(', ') + ')' : '') + '.' + (template === 'web' ? ' `npm run dev` is wired, so `/play ' + r.slug + '` works.' : ' The plan is in the vault; tell me the pitch and I\'ll fill it in.') : 'The template landed but `npm install` exited with ' + code + ' — check the log above.', acts: template === 'web' ? [{ label: 'play it', run: () => send('/play ' + r.slug) }, { label: 'first fix', run: () => { ask.value = '/fix '; ask.focus(); autosize(); } }] : [{ label: 'plan', run: () => send('/plan ' + r.slug) }, { label: 'write the pitch', run: () => { ask.value = 'The pitch for ' + name + ': '; ask.focus(); autosize(); } }] };
+      return { ok, text: ok ? '**' + md.esc(name) + '** is a ' + (template === 'web' ? 'web app' : 'game') + ' now — `' + r.repo + '`' + (files.length ? ' (' + files.map((f) => '`' + f + '`').join(', ') + ')' : '') + '.' + (template === 'web' ? ' `npm run dev` is wired, so `/play ' + r.slug + '` works.' : ' The plan is in the vault; tell me the pitch and I\'ll fill it in.') : 'The template landed but `npm install` exited with ' + code + ' — check the log above.', acts: template === 'web' ? [{ label: 'play it', run: () => send('/play ' + r.slug) }, { label: 'first fix', run: () => { ask.value = '/fix '; focusComposer(); autosize(); } }] : [{ label: 'plan', run: () => send('/plan ' + r.slug) }, { label: 'write the pitch', run: () => { ask.value = 'The pitch for ' + name + ': '; focusComposer(); autosize(); } }] };
     }); }
     case 'issue': return localTurn('/issue' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = activeProject(); const f = await issuesFile(proj);
@@ -749,7 +745,7 @@ async function runLocalCommand(name, arg, opts) {
       const proj = activeProject(); const st = addStep(T, 'dispatching a fixer on ' + proj);
       const r = await api.post('/api/fix', { project: proj, issue: arg });
       markStep(st, 'done'); refreshStatus();
-      return { text: 'Fixer **' + r.id + '** is on it — `' + r.branch + '` in **' + proj + '**. It works in its own worktree; nothing lands until you approve.', acts: [{ label: 'watch it', run: () => send('/log ' + r.id) }, { label: 'steer', run: () => { ask.value = '/steer ' + r.id + ' '; ask.focus(); autosize(); } }] };
+      return { text: 'Fixer **' + r.id + '** is on it — `' + r.branch + '` in **' + proj + '**. It works in its own worktree; nothing lands until you approve.', acts: [{ label: 'watch it', run: () => send('/log ' + r.id) }, { label: 'steer', run: () => { ask.value = '/steer ' + r.id + ' '; focusComposer(); autosize(); } }] };
     });
     case 'diff': return localTurn('/diff ' + arg, async (T) => {
       if (!arg) return { ok: false, text: 'Which one? `/diff <fixer-id>`' };
@@ -823,7 +819,7 @@ async function runLocalCommand(name, arg, opts) {
       return;
     }
     case 'history': return localTurn('/history ' + arg, async () => { if (!arg) return { ok: false, text: '`/history <query>`' }; const r = await api.get('/api/history?q=' + encodeURIComponent(arg) + '&n=8'); const items = Array.isArray(r) ? r : (r.items || []); if (!items.length) return { text: 'Nothing about "' + md.esc(arg) + '" in the log.' }; return { text: items.slice(0, 8).map((e) => '**' + (e.role === 'user' ? 'you' : NAME) + '**' + (e.role !== 'user' && localReplyLabel(e) ? ' · ' + md.esc(localReplyLabel(e)) : '') + ' · ' + new Date(e.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + '\n' + String(e.text || '').replace(/\s+/g, ' ').slice(0, 220)).join('\n\n') }; });
-    case 'vault': return localTurn('/vault ' + arg, async () => { if (!arg) return { ok: false, text: '`/vault <path>` — e.g. `/vault plans/battalion.md`' }; const r = await api.get('/api/vault?p=' + encodeURIComponent(arg)); return { text: '`' + md.esc(arg) + '`\n\n' + String(r.content || '').slice(0, 6000), acts: [{ label: 'ask nibbi to change it', run: () => { ask.value = 'In ' + arg + ', '; ask.focus(); autosize(); } }] }; });
+    case 'vault': return localTurn('/vault ' + arg, async () => { if (!arg) return { ok: false, text: '`/vault <path>` — e.g. `/vault plans/battalion.md`' }; const r = await api.get('/api/vault?p=' + encodeURIComponent(arg)); return { text: '`' + md.esc(arg) + '`\n\n' + String(r.content || '').slice(0, 6000), acts: [{ label: 'ask nibbi to change it', run: () => { ask.value = 'In ' + arg + ', '; focusComposer(); autosize(); } }] }; });
     case 'journal': return localTurn('/journal' + (arg ? ' ' + arg : ''), async () => { const day = arg || new Date().toLocaleDateString('en-CA'); const r = await api.get('/api/vault?p=' + encodeURIComponent('journal/' + day + '.md')); const c = String(r.content || ''); if (!c || c === '(missing)') return { text: 'No journal page for **' + day + '** yet.', acts: [{ label: 'what happened today?', run: () => send('what happened today? give me the short version, then write the journal page') }] }; return { text: '`journal/' + day + '.md`\n\n' + c.slice(0, 6000), acts: [{ label: 'yesterday', run: () => { const d = new Date(day); d.setDate(d.getDate() - 1); send('/journal ' + d.toLocaleDateString('en-CA')); } }] }; });
     case 'report': return localTurn('/report' + (arg ? ' ' + arg : ''), async () => { const r = await api.get('/api/build-report?hours=' + (Number(arg) || 24)); return { text: r.text || '_nothing to report_' }; });
     case 'artifacts': return localTurn('/artifacts' + (arg ? ' ' + arg : ''), async () => {
@@ -1144,7 +1140,7 @@ function updatePalette() {
   const r = pill.getBoundingClientRect(); paletteEl.style.bottom = (innerHeight - r.top + 10) + 'px'; paletteEl.style.width = r.width + 'px';
   paletteEl.hidden = false;
 }
-function pickPalette(i) { const c = palItems[i]; if (!c) return; ask.value = c.cmd + (c.args ? ' ' : ''); paletteEl.hidden = true; palItems = []; ask.focus(); autosize(); if (!c.args) pill.requestSubmit(); }
+function pickPalette(i) { const c = palItems[i]; if (!c) return; ask.value = c.cmd + (c.args ? ' ' : ''); paletteEl.hidden = true; palItems = []; focusComposer(); autosize(); if (!c.args) pill.requestSubmit(); }
 ask.addEventListener('input', () => { palIndex = 0; updatePalette(); });
 ask.addEventListener('blur', () => setTimeout(() => { paletteEl.hidden = true; }, 120));
 ask.addEventListener('keydown', (e) => {
@@ -1381,7 +1377,7 @@ function renderProposalCard(T, p, prompt) {
     try { await api.command('plan.cancel', { id: p.id }, p.project); setState('cancelled', 'Plan cancelled — nothing was queued.'); }
     catch (e) { toast(e.message || String(e), 3200); }
   };
-  const adjust = () => { ask.value = prompt || T.text || ''; setPlanFirst(true); ask.focus(); autosize(); toast('adjust the goal, then Enter — plan first stays on', 2600); };
+  const adjust = () => { ask.value = prompt || T.text || ''; setPlanFirst(true); focusComposer(); autosize(); toast('adjust the goal, then Enter — plan first stays on', 2600); };
   const acts = [];
   if (p.state === 'prepared' && steps.length) acts.push({ label: 'approve', confirm: 'queue ' + steps.length + ' build' + (steps.length === 1 ? '' : 's') + ' — sure?', warn: true, run: approve });
   acts.push({ label: 'adjust', run: adjust });
@@ -1616,8 +1612,8 @@ async function handleMarginAction(action, id, value) {
     case 'selectProject': if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
     case 'projectSection': openProjectSection(id, value); return;
     case 'repository': openProjectSection(id, 'repository'); margins.close(); return;
-    case 'newProject': margins.close(); ask.value = '/new '; ask.focus(); autosize(); return;
-    case 'fix': selectMarginProject(id); margins.close(); ask.value = '/fix '; ask.focus(); autosize(); return;
+    case 'newProject': margins.close(); ask.value = '/new '; focusComposer(); autosize(); return;
+    case 'fix': selectMarginProject(id); margins.close(); ask.value = '/fix '; focusComposer(); autosize(); return;
     case 'plan': case 'play': case 'review':
       selectMarginProject(id); margins.close(); await send('/' + action + ' ' + id); return;
     case 'autoMode':
@@ -1661,17 +1657,16 @@ function openProjectSection(id, section, detail = {}) {
   const project = (S.projects || []).find(p => p.name === id && p.kind !== 'brain');
   if (!project) { toast('This project is no longer available.'); return; }
   selectMarginProject(id); margins.close();
-  if (!S.projectView) S.projectComposerExpanded = null;
   S.projectView = { project: id, section }; body.classList.add('project-view');
-  hideChips(); paletteEl.hidden = true;
+  closeDock(false); hideChips(); paletteEl.hidden = true;
   projectWorkspace.open({ project: id, kind: project.kind, section, ...detail });
-  projectWorkspace.setSummaries?.(id, projectSummaries.get(id)); watchProjectSummaries();
+  watchProjectSummaries();
   syncMargins(); layout(false);
 }
 function closeProjectView(focus = true) {
   if (!S.projectView) return;
-  S.projectView = null; S.projectComposerExpanded = null; projectWorkspace.close(); body.classList.remove('project-view'); watchProjectSummaries();
-  syncMargins(); layout(false); if (focus) ask.focus();
+  S.projectView = null; projectWorkspace.close(); body.classList.remove('project-view'); watchProjectSummaries();
+  syncMargins(); layout(false); if (focus) focusComposer();
 }
 async function handleProjectAction(action, project, value) {
   if (action === 'githubRead') {
@@ -1719,13 +1714,13 @@ async function handleProjectAction(action, project, value) {
   if (action === 'buildChanges' || action === 'buildLog') {
     closeProjectView(false);
     await runLocalCommand(action === 'buildChanges' ? 'diff' : 'log', value, { keepInput: true });
-    ask.focus(); return;
+    focusComposer(); return;
   }
   const prompts = { newBuild: '/fix ', newIssue: '/issue ', newPlan: 'Write a plan with milestones and checkbox tasks for ' + project + ' in plans/' + project + '.md: ', editPlan: '/plan edit ' };
   if (!(action in prompts)) throw new Error('This project action is unavailable.');
   closeProjectView(false);
-  if (ask.value.trim() || pendingImages.length) { ask.focus(); toast('Your draft is still here. Send or clear it before starting something new.'); return; }
-  ask.value = prompts[action]; ask.focus(); autosize();
+  if (ask.value.trim() || pendingImages.length) { focusComposer(); toast('Your draft is still here. Send or clear it before starting something new.'); return; }
+  ask.value = prompts[action]; focusComposer(); autosize();
 }
 
 let projectRefreshTimer = 0, allProjectRefresh = false;
@@ -1854,13 +1849,13 @@ function showChips(when) {
   chipsShown = true;
   clearTimeout(S.chipTimer); S.chipTimer = setTimeout(hideChips, when === 'after' ? 14000 : 30000);
 }
-function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; ask.focus(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); ask.focus(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
+function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; focusComposer(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); focusComposer(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
 function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
-ask.addEventListener('focus', () => { if (S.projectView) S.projectComposerExpanded = true; layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
+ask.addEventListener('focus', () => { layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
@@ -1901,7 +1896,7 @@ addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.activeElement !== ask && !e.repeat && S.turns.length && !S.busy) { const map = { d: /^(diff|what changed)$/, p: /^preview$/, a: /^approve/, s: /^stop/, o: /^open/ }; const rx = map[e.key.toLowerCase()]; if (rx) { const chip = [...S.turns[S.turns.length - 1].body.querySelectorAll('.acts .chip')].find((c) => rx.test(c.textContent)); if (chip) { e.preventDefault(); chip.click(); chip.focus(); return; } } }
   if (e.key === ' ' && e.target instanceof Element && e.target.closest('button, summary, [role="button"], a[href]')) return;   // Space activates the focused control (a step's summary, a chip); it is not a character for the composer
-  if (document.activeElement !== ask && e.key.length === 1 && !e.repeat) { ask.focus(); }
+  if (document.activeElement !== ask && e.key.length === 1 && !e.repeat) { focusComposer(); }
 });
 
 /* images: paste or drop */
@@ -1917,7 +1912,7 @@ function renderAttach() {
 function clearAttach() { pendingImages = []; renderAttach(); }
 document.addEventListener('paste', (e) => { for (const it of e.clipboardData?.items || []) if (it.kind === 'file') addImage(it.getAsFile()); });
 document.addEventListener('dragover', (e) => e.preventDefault());
-document.addEventListener('drop', (e) => { e.preventDefault(); for (const f of e.dataTransfer?.files || []) addImage(f); ask.focus(); });
+document.addEventListener('drop', (e) => { const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return; e.preventDefault(); for (const f of files) addImage(f); focusComposer(); });
 
 /* ------------------------------------------------------------------ opt-in mic toggle + local “Hey Nibbi” wake gate */
 let listening = false, micStarting = false, micEpoch = 0, micProject = null, voiceCooldown = 0;
@@ -2071,7 +2066,7 @@ let stateTimer = 0;
 function snapshot() {
   return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mic: { enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }, mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, glass: glassOn, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
     turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => (s.querySelector(':scope > summary') || s).textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
-    renderer: (() => { try { const r = nibbi.state(); return { character: r.character ?? null, backend: r.backend ?? (r.gl ? 'webgl' : 'canvas2d'), fallbackReason: r.fallbackReason ?? null, engine: r.motion ? 'pocket' : 'legacy', dpr: r.dpr ?? devicePixelRatio }; } catch { return null; } })(), chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectWorkspace.snapshot(), composerCollapsed: body.classList.contains('project-compose-compact'), toast: $('#toast').hidden ? null : $('#toast').textContent };
+    renderer: (() => { try { const r = nibbi.state(); return { character: r.character ?? null, backend: r.backend ?? (r.gl ? 'webgl' : 'canvas2d'), fallbackReason: r.fallbackReason ?? null, engine: r.motion ? 'pocket' : 'legacy', dpr: r.dpr ?? devicePixelRatio }; } catch { return null; } })(), chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectWorkspace.snapshot(), composerCollapsed: !!S.projectView, toast: $('#toast').hidden ? null : $('#toast').textContent };
 }
 /* a persisted step: ≤ 1 KB without its diff, diff ≤ 2 KB */
 function stepRow(s) {

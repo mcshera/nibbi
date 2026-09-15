@@ -57,7 +57,6 @@ async function harness(browser, viewport) {
         data.revision += '-next'; return { ok: true, section: structuredClone(data), itemId: ({ 'issue.create': 'new-issue', 'milestone.create': 'new-milestone', 'task.create': 'new-task' })[value.action] || value.id };
       }
     } });
-    workspace.setSummaries('paper-garden', sections);
   }, fixtures);
   const open = async section => { await page.evaluate(section => workspace.open({ project: 'paper-garden', section }), section); await page.waitForFunction(() => document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false'); };
   return { page, context, errors, open };
@@ -68,7 +67,7 @@ test('project workspace preserves editing context and shows canonical linked wor
   const { page, context, errors, open } = await harness(browser, { width: 1180, height: 712 });
   try {
     await open('issues');
-    assert.equal(await page.locator('.project-issue').count(), 2);
+    assert.equal(await page.locator('.project-issue').count(), 3);
     await page.getByLabel('Search issues', { exact: true }).fill('seedlings');
     assert.equal(await page.locator('.project-issue').count(), 1);
     await page.locator('[data-record-id="issue-seedlings"] > summary').click();
@@ -259,6 +258,57 @@ test('Builds Log tab renders the event trail as rows: tool labels, exact names, 
         const plain = page.locator('[data-build-id="run-active"] .project-evidence-panel > .project-evidence-code'); await plain.waitFor();
         assert.equal(await plain.innerText(), 'plain text log');
         assert.equal(await page.locator('[data-build-id="run-active"] .project-log').count(), 0);
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    }
+  } finally { await browser.close(); }
+});
+
+
+test('large play control starts the selected version, reopens it, and reports unavailable previews', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    for (const viewport of [{ width: 1180, height: 712 }, { width: 390, height: 844 }]) {
+      const { page, context, errors, open } = await harness(browser, viewport);
+      try {
+        await page.evaluate(() => {
+          sections.builds.runs[0].allowedActions.push('preview.start');
+          window.workspace.destroy();
+        });
+        // Reuse the harness action contract while holding startup long enough to inspect it.
+        await page.evaluate(async () => {
+          const { installProjectWorkspace } = await import('/lib/project-workspace.js');
+          window.workspace = installProjectWorkspace({ load: async () => structuredClone(sections.builds), onAction: async (name, project, value) => {
+            calls.push({ name, project, value });
+            if (name === 'buildCommand') {
+              await new Promise(resolve => window.finishPreviewStart = resolve);
+              sections.builds.runs[0].allowedActions = ['preview.stop'];
+              return { ok: true };
+            }
+            if (name === 'previewStatus') return { running: true, url: 'http://127.0.0.1:4321' };
+          } });
+        });
+        await open('builds');
+        if (viewport.width < 900) await page.locator('[data-build-id="run-review"] > summary').click();
+        const play = page.getByRole('button', { name: 'Play build', exact: true });
+        assert((await play.boundingBox()).height >= 104);
+        await play.click();
+        assert.equal(await play.getAttribute('aria-busy'), 'true');
+        assert.equal(await play.isDisabled(), true);
+        assert.equal(await play.locator('.project-build-play-loading').isVisible(), true);
+        assert.deepEqual(await page.evaluate(() => calls[0]), { name: 'buildCommand', project: 'paper-garden', value: { id: 'run-review', command: 'preview.start' } });
+        await page.evaluate(() => finishPreviewStart());
+        await page.getByRole('button', { name: 'Open build', exact: true }).waitFor();
+        assert.equal(await page.evaluate(() => calls.filter(c => c.name === 'openUrl').length), 1);
+        await page.getByRole('button', { name: 'Open build', exact: true }).click();
+        assert.equal(await page.evaluate(() => calls.filter(c => c.name === 'buildCommand').length), 1, 'Reopening must not start another preview');
+        assert.equal(await page.evaluate(() => calls.filter(c => c.name === 'openUrl').length), 2);
+        const out = resolve('output/playwright/build-play'); mkdirSync(out, { recursive: true });
+        await page.screenshot({ path: resolve(out, `running-${viewport.width}.png`) });
+        await page.evaluate(() => { sections.builds.runs[0].allowedActions = []; document.activeElement.blur(); return workspace.refresh(); });
+        assert.equal(await page.getByRole('button', { name: 'Play build', exact: true }).isDisabled(), true);
+        assert.match(await play.innerText(), /No browser preview is configured/);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     }

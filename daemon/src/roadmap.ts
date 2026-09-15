@@ -7,10 +7,11 @@ import { editDocuments, readDocument } from './workspace-documents.js';
 export interface MarkdownHeading { line: number; level: number; text: string; id: string; explicit: boolean }
 export interface RoadmapTask {
   id: string; text: string; done: boolean; checked: boolean; line: number; endLine: number; explicit: boolean;
+  boardStatus?: 'backlog' | 'in-progress' | 'done';
   milestone?: string; milestoneId?: string; heading: string | null; description: string; issueIds: string[];
 }
 export interface PlanMilestone { id: string; name: string; description: string; line: number; endLine: number; descriptionEnd: number; explicit: boolean; done: number; total: number; tasks: RoadmapTask[] }
-const cleanMarkers = (text: string): string => text.replace(/\s*<!--\s*nibbi-(?:task|issue|milestone|issue-ref|current-milestone):[^>]+-->/g, '').trim();
+const cleanMarkers = (text: string): string => text.replace(/\s*<!--\s*nibbi-(?:task|issue|milestone|issue-ref|current-milestone|status):[^>]+-->/g, '').trim();
 const identity = (text: string, nth: number, namespace = ''): string => createHash('sha256').update(namespace + text + '\0' + nth).digest('hex').slice(0, 16);
 const checkbox = /^(\s*(?:[-+*][ \t]*|\d+[.)][ \t]+))\[([ xX])\](?:[ \t]+(.*))?$/;
 
@@ -59,7 +60,7 @@ export function parseProjectDocument(markdown: string, kind: 'task' | 'issue' = 
     }
     if (managedEnd >= 0) endLine = managedEnd + 1;
     const description = lines.slice(index + (managedEnd >= 0 ? 2 : 1), managedEnd >= 0 ? managedEnd : endLine).map(value => value.replace(/^(?: {2}|\t)/, '').replace(/\r$/, '')).join('\n').trim();
-    items.push({ id, text: body, done: match[2] !== ' ', checked: match[2] !== ' ', line: index, endLine, explicit: !!marker,
+    items.push({ ...(kind === 'issue' ? { boardStatus: match[2].toLowerCase() === 'x' ? 'done' as const : /<!--\s*nibbi-status:in-progress\s*-->/.test(raw) ? 'in-progress' as const : 'backlog' as const } : {}), id, text: body, done: match[2] !== ' ', checked: match[2] !== ' ', line: index, endLine, explicit: !!marker,
       milestone: milestone?.text, milestoneId: milestone?.id, heading, description,
       issueIds: [...raw.matchAll(/<!--\s*nibbi-issue-ref:([a-zA-Z0-9_-]+)\s*-->/g)].map(value => value[1]) });
   }

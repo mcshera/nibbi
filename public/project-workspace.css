@@ -1,6 +1,6 @@
 /* Project records share the conversation's paper, ink and comfortable reading measure. */
 body.project-view .feed, body.project-view .chips, body.project-view .jump { display: none; }
-.project-workspace { position: fixed; z-index: 5; top: var(--feed-top); bottom: var(--feed-bottom); left: calc(50% + var(--workspace-left) / 2); transform: translateX(-50%); width: min(800px, calc(100vw - var(--workspace-left) - 64px)); display: flex; flex-direction: column; min-height: 0; color: var(--ink); }
+.project-workspace { position: fixed; z-index: 5; top: var(--feed-top); bottom: 0; left: calc(50% + var(--workspace-left) / 2); transform: translateX(-50%); width: min(800px, calc(100vw - var(--workspace-left) - 64px)); display: flex; flex-direction: column; min-height: 0; color: var(--ink); }
 .project-workspace-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 0 12px; }
 .project-workspace h1 { margin: 0; font-size: 26px; line-height: 1.25; letter-spacing: -.025em; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .project-workspace h1:focus { outline: none; }
@@ -11,13 +11,7 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-workspace button:disabled { cursor: default; opacity: .45; }
 .project-workspace :is(button,summary,a,input,textarea,select):focus-visible, .project-workspace-body:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 3px; }
 .project-workspace ::selection { background: #ded5c6; color: var(--ink); }
-.project-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); flex: none; }
-.project-tab { display: flex; align-items: center; flex-wrap: wrap; column-gap: 7px; min-height: 48px; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 0 12px; font-size: 14px !important; color: var(--ink-3); text-align: left; }
-.project-tab-count { font-size: 11px; font-weight: 400; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.project-tab[data-freshness="stale"] .project-tab-count { text-decoration: underline dotted; text-underline-offset: 3px; }
-.project-tab[aria-current="page"] { border-bottom-color: var(--ink); color: var(--ink); font-weight: 600; }
-.project-tab:hover { color: var(--ink); }
-.project-workspace-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 4px 24px; margin: 0 -4px; scrollbar-width: thin; scrollbar-color: #bcb7af transparent; overflow-anchor: none; }
+.project-workspace-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 4px calc(88px + env(safe-area-inset-bottom)); scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom)); margin: 0 -4px; scrollbar-width: thin; scrollbar-color: #bcb7af transparent; overflow-anchor: none; }
 .project-content { font-size: 14px; line-height: 1.55; user-select: text; -webkit-user-select: text; }
 .project-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; }
 .project-summary { margin: 0; font-size: 12px; color: var(--ink-3); }
@@ -112,8 +106,6 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
   .project-workspace { width: calc(100vw - 32px); }
   .project-workspace h1 { font-size: 23px; }
   .project-toolbar { gap: 8px; flex-wrap: wrap; padding-block: 12px; }
-  .project-tabs { gap: 20px; }
-  .project-tab { flex-direction: column; align-items: flex-start; gap: 2px; }
   .project-build > summary, .project-record > summary { flex-wrap: wrap; column-gap: 10px; row-gap: 4px; }
   .project-build-label, .project-record-copy { min-width: 65%; }
   .project-build-status, .project-record-status { margin-right: auto; }
@@ -129,7 +121,6 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 @media (max-height: 520px) {
   .project-workspace-head { padding-bottom: 4px; }
   .project-workspace h1 { font-size: 20px; }
-  .project-tab { padding-block: 4px; }
   .project-toolbar { padding-block: 8px; }
   .project-group-title { margin-top: 16px !important; }
 }
@@ -249,3 +240,45 @@ body.glass .project-action:hover:not(:disabled) { background: rgba(233, 229, 221
 }
 /* A phone shows the staged build alone; "Back to build list" is the way back to the queue. */
 @media (max-width: 540px) { .project-build-rail { display: none; } }
+
+/* The selected version has one unmistakable way to play it. */
+.project-build-play-area { margin: 8px 0 16px; }
+.project-workspace .project-build-play {
+  display: flex; align-items: center; gap: 20px; width: 100%; min-height: 104px;
+  padding: 24px; border-radius: 16px; text-align: left;
+}
+.project-build-play svg { flex: none; }
+.project-build-play-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.project-build-play-copy strong { font-size: 22px; font-weight: 600; line-height: 1.25; }
+.project-build-play-hint { font-size: 13px; line-height: 1.5; }
+.project-build-play .project-build-play-loading { display: none; }
+.project-build-play[aria-busy="true"] .project-build-play-label { display: none; }
+.project-build-play[aria-busy="true"] .project-build-play-loading { display: block; }
+.project-workspace .project-build-play:disabled { opacity: 1; background: var(--surface); color: var(--ink-3); border-color: var(--line); }
+.project-workspace .project-build-play[aria-busy="true"] { background: var(--ink); color: var(--paper); }
+@media (max-width: 540px) {
+  .project-workspace .project-build-play { padding: 20px; gap: 16px; }
+  .project-build-play-copy strong { font-size: 20px; }
+}
+
+/* Issue stages share one board; cards keep their details and actions close. */
+.project-workspace[data-section="issues"] { width: min(1120px, calc(100vw - var(--workspace-left) - 64px)); }
+.project-kanban { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; margin: 20px 0 28px; }
+.project-kanban-column { min-width: 0; }
+.project-kanban-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.project-kanban-count { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.project-kanban .project-issue { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.project-kanban .project-issue > summary { padding: 16px; align-items: flex-start; }
+.project-kanban .project-record-copy { min-width: 0; }
+.project-kanban .project-record-status { display: none; }
+.project-kanban .project-record-detail { padding: 0 16px 16px; }
+.project-kanban .project-toolbar-actions { gap: 8px; }
+.project-kanban .project-toolbar-actions .project-action { flex: 1 1 auto; }
+.project-kanban-empty { color: var(--ink-3); font-size: 13px; line-height: 1.5; margin: 20px 0 28px; }
+@media (max-width: 899px) {
+  .project-workspace[data-section="issues"] { width: calc(100vw - 32px); }
+  .project-kanban { grid-template-columns: 1fr; gap: 24px; }
+}
+
+.project-kanban-column.drag-over { outline: 2px dashed var(--ink-3); outline-offset: 6px; border-radius: 8px; }
+.project-kanban .project-issue > summary[draggable="true"] { cursor: grab; }

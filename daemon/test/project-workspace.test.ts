@@ -214,3 +214,25 @@ test('Add to plan rejects a hidden destination before pinning either document', 
   assert.equal(projectSection(project, 'plans').markdown, plan.markdown); assert.equal(projectSection(project, 'issues').markdown, issues.markdown);
   assert.equal(projectSection(project, 'issues').items[0].explicit, false); assert.deepEqual(projectSection(project, 'issues').items[0].linkedTaskIds, []);
 });
+
+
+test('kanban status persists without changing issue identity or source notes, and rejects stale moves', async () => {
+  const project = fixture('kanban', '', '# Issues\n\nKeep these notes.\n- [ ] Fix focus\n  Reproduce with a keyboard.\n- [x] Earlier fix\n');
+  const initial = projectSection(project, 'issues'), id = initial.items[0].id;
+  assert.equal(initial.items[0].boardStatus, 'backlog');
+  const started = await command(project, 'issue.status', { id, status: 'in-progress' }); ok(started);
+  assert.equal(projectSection(project, 'issues').items[0].boardStatus, 'in-progress');
+  assert.equal(started.section.items[0].id, id); assert.equal(started.section.items[0].text, 'Fix focus');
+  assert.equal(started.section.items[0].description, 'Reproduce with a keyboard.');
+  assert.equal(started.section.counts.open, 1);
+  const stale = await command(project, 'issue.status', { id, status: 'done', expectedRevision: initial.revision });
+  assert.equal(stale.ok, false);
+  const edited = await command(project, 'issue.edit', { id, title: 'Fix keyboard focus' }); ok(edited);
+  assert.equal(edited.section.items[0].boardStatus, 'in-progress');
+  const completed = await command(project, 'issue.status', { id, status: 'done' }); ok(completed);
+  assert.equal(completed.section.items[0].done, true); assert.equal(completed.section.items[0].boardStatus, 'done');
+  const reopened = await command(project, 'issue.reopen', { id }); ok(reopened);
+  assert.equal(reopened.section.items[0].boardStatus, 'backlog');
+  assert.match(reopened.section.markdown, /Keep these notes/); assert.equal(reopened.section.items[1].done, true);
+  assert.equal((await command(project, 'issue.status', { id, status: 'invalid' })).ok, false);
+});

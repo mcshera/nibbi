@@ -24,7 +24,7 @@ async function open(page,project,section){
  await chooseProject(page,project);await closeSwitcher(page);
  await page.locator(`[data-section-project="${project}"][data-project-section="${section}"]`).click();await ready(page,section);
 }
-async function tab(page,section){await page.locator(`[data-workspace-section="${section}"]`).click();await ready(page,section);}
+async function tab(page,section){const project=await page.evaluate(()=>nibbiApp.state().projectView.project);await open(page,project,section);}
 async function shot(page,name){await page.waitForFunction(()=>{const s=nibbi.state();return Math.abs(s.y-s.ty)<2&&Math.abs(s.x-s.tx)<2&&Math.abs(s.r-s.tr)<1;});await page.screenshot({path:join(out,name+'.png')});}
 async function createPage(width=1180,height=712){const context=await browser.newContext({viewport:{width,height},serviceWorkers:'block'});await context.addInitScript(silentMicrophone);const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>report.errors.push(e.message));await context.route('**/*',route=>new URL(route.request().url()).origin===fixture.base?route.continue():route.abort());await page.goto(fixture.base+'/?nosw=1'+(width===1180?'&app=1':''));await page.waitForFunction(()=>window.nibbiApp?.state().projects?.length>=3);return{context,page};}
 async function saveForm(page,title,description){const form=page.locator('.project-inline-form');await form.getByLabel('Title',{exact:true}).fill(title);if(description!==undefined)await form.getByLabel('Description',{exact:true}).fill(description);await form.getByRole('button',{name:'Save',exact:true}).click();await form.waitFor({state:'detached'});}
@@ -34,11 +34,31 @@ try{
  if(report.scope!=='responsive'){
  const {page,context}=await createPage();
  try{
+  await check('launcher preserves the active conversation and work while Nibbi is busy',async()=>{
+   const release=fixture.holdChat();
+   try {
+    await page.locator('#ask').fill('Keep working while I browse');await page.locator('#ask').press('Enter');
+    await page.waitForFunction(()=>nibbiApp.state().busy&&nibbiApp.state().activeRunId);
+    await page.locator('#ask').fill('An unsent follow-up');await attachFixture(page);
+    const before=await page.evaluate(()=>({thread:nibbiApp.state().thread,run:nibbiApp.state().activeRunId,turns:nibbiApp.state().turns.map(t=>t.text)}));
+    for(const section of ['builds','issues','plans'])await open(page,'observatory',section);
+    const writes=fixture.calls.filter(c=>c.method==='POST').length;
+    await page.getByRole('button',{name:'Chat with Nibbi',exact:true}).click();
+    assert.deepEqual(await page.evaluate(()=>({thread:nibbiApp.state().thread,run:nibbiApp.state().activeRunId,turns:nibbiApp.state().turns.map(t=>t.text)})),before);
+    assert.equal(await page.evaluate(()=>nibbiApp.state().busy),true);
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'ask');
+    assert.equal(await page.locator('#ask').inputValue(),'An unsent follow-up');assert.equal(await page.locator('#attach img').count(),1);
+    assert.equal(fixture.calls.filter(c=>c.method==='POST').length,writes,'opening chat sends nothing');
+   } finally {release();}
+   await page.waitForFunction(()=>!nibbiApp.state().busy);
+   // Start the record workflow with its own attachment.
+   await page.locator('#attach button').click();
+  });
   await check('informative navigation agrees with actual canonical records',async()=>{
    await page.locator('#ask').fill('Preserve this conversation draft');await attachFixture(page);await open(page,'paper-garden','issues');
    await page.waitForFunction(()=>document.querySelector('[data-section-project="paper-garden"][data-project-section="issues"] .project-section-badge').textContent==='2 open');
-   assert.equal(await page.locator('[data-workspace-section="issues"] .project-tab-count').innerText(),'2 open');assert.equal(await page.locator('.project-issue').count(),2);
-   await tab(page,'plans');assert.equal(await page.locator('[data-workspace-section="plans"] .project-tab-count').innerText(),'1/3 tasks');assert.equal(await page.locator('.project-summary').innerText(),'1 of 3 tasks complete');await shot(page,'plans-desktop');
+   assert.equal(await page.locator('[data-section-project="paper-garden"][data-project-section="issues"] .project-section-badge').innerText(),'2 open');assert.equal(await page.locator('.project-issue').count(),3);
+   await tab(page,'plans');assert.equal(await page.locator('[data-section-project="paper-garden"][data-project-section="plans"] .project-section-badge').innerText(),'1/3 tasks');assert.equal(await page.locator('.project-summary').innerText(),'1 of 3 tasks complete');await shot(page,'plans-desktop');
   });
   let createdIssueId,linkedTaskId,buildId;
   await check('inline issue capture, editing, search, completion and reopen persist',async()=>{
@@ -47,7 +67,7 @@ try{
    let row=page.locator(`[data-record-id="${createdIssueId}"]`);if(!await row.evaluate(el=>el.open))await row.locator('summary').click();await row.getByRole('button',{name:'Edit',exact:true}).click();await saveForm(page,'Let seedlings rest quietly','Keep this edited description.');
    data=await fixture.section('paper-garden','issues');issue=data.items.find(i=>i.id===createdIssueId);assert.equal(issue.text,'Let seedlings rest quietly');assert.match(issue.description,/edited description/);
    await page.getByRole('searchbox',{name:'Search issues'}).fill('rest quietly');assert.equal(await page.locator('.project-issue').count(),1);
-   row=page.locator(`[data-record-id="${createdIssueId}"]`);if(!await row.evaluate(el=>el.open))await row.locator('summary').click();await row.getByRole('button',{name:'Complete issue',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.project-issue').length===0);
+   row=page.locator(`[data-record-id="${createdIssueId}"]`);if(!await row.evaluate(el=>el.open))await row.locator('summary').click();await row.getByRole('button',{name:'Complete issue',exact:true}).click();await page.locator(`[data-issue-status="done"] [data-record-id="${createdIssueId}"]`).waitFor();
    await page.locator('[data-filter="done"]').click();row=page.locator(`[data-record-id="${createdIssueId}"]`);if(!await row.evaluate(el=>el.open))await row.locator('summary').click();await row.getByRole('button',{name:'Reopen issue',exact:true}).click();await page.locator('[data-filter="open"]').click();
    await page.getByRole('searchbox',{name:'Search issues'}).fill('');assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');await shot(page,'issues-desktop');
   });
@@ -81,7 +101,7 @@ try{
   await check('project and filter navigation retains reading state and drafts',async()=>{
    await tab(page,'issues');await page.locator('[data-filter="all"]').click();await page.getByRole('searchbox',{name:'Search issues'}).fill('seedlings');await tab(page,'plans');await tab(page,'issues');assert.equal(await page.getByRole('searchbox',{name:'Search issues'}).inputValue(),'seedlings');assert.equal(await page.locator('[data-filter="all"]').getAttribute('aria-pressed'),'true');
    await open(page,'observatory','plans');assert.match(await page.locator('.project-content').innerText(),/written plan/i);assert(!/seedlings/.test(await page.locator('.project-content').innerText()));await open(page,'weekend-notes','issues');assert.match(await page.locator('.project-content').innerText(),/No issues yet/);
-   await page.getByRole('button',{name:'Back to chat',exact:true}).click();assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);assert.equal(await page.locator('#project-workspace').isVisible(),false);
+   await page.getByRole('button',{name:'Chat with Nibbi',exact:true}).click();assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);assert.equal(await page.locator('#project-workspace').isVisible(),false);
   });
   await check('empty plan supports inline milestone and task creation and editing',async()=>{
    await open(page,'weekend-notes','plans');await page.getByRole('button',{name:'Create milestone',exact:true}).click();await saveForm(page,'A useful weekend','Keep room for small ideas.');
@@ -98,11 +118,26 @@ try{
   const {page,context}=await createPage(w,h);
   try{await check(`responsive sections and composer ${w}x${h}`,async()=>{
    await page.locator('#ask').fill('A mobile draft');await attachFixture(page);await open(page,'paper-garden','plans');
-   assert.equal(await page.locator('#pill').evaluate(el=>el.inert),false);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-   for(const selector of ['#project-workspace','#pill']){const b=await page.locator(selector).boundingBox();assert(b.x>=-1&&b.y>=-1&&b.x+b.width<=w+1&&b.y+b.height<=h+1,selector+' fits');}
-   if(h<600){assert.equal(await page.locator('body').evaluate(el=>el.classList.contains('project-compose-compact')),true);assert.equal(await page.locator('#ask').isVisible(),false);await page.locator('#project-compose-toggle').click();assert.equal(await page.locator('#ask').inputValue(),'A mobile draft');assert.equal(await page.evaluate(()=>document.activeElement.id),'ask');await page.locator('#project-compose-toggle').click();assert.equal(await page.locator('#ask').inputValue(),'A mobile draft');}
-   await shot(page,`plans-${w}x${h}`);await tab(page,'issues');await shot(page,`issues-${w}x${h}`);await tab(page,'builds');await shot(page,`builds-${w}x${h}`);
-   assert.equal(await page.locator('#attach img').count(),1);assert.equal(await page.locator('#ask').inputValue(),'A mobile draft');
+   for(const section of ['plans','issues','builds']){
+    await tab(page,section);
+    assert.equal(await page.locator('#project-workspace-title').innerText(),section[0].toUpperCase()+section.slice(1));
+    assert.equal(await page.locator('.project-tabs').count(),0);
+    assert.equal(await page.locator('#pill').isVisible(),false);
+    assert.equal(await page.locator('#pill').evaluate(el=>el.inert),true);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    const launcher=page.locator('#project-chat-launcher'),before=await launcher.boundingBox();
+    assert.equal(before.height,48);assert.equal(Math.round(w-before.x-before.width),16);assert.equal(Math.round(h-before.y-before.height),16);
+    await page.locator('.project-workspace-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+    assert.deepEqual(await launcher.boundingBox(),before,'launcher stays fixed while records scroll');
+    const scroll=await page.locator('.project-workspace-body').evaluate(el=>el.scrollTop);
+    await shot(page,`${section}-${w}x${h}`);
+    await launcher.focus();await page.keyboard.press(section==='issues'?'Space':'Enter');
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'ask');
+    assert.equal(await page.locator('#ask').inputValue(),'A mobile draft');assert.equal(await page.locator('#attach img').count(),1);
+    await open(page,'paper-garden',section);
+    assert.equal(await page.locator('.project-workspace-body').evaluate(el=>el.scrollTop),scroll);
+   }
+   await page.getByRole('button',{name:'Chat with Nibbi',exact:true}).click();
    const dock=page.locator('#dock'),dbox=await dock.boundingBox();assert(dbox.width>=(w<=640?44:40)&&dbox.height>=(w<=640?44:40),'options button target');const openDock=async()=>{if(await dock.getAttribute('aria-expanded')!=='true')await dock.click();};
    await openDock();const mic=page.locator('#mic'),box=await mic.boundingBox();assert(box.width>=44&&box.height>=44);await mic.click();await page.waitForFunction(()=>nibbiApp.voice.snapshot().phase==='paused');assert.equal(await page.locator('#dock-menu').isVisible(),false,'choosing a row closes the panel');assert.equal(await mic.getAttribute('aria-pressed'),'true','the panel toggle reports Hey Nibbi on');assert.equal(await page.locator('#listen').isVisible(),true,'the listen strip is the on-state cue inside the bar');assert.equal(await page.locator('.mode').count(),0,'no mode chips anywhere');await openDock();await mic.click();await page.waitForFunction(()=>nibbiApp.voice.snapshot().phase==='off');assert.equal(await mic.getAttribute('aria-pressed'),'false','the panel toggle reports Hey Nibbi off');assert.equal(await page.locator('#listen').isVisible(),false,'the listen strip leaves with the mode');assert.equal(await page.evaluate(()=>workflowMicrophone.requests),1);assert.equal(await page.evaluate(()=>workflowMicrophone.tracks.every(t=>t.readyState==='ended')),true);assert.equal(fixture.calls.some(r=>r.path==='/api/transcribe'),false);
    assert.equal(await page.evaluate(()=>nibbi.state().character),'pool-velvet');
