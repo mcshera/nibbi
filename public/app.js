@@ -180,9 +180,10 @@ function layout(snap) {
   if (S.mode === 'talk' || S.projectView) {
     const compactProject = S.projectView && H < 520;
     const r = compactProject ? 32 : Math.max(48, Math.min(78, r0 * 0.48, H * 0.09));
-    const cy = (compactProject ? 18 : 30) + r * 1.15;
+    const cy = r;
     pose = { x: center, y: cy, r };
-    document.documentElement.style.setProperty('--feed-top', Math.round(cy + r * 1.1 + 10) + 'px');
+    const feedTop = cy + r * 0.85;
+    document.documentElement.style.setProperty('--feed-top', Math.round(feedTop) + 'px');
   } else {
     const focused = document.activeElement === ask && !S.busy;
     pose = { x: center, y: H * (focused ? 0.47 : 0.49) - (H < 600 ? 20 : 0), r: r0 };
