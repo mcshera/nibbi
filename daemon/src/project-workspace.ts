@@ -12,8 +12,8 @@ import { editDocuments, readDocument, WorkspaceConflict, type WorkspaceDocument 
 import type { GameCfg } from './projects.js';
 
 const projectSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(150);
-const actionSchema = z.enum(['issue.create', 'issue.edit', 'issue.complete', 'issue.reopen', 'issue.build', 'issue.plan', 'task.create', 'task.edit', 'task.reorder', 'task.build', 'milestone.create', 'milestone.edit', 'milestone.reorder', 'milestone.select']);
-const inputSchema = z.object({ project: projectSchema, action: actionSchema, expectedRevision: z.string().length(64), id: z.string().min(1).max(150).optional(), title: z.string().trim().min(1).max(1000).optional(), description: z.string().max(40_000).optional(), milestoneId: z.string().max(150).nullable().optional(), ids: z.array(z.string().min(1).max(150)).max(5000).optional(), planRevision: z.string().length(64).optional(), idempotencyKey: z.string().min(1).max(250) }).strict();
+const actionSchema = z.enum(['issue.create', 'issue.status', 'issue.edit', 'issue.complete', 'issue.reopen', 'issue.build', 'issue.plan', 'task.create', 'task.edit', 'task.reorder', 'task.build', 'milestone.create', 'milestone.edit', 'milestone.reorder', 'milestone.select']);
+const inputSchema = z.object({ project: projectSchema, action: actionSchema, status: z.enum(['backlog', 'in-progress', 'done']).optional(), expectedRevision: z.string().length(64), id: z.string().min(1).max(150).optional(), title: z.string().trim().min(1).max(1000).optional(), description: z.string().max(40_000).optional(), milestoneId: z.string().max(150).nullable().optional(), ids: z.array(z.string().min(1).max(150)).max(5000).optional(), planRevision: z.string().length(64).optional(), idempotencyKey: z.string().min(1).max(250) }).strict();
 export type ProjectCommandInput = z.infer<typeof inputSchema>;
 const registry = (): Record<string, GameCfg> => runtime().get('config', 'projects') ?? runtime().get('legacy', 'games.json') ?? {};
 function checkProject(project: string): void { projectSchema.parse(project); if (project !== 'vault' && !registry()[project]) throw new Error('Unknown project'); }
@@ -111,7 +111,12 @@ function editItem(markdown: string, kind: 'task' | 'issue', input: ProjectComman
     const markers = lines[item.line].match(/<!--\s*nibbi-[^>]+-->/g)?.join(' ') ?? '';
     lines[item.line] = prefix + safeTitle(input.title) + ' ' + markers;
   }
-  if (input.action === 'issue.complete' || input.action === 'issue.reopen') lines[item.line] = lines[item.line].replace(/\[[ xX]\]/, input.action === 'issue.complete' ? '[x]' : '[ ]');
+  if (['issue.status', 'issue.complete', 'issue.reopen'].includes(input.action)) {
+    const status = input.action === 'issue.complete' ? 'done' : input.action === 'issue.reopen' ? 'backlog' : input.status;
+    if (!status) throw new Error('Choose an issue status.');
+    lines[item.line] = lines[item.line].replace(/\[[ xX]\]/, status === 'done' ? '[x]' : '[ ]').replace(/\s*<!--\s*nibbi-status:[^>]+-->/g, '');
+    if (status === 'in-progress') lines[item.line] += ' <!-- nibbi-status:in-progress -->';
+  }
   if (input.description !== undefined) lines.splice(item.line + 1, item.endLine - item.line - 1, ...describe(input.description));
   let next = lines.join('\n');
   if (kind === 'task' && input.milestoneId !== undefined && (input.milestoneId || null) !== (item.milestoneId ?? null)) {
@@ -153,7 +158,7 @@ export async function projectCommand(value: unknown, dependencies: ProjectComman
       itemId = randomUUID(); const block = itemBlock(itemId, safeTitle(input.title), input.description ?? '', kind);
       next = kind === 'task' ? insertTask(next, block, input.milestoneId) : next + (next && !next.endsWith('\n\n') ? '\n\n' : '') + block.join('\n') + '\n';
       requireCreatedItem(next, kind, itemId);
-    } else if (['issue.edit', 'issue.complete', 'issue.reopen', 'task.edit'].includes(action)) next = editItem(next, kind, input);
+    } else if (['issue.status', 'issue.edit', 'issue.complete', 'issue.reopen', 'task.edit'].includes(action)) next = editItem(next, kind, input);
     else if (action === 'milestone.create') {
       itemId = randomUUID();
       next += (next && !next.endsWith('\n\n') ? '\n\n' : '') + `## ${safeTitle(input.title)} <!-- nibbi-milestone:${itemId} -->\n\n` + (input.description ? ['<!-- nibbi-description:start -->', safeDescription(input.description), '<!-- nibbi-description:end -->', '', ''].join('\n') : '');

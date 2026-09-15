@@ -10,9 +10,9 @@ export async function projectWorkflowFixture({daemon,ui}) {
  for(const [key,sub]of Object.entries({NIBBI_STATE_DIR:'state',NIBBI_VAULT_DIR:'vault',NIBBI_WORK_DIR:'work',NIBBI_PROJECTS_DIR:'projects'})){process.env[key]=join(directory,sub);mkdirSync(process.env[key],{recursive:true});}
  const mod=name=>import(pathToFileURL(join(daemon,name+'.js')).href);
  const {runtime,closeRuntime}=await mod('store');const {api}=await mod('api');const {createProject,updateProject}=await mod('projects');const {replaceProviderForTest}=await mod('providers/index');const fixer=await mod('fixer');const {closeToolService}=await mod('tool-service');const {stopProcesses}=await mod('processes');
- let serial=0;const restores=[];
+ let serial=0, chatGate=null, releaseChat=null;const restores=[];
  for(const id of ['claude','codex'])restores.push(replaceProviderForTest(id,{id,capabilities:{streaming:true,steering:true,cancellation:true,skills:true,tools:true,images:true},start:input=>({
-  result:Promise.resolve().then(()=>{if(input.role==='fixer')writeFileSync(join(input.cwd,'fixture-change-'+(++serial)+'.txt'),input.prompt);return {text:'Fixture change is ready for review.',isError:false};}),cancel:async()=>{},steer:async()=>{}
+  result:Promise.resolve().then(async()=>{if(input.role!=='fixer'&&chatGate)await chatGate;if(input.role==='fixer')writeFileSync(join(input.cwd,'fixture-change-'+(++serial)+'.txt'),input.prompt);return {text:'Fixture change is ready for review.',isError:false};}),cancel:async()=>{},steer:async()=>{}
  })}));
  for(const project of ['paper-garden','observatory','weekend-notes']){await createProject(project);updateProject(project,{check:'test -n "$(ls fixture-change-*.txt)"',install:'true'});}
  const vault=process.env.NIBBI_VAULT_DIR;mkdirSync(join(vault,'plans'),{recursive:true});mkdirSync(join(vault,'games/paper-garden'),{recursive:true});
@@ -29,6 +29,6 @@ export async function projectWorkflowFixture({daemon,ui}) {
   res.setHeader('content-type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));
  })().catch(error=>{errors.push(error.message);if(!res.headersSent){res.writeHead(error.status||400,{'content-type':'application/json'});res.end(JSON.stringify({error:error.message}));}else res.end();});});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+server.address().port;
- return {directory,vault,base,calls,errors,runtime:runtime(),fixer,section:async(project,section)=>fetch(base+'/api/project-section?project='+project+'&section='+section).then(r=>r.json()),
-  close:async()=>{await fixer.shutdownFixers();await closeToolService();await stopProcesses();for(const restore of restores)restore();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));closeRuntime();rmSync(directory,{recursive:true,force:true});}};
+ return {directory,vault,base,calls,errors,holdChat:()=>{chatGate=new Promise(resolve=>releaseChat=resolve);return ()=>{releaseChat?.();chatGate=null;};},runtime:runtime(),fixer,section:async(project,section)=>fetch(base+'/api/project-section?project='+project+'&section='+section).then(r=>r.json()),
+  close:async()=>{releaseChat?.();await fixer.shutdownFixers();await closeToolService();await stopProcesses();for(const restore of restores)restore();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));closeRuntime();rmSync(directory,{recursive:true,force:true});}};
 }

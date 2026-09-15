@@ -1,8 +1,10 @@
 import { loadProjectSection } from './project-data.js';
-import { describeProjectSection, buildStatusLabel, verificationLabel, buildGroup as groupForStatus, buildMatchesFilter, buildListGroup } from './project-summary.js';
+import { buildStatusLabel, verificationLabel, buildGroup as groupForStatus, buildMatchesFilter, buildListGroup } from './project-summary.js';
 import { createGithubPanel, githubDeliveryLabel } from './github-ui.js';
 import { describeToolEvent, inputLine } from './transcript.js';
 
+const issueColumns = [['backlog', 'Backlog'], ['in-progress', 'In progress'], ['done', 'Done']];
+const issueStatus = item => done(item) ? 'done' : item.boardStatus === 'in-progress' ? 'in-progress' : 'backlog';
 const labels = { builds: 'Builds', issues: 'Issues', plans: 'Plans' };
 const viewLabels = {...labels, repository:'Repository & GitHub'};
 const node = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; return el; };
@@ -24,7 +26,7 @@ const clipText = (value, max) => { const text = String(value ?? ''); return text
 const boundedInput = input => { if (input == null) return ''; if (typeof input !== 'object') return clipText(input, LOG_INPUT_MAX); let json = ''; try { json = Object.keys(input).length > 1 ? JSON.stringify(input, null, 1) : ''; } catch { json = ''; } return clipText(json || inputLine(input), LOG_INPUT_MAX); };
 const logKindLabel = { 'tool.attempted': 'attempt', 'process.output': 'output', 'text.delta': 'text', 'run.updated': 'run', 'run.started': 'run', 'run.finished': 'run', 'turn.steered': 'steer', 'run.steered': 'steer', 'verification.finished': 'checks', 'web.searched': 'web', 'web.fetched': 'web', 'mcp.called': 'mcp' };
 const entryText = entry => { const text = entry.text ?? entry.message ?? entry.content; if (text != null && text !== '') return String(text); try { return JSON.stringify(entry); } catch { return ''; } };
-const commandLabels = { 'run.stop': 'Stop build', 'run.retry': 'Start replacement build', 'run.verify': 'Verify', 'run.discard': 'Discard', 'run.steer': 'Guide build', 'preview.start': 'Playtest', 'preview.stop': 'Stop playtest', 'run.merge': 'Approve & merge' };
+const commandLabels = { 'run.stop': 'Stop build', 'run.retry': 'Start replacement build', 'run.verify': 'Verify', 'run.discard': 'Discard', 'run.steer': 'Guide build', 'preview.start': 'Playtest', 'preview.stop': 'Stop play', 'run.merge': 'Approve & merge' };
 // Builds read as a lobby: the work waiting on a decision comes first, then what is still
 // running, then what is settled. One build is staged at a time and the rest wait in a queue.
 const DECISION_ORDER = ['review', 'toPush', 'pullRequests', 'attention', 'active', 'history'];
@@ -35,30 +37,17 @@ const lobbyWidth = matchMedia('(min-width: 900px)');
 const byDecision = runs => DECISION_ORDER.flatMap(group => runs.filter(run => buildListGroup(run) === group));
 
 /** Section views retain their own drafts, filters and reading position. The app owns commands. */
-export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate, onAction, onClose, onData, load = loadProjectSection } = {}) {
+export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate, onAction, onData, load = loadProjectSection } = {}) {
   const el = node('section', 'project-workspace'); el.id = 'project-workspace'; el.hidden = true;
   el.setAttribute('aria-labelledby', 'project-workspace-title');
   const head = node('header', 'project-workspace-head');
   const title = node('h1', '', 'Project'); title.id = 'project-workspace-title'; title.tabIndex = -1;
   head.append(title);
-  const tabs = node('nav', 'project-tabs'); tabs.setAttribute('aria-label', 'Project sections');
-  const tabButtons = {};
-  // Chat is a tab here for the same reason it is one in the bar: leaving a record section is going
-  // back to the conversation, not dismissing a page. "Back to chat" said that as a link; this says
-  // it as the thing it is, and the bar and the workspace now name the same four places.
-  const chatTab = button('', 'project-tab project-tab-chat', () => onClose?.());
-  chatTab.append(node('span', 'project-tab-name', 'Chat'), node('span', 'project-tab-count', ''));
-  chatTab.dataset.workspaceSection = 'chat'; tabs.append(chatTab);
-  for (const [section, label] of Object.entries(labels)) {
-    const b = button('', 'project-tab', () => onNavigate?.(current.project, section));
-    b.append(node('span', 'project-tab-name', label), node('span', 'project-tab-count', 'Loading'));
-    b.dataset.workspaceSection = section; tabs.append(b); tabButtons[section] = b;
-  }
   const body = node('div', 'project-workspace-body'); body.tabIndex = 0;
   body.setAttribute('role', 'region'); body.setAttribute('aria-label', 'Project content');
   const notice = node('div', 'project-notice'); notice.setAttribute('role', 'status'); notice.hidden = true;
-  const content = node('div', 'project-content'); body.append(notice, content); el.append(head, tabs, body); document.body.append(el);
-  const views = new Map(), summaries = new Map(), actions = new Set();
+  const content = node('div', 'project-content'); body.append(notice, content); el.append(head, body); document.body.append(el);
+  const views = new Map(), actions = new Set();
   let current = null, generation = 0, controller = null, busy = false, pointerActive = false, pointerRelease = null;
   content.addEventListener('pointerdown', () => { clearTimeout(pointerRelease); pointerActive = true; }, true);
   content.addEventListener('click', () => { clearTimeout(pointerRelease); pointerActive = false; if (current && getView().noticePending) renderNotice(getView()); }, true);
@@ -67,7 +56,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   document.addEventListener('pointercancel', finishPointer, true);
   function getView(selection = current) {
     const key = sectionKey(selection);
-    if (!views.has(key)) views.set(key, { selection: { ...selection }, data: null, state: 'loading', filter: selection.section === 'issues' ? 'open' : 'all', search: '', grouped: true, open: new Set(), evidence: new Map(), scroll: 0, form: null, message: '', messageKind: '', pending: new Set(), deferred: false });
+    if (!views.has(key)) views.set(key, { selection: { ...selection }, data: null, state: 'loading', filter: 'all', search: '', grouped: true, open: new Set(), evidence: new Map(), scroll: 0, form: null, message: '', messageKind: '', pending: new Set(), deferred: false });
     return views.get(key);
   }
   function githubPanel(view, run) {
@@ -91,36 +80,31 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     if (view.deferred) notice.append(button('Show updates', 'project-text-button', () => render(true)));
     if (view.state === 'stale' || view.state === 'error') notice.append(button('Try again', 'project-text-button', () => void refresh()));
   }
-  function updateTabs() {
-    if (!current) return;
-    const projectSummaries = summaries.get(current.project) || {};
-    for (const [section, b] of Object.entries(tabButtons)) {
-      const cached = views.get(sectionKey({ ...current, section }));
-      const raw = section === current.section && cached?.data ? cached.data : projectSummaries[section] || cached?.data;
-      const summary = describeProjectSection(section, raw);
-      const label = summary.badge;
-      b.querySelector('.project-tab-count').textContent = label;
-      b.setAttribute('aria-label', `${current.project}, ${labels[section]}, ${summary.accessible || label}${summary.stale || cached?.state === 'stale' ? ', stale' : ''}`);
-      b.dataset.freshness = summary.stale || cached?.state === 'stale' ? 'stale' : raw?.status || cached?.state || 'loading';
-      if (section === current.section) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-    }
-  }
   function accept(view, data, force = false) {
     if (!force && isCurrent(view) && view.data && (pointerActive || view.deferred || view.form || content.contains(document.activeElement))) {
       view.pendingData = data; view.deferred = true; renderNotice(view); return;
     }
     view.pendingData = null;
-    view.data = data; view.state = data.status || 'ready'; onData?.(view.selection, data); updateTabs();
+    view.data = data; view.state = data.status || 'ready'; onData?.(view.selection, data);
   }
-  function action(label, perform, { primary = false, key = label, disabled = false, reason, mutating = true } = {}) {
+  function action(label, perform, { primary = false, key = label, disabled = false, reason, mutating = true, refreshAfter = false } = {}) {
     const view = getView();
     const b = button(label, 'project-action' + (primary ? ' primary' : ''), async () => {
       if (view.pending.has(key)) return;
       view.pending.add(key); b.disabled = true; b.setAttribute('aria-busy', 'true');
       show(view, `${label}…`);
-      try { await perform(view); }
+      let completed = false;
+      try { await perform(view); completed = true; }
       catch (error) { show(view, error?.message || 'Could not complete this action. Try again.', 'error'); }
-      finally { view.pending.delete(key); if (b.isConnected) { b.disabled = disabled || (mutating && busy); b.removeAttribute('aria-busy'); } }
+      finally {
+        view.pending.delete(key);
+        if (b.isConnected) { b.disabled = disabled || (mutating && busy); b.removeAttribute('aria-busy'); }
+        if (completed && refreshAfter && isCurrent(view)) {
+          const refocus = document.activeElement === b;
+          await refresh({ preserveMessage: true, force: true });
+          if (refocus && document.activeElement === document.body) [...actions].find(next => next.dataset.actionKey === key)?.focus({ preventScroll: true });
+        }
+      }
     });
     b.dataset.intrinsicDisabled = String(disabled); b.dataset.mutating = String(mutating); b.dataset.actionKey = key;
     b.disabled = disabled || (mutating && busy) || view.pending.has(key);
@@ -201,7 +185,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
         if (result.section && typeof result.section === 'object') accept(view, result.section, true);
         if (result.plan) accept(getView({ ...view.selection, section: 'plans' }), result.plan);
         if (result.itemId) { view.open.add(`issue-${result.itemId}`); view.open.add(`task-${result.itemId}`); view.open.add(`milestone-${result.itemId}`); }
-        if (spec.payload.action === 'issue.create') view.filter = 'open';
+        if (spec.payload.action === 'issue.create') view.filter = 'all';
         if (['issue.create', 'issue.edit'].includes(spec.payload.action)) view.search = '';
         show(view, spec.success || 'Saved.', 'success');
         if (isCurrent(view)) {
@@ -254,8 +238,8 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   }
   function issueRow(item) {
     const view = getView(), summary = node('summary', 'project-record-summary'), copy = node('span', 'project-record-copy');
-    copy.append(node('strong', '', itemText(item))); if (item.heading && !view.grouped) copy.append(node('span', 'project-muted', item.heading));
-    summary.append(copy, node('span', 'project-record-status', done(item) ? 'Completed' : 'Open'));
+    copy.append(node('strong', '', itemText(item))); if (item.heading) copy.append(node('span', 'project-muted', item.heading));
+    summary.append(copy, node('span', 'project-record-status', issueColumns.find(([key]) => key === issueStatus(item))[1]));
     const row = disclosure(`issue-${itemKey(item)}`, summary, 'project-record project-issue' + (done(item) ? ' completed' : '')); row.dataset.recordId = item.id || '';
     const detail = node('div', 'project-record-detail'); detail.append(item.description ? documentView(item.description) : node('p', 'project-muted', 'No description yet. Add details or reproduction steps with Edit.'));
     detail.append(linkedBuilds(item));
@@ -267,9 +251,26 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
         group.append(action((item.linkedTaskIds || []).length ? 'Added to plan' : 'Add to plan', v => issueToPlan(v, item), { disabled: (item.linkedTaskIds || []).length > 0 }));
       }
       group.append(action('Edit', () => editIssue(item)), action(done(item) ? 'Reopen issue' : 'Complete issue', v => sendCommand(v, { action: done(item) ? 'issue.reopen' : 'issue.complete', id: item.id, expectedRevision: v.data.revision }, done(item) ? 'Issue reopened.' : 'Issue completed.')));
+      for (const [status, label] of issueColumns) if (status !== issueStatus(item) && status !== 'done') {
+        group.append(action(status === 'in-progress' ? 'Start work' : 'Move to backlog', v => moveIssue(v, item.id, status), { key: `issue.status-${item.id}-${status}` }));
+      }
       detail.append(group);
     }
+    summary.draggable = !!item.id && !!view.data.revision;
+    summary.addEventListener('dragstart', event => {
+      if (busy || view.form || view.pending.size) { event.preventDefault(); return; }
+      view.dragIssue = { id: item.id, revision: view.data.revision };
+      event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id);
+    });
+    summary.addEventListener('dragend', () => { view.dragIssue = null; for (const col of content.querySelectorAll('.drag-over')) col.classList.remove('drag-over'); });
     row.append(detail); return row;
+  }
+  async function moveIssue(view, id, status, revision = view.data.revision) {
+    await sendCommand(view, { action: 'issue.status', status, id, expectedRevision: revision }, `Moved to ${issueColumns.find(([key]) => key === status)[1].toLowerCase()}.`);
+    if (isCurrent(view)) {
+      const target = [...content.querySelectorAll('[data-record-id]')].find(row => row.dataset.recordId === id)?.querySelector('summary');
+      (target || title).focus({ preventScroll: true }); target?.scrollIntoView({ block: 'nearest' });
+    }
   }
   function renderIssues() {
     const view = getView(), data = view.data, items = data.items || [], total = items.length, complete = items.filter(done).length;
@@ -279,13 +280,12 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     if (!total) {
       if (data.markdown?.trim()) { content.append(node('p', 'project-muted', 'These notes do not contain checklist issues yet. Add an issue to make it actionable.'), documentView(data.markdown)); }
       else content.append(empty(data.status === 'partial' ? 'Issue list is incomplete' : 'No issues yet', data.status === 'partial' ? 'Refresh to read the unavailable records.' : 'Capture a bug, an idea, or something that needs attention.'));
-      return;
     }
     const tools = node('div', 'project-list-tools'), searchLabel = node('label', 'project-search');
     searchLabel.append(node('span', 'project-sr-only', 'Search issues'));
     const search = node('input'); search.type = 'search'; search.placeholder = 'Search issues'; search.value = view.search; search.setAttribute('aria-label', 'Search issues');
     search.oninput = () => { view.search = search.value; renderIssueResults(); }; searchLabel.append(search); tools.append(searchLabel);
-    const grouping = button(view.grouped ? 'Grouped by heading' : 'Group by heading', 'project-filter', () => { view.grouped = !view.grouped; grouping.textContent = view.grouped ? 'Grouped by heading' : 'Group by heading'; grouping.setAttribute('aria-pressed', String(view.grouped)); renderIssueResults(); }); grouping.setAttribute('aria-pressed', String(view.grouped)); tools.append(grouping); content.append(tools);
+    content.append(tools);
     const results = node('div', 'project-issue-results'); results.id = 'project-issue-results'; content.append(results); renderIssueResults();
     source(data.markdown, 'Read full issue notes');
   }
@@ -293,9 +293,24 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     const view = getView(), results = content.querySelector('.project-issue-results'); if (!results) return;
     results.replaceChildren(); const query = view.search.toLocaleLowerCase();
     const items = (view.data.items || []).filter(item => (view.filter === 'all' || done(item) === (view.filter === 'done')) && `${itemText(item)} ${item.description || ''} ${item.heading || ''}`.toLocaleLowerCase().includes(query));
-    if (!items.length) { results.append(empty(query ? 'No matching issues' : view.filter === 'open' ? 'No open issues' : 'No completed issues', query ? 'Try a different search or choose another filter.' : view.filter === 'open' ? 'Everything in this issue list is complete.' : 'Completed issues will appear here.')); return; }
-    const groups = new Map(); for (const item of items) { const heading = view.grouped ? item.heading || 'Other issues' : ''; if (!groups.has(heading)) groups.set(heading, []); groups.get(heading).push(item); }
-    for (const [heading, records] of groups) { if (heading) results.append(node('h2', 'project-group-title', `${heading} · ${records.length}`)); for (const item of records) results.append(issueRow(item)); }
+    results.classList.add('project-kanban');
+    for (const [status, label] of issueColumns) {
+      const records = items.filter(item => issueStatus(item) === status);
+      const column = node('section', 'project-kanban-column'); column.dataset.issueStatus = status;
+      const heading = node('h2', 'project-kanban-heading'); heading.id = `issues-${status}`;
+      heading.append(node('span', '', label), node('span', 'project-kanban-count', String(records.length)));
+      column.setAttribute('aria-labelledby', heading.id); column.append(heading);
+      for (const item of records) column.append(issueRow(item));
+      if (!records.length) column.append(node('p', 'project-kanban-empty', query ? 'No matching issues' : status === 'backlog' ? 'Nothing in the backlog.' : status === 'in-progress' ? 'Ready when you are.' : 'Completed issues land here.'));
+      column.addEventListener('dragover', event => { if (view.dragIssue && !busy) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; column.classList.add('drag-over'); } });
+      column.addEventListener('dragleave', event => { if (!column.contains(event.relatedTarget)) column.classList.remove('drag-over'); });
+      column.addEventListener('drop', event => {
+        const moving = view.dragIssue; if (!moving || busy) return;
+        event.preventDefault(); event.stopPropagation(); view.dragIssue = null; column.classList.remove('drag-over');
+        action('Move issue', v => moveIssue(v, moving.id, status, moving.revision), { key: `issue.move-${moving.id}` }).click();
+      });
+      results.append(column);
+    }
   }
   /** The Log tab shows the run's event trail as rows: tool calls carry their friendly label, exact name, bounded input, verdict and diff (the chat transcript's shape); other events keep their text. */
   function logList(entries) {
@@ -386,8 +401,9 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     for (const [kind, label] of [['summary', 'Summary'], ['changes', 'Changes'], ['checks', 'Checks'], ['github','GitHub'], ['log', 'Log']]) {
       const b = button(label, 'project-filter', () => void select(kind)); b.dataset.kind = kind; tabs.append(b);
     }
+    const playArea = node('div', 'project-build-play-area');
     const cta = node('div', 'project-lobby-cta');
-    detail.append(cta, tabs, panel); paint();
+    detail.append(playArea, cta, tabs, panel); paint();
     const controls = node('div', 'project-toolbar-actions');
     const confirmation = node('div', 'project-confirmation'); confirmation.hidden = true;
     const executeBuild = async (v, command) => {
@@ -407,7 +423,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     // Playtest starts this build's own preview server and opens it, the way /preview does.
     const playtest = async v => {
       const started = await onAction?.('buildCommand', v.selection.project, { id: run.id, command: 'preview.start' });
-      if (started?.ok === false) throw new Error(started.error?.message || 'Could not start the playtest.');
+      if (started?.ok === false) throw new Error(started.error?.message || 'Could not start this build.');
       let status = null;
       for (let attempt = 0; attempt < 20; attempt++) {
         status = await onAction?.('previewStatus', v.selection.project, { id: run.id });
@@ -415,25 +431,38 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
         await new Promise(done => setTimeout(done, 500));
       }
       if (status?.error) throw new Error(status.error);
-      if (status?.url) { await onAction?.('openUrl', v.selection.project, { url: status.url }); show(v, `Playtest running at ${status.url}`, 'success'); }
-      else show(v, 'The playtest is still starting. Press Playtest again to check on it.');
-      if (isCurrent(v)) await refresh({ preserveMessage: true });
+      if (!status?.url && !status?.running) throw new Error('The preview stopped before it was ready. Check this build’s log and try again.');
+      if (status?.url) { await onAction?.('openUrl', v.selection.project, { url: status.url }); show(v, `Build running at ${status.url}`, 'success'); }
+      else show(v, 'The build is still starting. Press Play build again to check on it.');
     };
     const openPlaytest = async v => {
       const status = await onAction?.('previewStatus', v.selection.project, { id: run.id });
-      if (!status?.url) { show(v, 'The playtest has no address yet.'); return; }
+      if (!status?.url) { show(v, 'The build is still starting. Try opening it again shortly.'); return; }
       await onAction?.('openUrl', v.selection.project, { url: status.url });
     };
-    if (allowed.includes('preview.start')) cta.append(action('Playtest', playtest, { primary: true, key: `${run.id}-playtest` }));
-    if (allowed.includes('preview.stop')) {
-      cta.append(action('Open playtest', openPlaytest, { primary: true, mutating: false, key: `${run.id}-open-playtest` }));
-      cta.append(action('Stop playtest', v => executeBuild(v, 'preview.stop'), { key: `${run.id}-preview.stop` }));
-    }
     const canPlaytest = allowed.includes('preview.start') || allowed.includes('preview.stop');
+    const running = allowed.includes('preview.stop');
+    const playLabel = running ? 'Open build' : 'Play build';
+    const playButton = action(playLabel, running ? openPlaytest : playtest, { primary: true, mutating: !running, disabled: !canPlaytest, refreshAfter: !running, key: `${run.id}-play` });
+    playButton.classList.add('project-build-play'); playButton.setAttribute('aria-label', playLabel);
+    playButton.innerHTML = '<svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true"><path d="M17 10L38 24L17 38Z" fill="currentColor" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>';
+    const playCopy = node('span', 'project-build-play-copy');
+    playCopy.append(node('strong', 'project-build-play-label', playLabel), node('strong', 'project-build-play-loading', running ? 'Opening build…' : 'Starting build…'));
+    const playHint = !canPlaytest ? 'No browser preview is configured for this build.' : running ? 'Your preview is running' : 'Open this version in your browser';
+    playCopy.append(node('span', 'project-build-play-hint', playHint)); playButton.append(playCopy); playArea.append(playButton);
+    if (running) cta.append(action('Stop build preview', async v => {
+      await executeBuild(v, 'preview.stop');
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const status = await onAction?.('previewStatus', v.selection.project, { id: run.id });
+        if (!status?.running) return;
+        await new Promise(done => setTimeout(done, 250));
+      }
+      show(v, 'The preview is still stopping. Refresh to check its status.');
+    }, { key: `${run.id}-preview.stop`, refreshAfter: true }));
     if (allowed.includes('run.merge')) cta.append(action('Approve & merge', v => { confirmBuild('run.merge'); show(v, 'Confirm this build action below.'); }, { primary: !canPlaytest, key: `${run.id}-run.merge` }));
     if (allowed.includes('run.discard')) cta.append(action('Discard', v => { confirmBuild('run.discard'); show(v, 'Confirm this build action below.'); }, { key: `${run.id}-run.discard` }));
     if (queue.length > 1 && onSelectBuild) cta.append(action('Next build', () => onSelectBuild(queue[(index + 1) % queue.length].id), { mutating: false, key: `${run.id}-next` }));
-    if (cta.children.length) cta.append(node('p', 'project-lobby-keys', 'j/k next · a approve · x discard · p playtest'));
+    if (cta.children.length) cta.append(node('p', 'project-lobby-keys', 'j/k next · a approve · x discard · p play'));
     controls.append(action(buildGroup(run) === 'review' ? 'Review changes' : buildGroup(run) === 'failed' ? 'Inspect failure' : buildGroup(run) === 'active' ? 'View activity' : 'View result', () => select(buildGroup(run) === 'failed' || buildGroup(run) === 'active' ? 'log' : 'changes'), { mutating: false }));
     for (const command of allowed) if (commandLabels[command] && !STAGE_COMMANDS.includes(command)) controls.append(action(commandLabels[command], async v => {
       if (command === 'run.steer') {
@@ -583,7 +612,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     if (!current) return;
     const view = getView();
     // Keep the actual focused node and any open form in place during live reads.
-    if (!force && (pointerActive || view.deferred || view.form || content.contains(document.activeElement))) { view.deferred = true; renderNotice(view); updateTabs(); return; }
+    if (!force && (pointerActive || view.deferred || view.form || content.contains(document.activeElement))) { view.deferred = true; renderNotice(view); return; }
     if (view.pendingData) accept(view, view.pendingData, true);
     view.deferred = false; view.renderedRevision = view.data?.revision; const scroll = body.scrollTop;
     content.replaceChildren(); actions.clear();
@@ -591,7 +620,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     else if (view.data) { if (current.section === 'builds') renderBuilds(); else if (current.section === 'issues') renderIssues(); else renderPlans(); }
     else if (view.state === 'error') content.append(empty(`Could not load ${labels[current.section].toLowerCase()}`, 'The records are unavailable. Try again when Nibbi is connected.'));
     else content.append(node('p', 'project-loading', `Loading ${labels[current.section].toLowerCase()}…`));
-    body.scrollTop = scroll; renderNotice(view); updateTabs();
+    body.scrollTop = scroll; renderNotice(view);
   }
   // Applying deferred records is explicit. Blur can occur between pointerdown and
   // click, when activeElement is briefly body; replacing rows there drops clicks.
@@ -615,14 +644,14 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     if (event.key === 'j' || event.key === 'ArrowRight') { event.preventDefault(); move(1); return; }
     if (event.key === 'k' || event.key === 'ArrowLeft') { event.preventDefault(); move(-1); return; }
     if (!stage) return;
-    if (event.key === 'p') { if (press('Playtest') || press('Open playtest')) event.preventDefault(); return; }
+    if (event.key === 'p') { const play = stage?.querySelector('.project-build-play'); if (play && !play.disabled) { play.click(); event.preventDefault(); } return; }
     if (event.key === 'a') { if (press('Approve & merge')) { event.preventDefault(); content.querySelector('.project-confirmation .project-action')?.focus({ preventScroll: true }); } return; }
     if (event.key === 'x') { if (press('Discard')) { event.preventDefault(); content.querySelector('.project-confirmation .project-action')?.focus({ preventScroll: true }); } return; }
     // Escape is not ours: the sidebar claims it first and closes itself. A confirmation is
     // cancelled with its own Cancel button, and the queue is left with "All builds".
   });
   body.addEventListener('scroll', () => { if (current) getView().scroll = body.scrollTop; }, { passive: true });
-  async function refresh({ preserveMessage = false } = {}) {
+  async function refresh({ preserveMessage = false, force = false } = {}) {
     if (!current || el.hidden) return;
     if (current.section === 'repository') { const view=getView(),panel=githubPanel(view);el.setAttribute('aria-busy','true');try{if(panel.snapshot().hasData)await panel.refresh();else await panel.open();view.state=panel.snapshot().hasData?'ready':'error';}finally{el.setAttribute('aria-busy','false');}return; }
     const view = getView(), request = ++generation; controller?.abort(); controller = new AbortController();
@@ -632,13 +661,13 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     try {
       const result = await load({ ...view.selection, signal: controller.signal });
       if (request !== generation || !isCurrent(view)) return;
-      accept(view, result); render();
+      accept(view, result, force); render(force);
       const selected=view.selectedBuild;
       if(selected&&view.evidence.get(selected)?.kind==='github')void view.githubPanels?.get(selected)?.refresh();
     } catch (error) {
       if (request !== generation || error?.name === 'AbortError') return;
       view.state = view.data ? 'stale' : 'error'; show(view, error?.message || 'Could not read project records. Try again.', 'error');
-      if (!view.data) render(); else updateTabs();
+      if (!view.data) render();
     } finally { if (request === generation) el.setAttribute('aria-busy', 'false'); }
   }
   return {
@@ -647,12 +676,11 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       if (!viewLabels[selection.section]) throw new Error('Unknown project section.');
       pointerActive = false; clearTimeout(pointerRelease);
       if (current) getView().scroll = body.scrollTop;
-      current = { ...selection }; const view = getView(); if(selection.section==='builds'&&selection.buildId){view.filter='all';view.selectedBuild=selection.buildId;view.open.add(`build-${selection.buildId}`);view.evidence.set(selection.buildId,{kind:selection.evidence||'summary'});} title.textContent = selection.project; body.setAttribute('aria-label', `${selection.project} ${viewLabels[selection.section]}`);
+      el.dataset.section = selection.section; current = { ...selection }; const view = getView(); if(selection.section==='builds'&&selection.buildId){view.filter='all';view.selectedBuild=selection.buildId;view.open.add(`build-${selection.buildId}`);view.evidence.set(selection.buildId,{kind:selection.evidence||'summary'});} title.textContent = viewLabels[selection.section]; body.setAttribute('aria-label', `${selection.project} ${viewLabels[selection.section]}`);
       el.hidden = false; render(true); body.scrollTop = view.scroll; title.focus({ preventScroll: true }); void refresh();
     },
     close() { if (current) getView().scroll = body.scrollTop; pointerActive = false; clearTimeout(pointerRelease); generation++; controller?.abort(); current = null; el.hidden = true; },
     refresh,
-    setSummaries(project, values) { summaries.set(project, values || {}); updateTabs(); },
     setBusy(value) { busy = !!value; for (const b of actions) b.disabled = b.dataset.intrinsicDisabled === 'true' || (busy && b.dataset.mutating === 'true') || !!(current && getView().pending.has(b.dataset.actionKey)); for (const view of views.values()) { const submit = view.form?.element.querySelector('[type="submit"]'); if (submit) submit.disabled = busy || !!view.form.submitting;for(const panel of view.githubPanels?.values()||[])panel.setBusy(busy); } },
     snapshot() { return current ? { ...current, state: getView().state, filter: getView().filter, hasDraft: !!getView().form||[...(getView().githubPanels?.values()||[])].some(panel=>panel.snapshot().hasDraft||panel.snapshot().reviewing) } : null; },
     destroy() { generation++; controller?.abort(); clearTimeout(pointerRelease); document.removeEventListener('pointerup', finishPointer, true); document.removeEventListener('pointercancel', finishPointer, true); for(const view of views.values())for(const panel of view.githubPanels?.values()||[])panel.destroy();views.clear(); el.remove(); },
