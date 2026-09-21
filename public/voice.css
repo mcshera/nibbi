@@ -1,7 +1,7 @@
 /* Hey Nibbi is a row in the dock panel: mic glyph, label, a small switch. While it is on, the bar shows the listen strip — that strip is the whole "mic is on" signal. */
 .mic-switch {
   display: block; position: relative; flex: none; width: 30px; height: 18px; margin-left: auto;
-  border: 1px solid #aaa49a; border-radius: 10px; background: #d9d4ca;
+  border: 1px solid var(--field-edge); border-radius: var(--r-control); background: var(--bed-press);
   transition: background var(--t1), border-color var(--t1);
 }
 .mic-thumb {

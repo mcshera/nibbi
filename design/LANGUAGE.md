@@ -2,7 +2,7 @@
 
 Read 2026-09-21 out of the shipped surface, not invented over it. Every rule below is either **observed** (the code already does this consistently — the rule just names it) or **proposed** (the code is inconsistent here — the rule picks the winner and says what it costs to adopt). Nothing is aspirational. Where a rule came from outside, the source is linked.
 
-Companion file: `design/tokens.css` — the same system as custom properties, values identical to today's, so it can be adopted file by file without a visual diff.
+Companion file: **`public/tokens.css`** — the same system as custom properties, 125 of them, linked ahead of `styles.css` in `public/index.html` and therefore live. The drift register in §15 has been applied: every literal in `public/*.css` that the register named now reads a token.
 
 ## Status
 
@@ -12,21 +12,25 @@ Companion file: `design/tokens.css` — the same system as custom properties, va
 | motion / poses | shipped, contracted | `public/pocket-motion.js`, 24 poses, 8 moods |
 | voice / copy | shipped, contracted | `docs/PERSONALITY.md` |
 | sidebar shape | in lab | `design/sidebar-lab/` |
-| **colour, type, space, shape, elevation** | **shipped, uncontracted** | this document |
+| **colour, type, space, shape, elevation** | **shipped, contracted** | this document + `public/tokens.css` |
 
-The last row is the gap. Nibbi has a design language — it is legible in every file and it is genuinely good — but it lives as convention in 1,101 lines of CSS rather than as a system. The measured cost of that:
+That last row was the gap. Nibbi had a design language — legible in every file and genuinely good — but it lived as convention in 1,101 lines of CSS rather than as a system. It was not visible as ugliness; it was visible as **drift**: the same intent rendered slightly differently depending on which file you were in when you wrote it.
 
-| dimension | distinct values in `public/*.css` | should be |
-|---|---|---|
-| font-size | 20 | 10 |
-| border-radius | 15 | 8 |
-| hex colours | 45 | 16 |
-| spacing values | 23 | 10 |
-| z-index layers | 12 | 8 named |
-| backdrop blur | 6 | 4 |
-| custom properties declared | 16 (+`--t2`/`--t3` sharing a line, `--margin-paper` inline, `--agents-bottom` from JS) | ~60 |
+Measured before and after applying §15:
 
-None of this is visible as ugliness. It is visible as **drift**: the same intent rendered slightly differently depending on which file you were in when you wrote it. The drift register at the end of this document lists every instance found.
+| dimension | before | after | target |
+|---|---|---|---|
+| font-size literals | 20 distinct | **0** | tokens only |
+| border-radius literals | 15 distinct | **1** (`30px`, the phone dock) | tokens only |
+| hex colours | 45 distinct | **7** | see below |
+| ink-veil alphas | 25 distinct | **1** (a zero-size shadow that draws nothing) | tokens only |
+| z-index literals | 12 anonymous | **2** (both in a local stacking context, deliberately) | named rungs only |
+| backdrop blur literals | 6 distinct | **0** | tokens only |
+| custom properties declared | 16 | **125** | — |
+
+The seven surviving hexes are all legitimate: `#151413` / `#3a3835` / `#6f6b65` as `var(--ink, #151413)` fallbacks, `#5f5b55` and `#4f4b46` inside explanatory comments, `#000` twice inside a `mask-image` gradient (a mask, not a colour), and `#fff` once on the QR code, which must be true white to scan.
+
+Verified after the change: `npm run build` green, `npm run test:unit` 221/221, `npm run verify` — both fixture-backed browser regression suites pass.
 
 ---
 
@@ -63,8 +67,10 @@ Two substances. **Paper** is warm, slightly yellow, never white. **Ink** is warm
 | `--ink-inverse` | `#f5f2ec` | text on filled ink (toast, hovered chip, ship segment) | ⚠️ drifts to `#f5f2ea` in 3 places |
 | `--ink-terminal` | `#1b1a18` | code blocks and run logs — ink as a *surface*, not as text | ✅ |
 | `--ink-terminal-fg` | `#ece8df` | paper on that surface | ✅ |
+| `--ink-faint` | `#c9c4bb` | a dot at rest — presence without state | merged from `#cfcac1` |
+| `--ink-scroll` | `#bcb7af` | scrollbar thumbs | ✅ |
 
-**Rule.** `#000` and `#fff` do not appear in Nibbi except inside the QR code (`.phonev .qr`, which must be true white to scan) and the attachment delete badge. Both are exceptions with reasons; there are no others.
+**Rule.** `#000` and `#fff` do not appear in Nibbi except inside the QR code (`.phonev .qr`, which must be true white to scan) and in the two `mask-image` gradients, where `#000` is a mask channel rather than a colour. There are no other exceptions.
 
 ### 2.2 The ink veil
 
@@ -80,7 +86,26 @@ Translucent ink over paper is how Nibbi builds every hover, well and hairline. T
 | `--veil-strong` | `.22` | a border that must be *read* (review turn, playtest pill) |
 | `--veil-solid` | `.92` | filled ink at rest under glass (toast, hovered chip, armed) |
 
-The values between (`.045`, `.05`, `.055`, `.07`, `.075`, `.08`, `.09`, `.14`, `.18`) are 40 uses that each land within `.02` of one of the seven. Merging them is invisible and removes the whole class of "which grey was that".
+Plus one outlier kept as its own token: `--veil-outline` (`.50`), the drawn ring on the composer's `+`, which is an outline rather than a wash.
+
+The values between (`.03`, `.035`, `.045`, `.05`, `.055`, `.065`, `.07`, `.075`, `.08`, `.085`, `.09`, `.13`, `.14`, `.18`, `.20`) were 40-odd uses that each land within `.02` of one of the seven — except `.28`, a hovered button border, which moved `.06` to `--veil-strong` and is imperceptible at 1px. Merging them removed the whole class of "which grey was that".
+
+### 2.2b Opaque beds
+
+The veil is ink *over* a surface. On a control that already sits on a raised card, a second translucent layer reads as muddy rather than as pressed, so those states are opaque. This family was entirely undocumented and had drifted into eight near-identical warm greys across two files:
+
+| token | value | role |
+|---|---|---|
+| `--bed` | `#fffdfa` | a control at rest on a card |
+| `--bed-hover` | `#efebe4` | merged from `#e9e5dd` |
+| `--bed-press` | `#e5dfd5` | merged from `#d9d4ca` |
+| `--ink-bed-hover` | `#35322d` | the same two states on a filled-ink control; merged from `#39352f` |
+| `--ink-bed-press` | `#080807` | |
+| `--notice-bed` | `#efe8dc` | a warm bed for a notice or confirmation; merged from `#eee7dc` |
+| `--field-edge` | `#c3beb4` | an input border, which must be seen on paper; merged from `#aaa49a` |
+| `--selection` | `#ded5c6` | `::selection` |
+
+**Rule.** Reach for a veil first. Use a bed only when the control sits on `--paper-raised` or on filled ink, where a veil would compound.
 
 ### 2.3 Semantic colour — the biggest drift in the system
 
@@ -475,24 +500,47 @@ Already met, and worth stating so it stays met:
 
 ---
 
-## 15. Drift register
+## 15. Drift register — applied
 
-Everything found that is the same intent rendered two ways. Each is a one-line fix.
+Everything found that was the same intent rendered two ways. **11 of 12 rows are applied**; row 6 is applied in part, for a stated reason.
 
-| # | drift | where | fix |
+| # | drift | fix | status |
 |---|---|---|---|
-| 1 | four reds for one verdict | `#873f35` (workspace, margins) vs `#9a3f2c`/`#7a3a2e`/`#b5533d` (chat) | collapse to `--fail-*` |
-| 2 | two greens for one verdict | `#365342` (workspace) vs `#2f6b3a` (chat) | collapse to `--pass-*` |
-| 3 | raised paper is `#faf8f3` in three places, `#faf8f4` in `margins.css` | `styles.css`, `platform.css` vs `margins.css` | one token |
-| 4 | inverse ink is `#f5f2ec` in some places, `#f5f2ea` in three | `styles.css` | one token |
-| 5 | toast shadow is black, everything else is ink | `styles.css` `.toast` | `--e-floating` |
-| 6 | `--ink-3` forked twice by hand (`#5f5b55`, `#4f4b46`) | `margins.css`, `.glass` | rebuild the ramp on APCA |
-| 7 | 25 ink alphas where 7 would do | all four files | §2.2 |
-| 8 | 20 font sizes where 10 would do | all four files | §3.2 |
-| 9 | 15 radii where 8 would do | all four files | §5.1 |
-| 10 | 6 blurs where 4 would do | all four files | §6.2 |
-| 11 | 12 anonymous z-indexes | all four files | §6.3 |
-| 12 | `margins.css` writes `220ms` literally instead of `--t2` | `margins.css:68` | use the token |
+| 1 | four reds for one verdict: `#873f35` (workspace, margins), `#743b2f`, `#65432c` against `#9a3f2c`/`#7a3a2e`/`#b5533d` (chat) | collapsed to `--fail-mark` / `--fail-text` / `--fail-quiet` | ✅ |
+| 2 | two greens for one verdict: `#365342` (workspace) vs `#2f6b3a` (chat) | collapsed to `--pass-text` | ✅ |
+| 3 | raised paper `#faf8f3` in three places, `#faf8f4` in `margins.css` | `--paper-raised` | ✅ |
+| 4 | inverse ink `#f5f2ec` in some places, `#f5f2ea` in three, `#fff` in three more | `--ink-inverse` | ✅ |
+| 5 | toast shadow black, every other shadow ink | `--e-floating` | ✅ |
+| 6 | `--ink-3` forked twice by hand (`#5f5b55`, `#4f4b46`) | forks are now measured, scoped token overrides in `tokens.css`, not literals patched into two files | ◐ partial — see below |
+| 7 | 25 ink alphas where 7 would do | `--veil-*`, 25 → 1 | ✅ |
+| 8 | 20 font sizes where 10 would do | `--type-*`, 20 → 0 literals | ✅ |
+| 9 | 15 radii where 8 would do | `--r-*`, 15 → 1 literal | ✅ |
+| 10 | 6 blurs where 4 would do | `--glass*`, 6 → 0 literals | ✅ |
+| 11 | 12 anonymous z-indexes | `--z-*`, 8 named rungs; 2 local-context values left literal with a comment saying why | ✅ |
+| 12 | `margins.css` wrote `220ms` literally instead of `--t2` | uses the token | ✅ |
+
+Two families were found while applying the register and are now documented rather than left loose: the opaque interaction beds (§2.2b, eight near-identical warm greys across two files) and the elevation ladder's one horizontal shadow, `--e-rail`.
+
+### Row 6, and the decision it needs
+
+The *drift* is fixed: the two forks are no longer hand-patched literals sitting in two unrelated files, they are scoped overrides next to the measurement that justifies them. What is **not** done is unifying them into one value, and that is deliberate, because the numbers make it a design decision rather than a cleanup.
+
+Measured (WCAG 2, which is the model the existing budget in `styles.css` uses, so these are comparable to the figures already in the code):
+
+| backdrop | `--ink-3` = `#6f6b65` | required for 4.5:1 |
+|---|---|---|
+| page `#f5f2ec` | 4.74:1 ✅ | — |
+| workspace bar `#ece8e0` | 4.33:1 ❌ | hence the `#5f5b55` fork |
+| glass at `.78` over a black desktop, i.e. `rgb(191,189,184)` | 2.70:1 ❌ | hence the `#4f4b46` fork |
+
+The glass case is roughly twice as demanding as the page. A single unified value therefore has to be about `#4f4b46`, which on the page reads **7.75:1** — muted text everywhere would go from comfortably quiet to nearly as dark as body copy. That trades away principle 3 for tidiness.
+
+Two honest options:
+
+1. **Keep the forks** (current state). Three measured values, each derived from its own surface, expressed as tokens. The ramp is legible; it is just not one number.
+2. **Rebuild the ramp on APCA** ([Huetone](https://huetone.ardov.me/), [OKLCH](https://oklch.com/)) and pick a muted step that clears the bar on all three by the model that actually fits translucent warm-on-warm. This is the only route to one value that does not simply darken everything, and it is a deliberate visual change that wants your eye on it before it lands.
+
+Option 2 is the recommendation, as a separate pass.
 
 ---
 
