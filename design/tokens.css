@@ -1,0 +1,182 @@
+/* Nibbi design tokens — the system in design/LANGUAGE.md, as custom properties.
+ *
+ * NOT YET LOADED by public/index.html. This file is the adoption target, not a live
+ * stylesheet: every value here is identical to what public/*.css already renders, so
+ * linking it and replacing literals file by file produces no visual diff. The merges
+ * the language proposes (20 font sizes -> 10, 25 alphas -> 7, 4 reds -> 1 ramp) are a
+ * SECOND step, marked below, and each one does change pixels.
+ *
+ * Order of adoption that keeps every step verifiable with tools/shot.mjs:
+ *   1. link this file first in index.html, change nothing else      -> no diff
+ *   2. replace literals with tokens, one CSS file at a time         -> no diff
+ *   3. apply the merges marked (MERGE)                              -> small, reviewed diff
+ *   4. rebuild the ink ramp on APCA (LANGUAGE.md 2.5)               -> deliberate diff
+ */
+
+:root {
+  /* ---------------------------------------------------------------- paper */
+  --paper: #f5f2ec;          /* the page */
+  --paper-raised: #faf8f3;   /* menus, panels, cards (MERGE: margins.css uses #faf8f4) */
+  --paper-sunken: #fbfaf7;   /* diff bodies, file wells */
+  --paper-bar: #ece8e0;      /* the workspace sidebar — the only surface darker than the page */
+
+  /* ------------------------------------------------------------------ ink */
+  --ink: #151413;
+  --ink-2: #3a3835;
+  --ink-3: #6f6b65;          /* forks to #5f5b55 on --paper-bar and #4f4b46 under .glass */
+  --ink-4: #8a857c;
+  --ink-inverse: #f5f2ec;    /* text on filled ink (MERGE: #f5f2ea appears 3x) */
+  --ink-terminal: #1b1a18;   /* ink as a surface: code blocks, run logs */
+  --ink-terminal-fg: #ece8df;
+
+  /* ----------------------------------------------------------- the ink veil
+   * translucent ink over paper. seven steps; every other alpha in the codebase
+   * lands within .02 of one of these (MERGE). */
+  --veil-well: rgba(21, 20, 19, .04);
+  --veil-hover: rgba(21, 20, 19, .06);   /* the most-used value in the codebase */
+  --veil-hairline: rgba(21, 20, 19, .10);
+  --veil-press: rgba(21, 20, 19, .12);
+  --veil-edge: rgba(21, 20, 19, .16);
+  --veil-strong: rgba(21, 20, 19, .22);
+  --veil-solid: rgba(21, 20, 19, .92);
+  --line: var(--veil-hairline);          /* the existing name, kept */
+
+  /* ------------------------------------------------------------- verdicts
+   * colour means machine verdict. two verdicts, no warning colour, no info
+   * colour — a warning is --fail-edge with ink text. */
+  --fail-mark: #b5533d;                  /* colour as object: dots, bars, fills */
+  --fail-text: #9a3f2c;                  /* failure text on paper */
+  --fail-quiet: #7a3a2e;                 /* failure prose longer than a phrase */
+  --fail-wash: rgba(181, 83, 61, .10);
+  --fail-edge: rgba(181, 83, 61, .35);
+  --pass-text: #2f6b3a;
+  --pass-wash: rgba(76, 140, 86, .10);
+  --pass-edge: rgba(76, 140, 86, .40);
+  /* MERGE: #873f35 (project-workspace, margins), #743b2f, #65432c retire into
+   * --fail-text; #365342 retires into --pass-text. */
+
+  /* ----------------------------------------------------------------- type */
+  --font: Geist, ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --type-micro: 10.5px;      /* uppercase machine labels, with --track-micro */
+  --type-meta: 11.5px;
+  --type-fine: 12px;
+  --type-control: 13px;
+  --type-body: 14.5px;
+  --type-base: 16px;
+  --type-read: 17px;         /* Nibbi's reply — the one thing meant to be read */
+  --type-field: 19px;        /* the composer */
+  --type-title: 21px;
+  --type-display: 26px;
+  /* MERGE: 10->micro, 11->meta, 12.5->fine, 13.5->control, 14/15->body,
+   * 18->field, 20/22/23->title. Every move is <=1px except 23->21. */
+
+  --track-micro: .06em;      /* only with text-transform: uppercase */
+  --track-title: -.035em;    /* only at --type-title and above */
+  --leading-tight: 1.4;
+  --leading-body: 1.5;
+  --leading-read: 1.55;
+
+  /* ---------------------------------------------------------------- space
+   * 4px base, 2px half-step. off-grid values are allowed only for optical
+   * alignment of a round or irregular object, and must carry a comment. */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;            /* the default gap */
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+
+  /* ---------------------------------------------------------------- shape */
+  --r-bar: 2px;              /* quantity */
+  --r-inline: 6px;
+  --r-well: 8px;
+  --r-control: 10px;
+  --r-card: 12px;
+  --r-panel: 14px;
+  --r-surface: 18px;         /* MERGE: absorbs 16 and 20 */
+  --r-pill: 999px;           /* a thing you can say or do */
+  --r-dock: 40px;            /* the composer only */
+
+  /* ------------------------------------------------------------ elevation
+   * warm ink, blur ~2.5x the y-offset, spread ~-0.6x the blur. */
+  --e-seated: 0 1px 2px rgba(21, 20, 19, .12);
+  --e-raised: 0 8px 24px -18px rgba(21, 20, 19, .25);
+  --e-floating: 0 10px 30px -12px rgba(21, 20, 19, .25);
+  --e-docked: 0 12px 34px -18px rgba(21, 20, 19, .28);
+  --e-lifted: 0 16px 36px -20px rgba(21, 20, 19, .28), 0 3px 8px -5px rgba(21, 20, 19, .14);
+  --e-dialog: 0 20px 60px -24px rgba(21, 20, 19, .30);
+  --e-highlight: 0 1px 0 rgba(255, 255, 255, .7) inset;  /* additive, on lifted paper */
+
+  /* blur always travels with saturate(1.1): that pairing is what keeps the
+   * paper warm behind glass. */
+  --glass-scrim: blur(3px);
+  --glass-light: blur(10px) saturate(1.1);
+  --glass: blur(14px) saturate(1.1);      /* the standard */
+  --glass-heavy: blur(16px) saturate(1.1);
+
+  /* --------------------------------------------------------------- layers */
+  --z-vignette: 0;
+  --z-character: 1;          /* canvas#ink; canvas#fx sits at +1 */
+  --z-feed: 3;
+  --z-perch: 5;              /* chips, agents, jump */
+  --z-dock: 6;               /* composer, status, project label */
+  --z-transient: 7;          /* toasts */
+  --z-overlay: 8;            /* palette; the composer while its panel is open */
+  --z-sheet: 9;              /* margin card; switch menu +1, backdrop +2, sidebar +3 */
+
+  /* --------------------------------------------------------------- motion
+   * three durations, one curve. the strongest part of the existing system —
+   * do not add a fourth without a fourth thing to say. */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t1: 120ms;               /* colour, background, small state */
+  --t2: 220ms;               /* entrances, exits, hover reveals */
+  --t3: 420ms;               /* layout */
+
+  /* --------------------------------------------------------------- layout */
+  --measure-feed: min(680px, calc(100vw - 48px));
+  --measure-wide: min(980px, calc(100vw - 48px));
+  --measure-dock: min(720px, calc(100vw - 56px));
+  --measure-panel: min(760px, calc(100vw - 28px));
+  --measure-card: 304px;
+  --measure-menu: min(248px, calc(100vw - 40px));
+  --measure-project-menu: 320px;
+  --pill-h: 72px;
+  --feed-top: 40vh;
+  --feed-bottom: 140px;      /* anything perched above the composer must track this */
+  --touch: 44px;             /* the floor at pointer: coarse */
+}
+
+/* phones: the composer shortens and the dock radius follows it. everything else
+ * should come from the fluid scale once LANGUAGE.md 3.4 is adopted. */
+@media (max-width: 640px) {
+  :root {
+    --pill-h: 60px;
+    --r-dock: 30px;
+  }
+}
+
+/* the Tauri shell over Liquid Glass. the paper veil alone must carry contrast:
+ * the surface cannot verify the native material is present, so the budget is
+ * measured against a black desktop. see LANGUAGE.md 2.5. */
+body.glass {
+  --paper: rgba(245, 242, 236, .78);
+  --paper-raised: rgba(250, 248, 243, .90);
+  --pill-bg: rgba(250, 248, 243, .78);
+  --surface: rgba(250, 248, 244, .86);
+  --ink-3: #4f4b46;          /* #6f6b65 is 2.7:1 here; this is 4.6:1 */
+}
+
+/* the workspace bar is the one surface darker than the page, so muted ink
+ * darkens there too: #6f6b65 on #ece8e0 is 4.33:1, under the floor at the
+ * 10-12px this type is used at. */
+.margin-rail,
+.margin-card,
+.workspace-sidebar {
+  --ink-3: #5f5b55;
+}

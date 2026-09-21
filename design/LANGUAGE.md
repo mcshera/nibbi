@@ -1,0 +1,517 @@
+# Nibbi — design language
+
+Read 2026-09-21 out of the shipped surface, not invented over it. Every rule below is either **observed** (the code already does this consistently — the rule just names it) or **proposed** (the code is inconsistent here — the rule picks the winner and says what it costs to adopt). Nothing is aspirational. Where a rule came from outside, the source is linked.
+
+Companion file: `design/tokens.css` — the same system as custom properties, values identical to today's, so it can be adopted file by file without a visual diff.
+
+## Status
+
+| layer | state | where |
+|---|---|---|
+| character | shipped, contracted | `design/character-lab/CONTRACT.md`, `public/nibbi.js` |
+| motion / poses | shipped, contracted | `public/pocket-motion.js`, 24 poses, 8 moods |
+| voice / copy | shipped, contracted | `docs/PERSONALITY.md` |
+| sidebar shape | in lab | `design/sidebar-lab/` |
+| **colour, type, space, shape, elevation** | **shipped, uncontracted** | this document |
+
+The last row is the gap. Nibbi has a design language — it is legible in every file and it is genuinely good — but it lives as convention in 1,101 lines of CSS rather than as a system. The measured cost of that:
+
+| dimension | distinct values in `public/*.css` | should be |
+|---|---|---|
+| font-size | 20 | 10 |
+| border-radius | 15 | 8 |
+| hex colours | 45 | 16 |
+| spacing values | 23 | 10 |
+| z-index layers | 12 | 8 named |
+| backdrop blur | 6 | 4 |
+| custom properties declared | 16 (+`--t2`/`--t3` sharing a line, `--margin-paper` inline, `--agents-bottom` from JS) | ~60 |
+
+None of this is visible as ugliness. It is visible as **drift**: the same intent rendered slightly differently depending on which file you were in when you wrote it. The drift register at the end of this document lists every instance found.
+
+---
+
+## 1. Principles
+
+These are read back out of the code and `docs/PERSONALITY.md`. They are the reason the rest of the document is shaped as it is.
+
+1. **Ink on paper, and it has to be earned.** One material, monochrome by default. Colour appears only where a machine fact needs a machine colour — a diff line, a failure, a passing check. If a colour is decorative, it is wrong.
+2. **The tenth message is the design target, not the first.** From `docs/IMPROVEMENT-PLAN.md`: the character yields to the conversation. Every surface that competes with reading loses.
+3. **Quiet until it matters.** `.meta` is `opacity: 0` until hover. `.status .label` is `max-width: 0` until hover. The system withholds chrome and returns it on intent. This is the single most characteristic move in the codebase and it should be applied to anything new.
+4. **State is spoken, not signalled.** From the sidebar lab: *"Leave the status dots — Nibbi says attention in words."* Dots carry presence and rhythm; words carry meaning.
+5. **Nothing animates to entertain.** Motion exists to explain where something came from (`arrive`), that work is live (`think`, `pulse`), or that a control took the press (`scale(.96)`). The character is the only element allowed expressive motion, and it is contracted separately.
+6. **Every control is reachable by keyboard and 44px under a finger.** Already enforced at `≤640px` and `pointer: coarse`. Non-negotiable for new work.
+7. **A surface that cannot verify its backdrop must carry contrast alone.** The glass budget at `public/styles.css:425` is the model: assume the worst backdrop, measure, and let the native material be a bonus.
+
+---
+
+## 2. Paper and ink — colour
+
+### 2.1 The material
+
+Two substances. **Paper** is warm, slightly yellow, never white. **Ink** is warm near-black, never `#000`.
+
+| token | value | role | observed |
+|---|---|---|---|
+| `--paper` | `#f5f2ec` | the page | ✅ |
+| `--paper-raised` | `#faf8f3` | menus, panels, cards — paper lifted off the page | ⚠️ drifts to `#faf8f4` in `margins.css` |
+| `--paper-sunken` | `#fbfaf7` | diff bodies, file wells — paper pressed in | ✅ |
+| `--paper-bar` | `#ece8e0` | the workspace sidebar; the only surface darker than the page | ✅ |
+| `--ink` | `#151413` | primary text, filled controls, the character | ✅ |
+| `--ink-2` | `#3a3835` | secondary text, body copy in dense surfaces | ✅ |
+| `--ink-3` | `#6f6b65` | muted — labels, timestamps, counts | ⚠️ fails contrast in two contexts, see 2.5 |
+| `--ink-4` | `#8a857c` | faintest — step dots at rest, hunk headers, disabled marks | ✅ |
+| `--ink-inverse` | `#f5f2ec` | text on filled ink (toast, hovered chip, ship segment) | ⚠️ drifts to `#f5f2ea` in 3 places |
+| `--ink-terminal` | `#1b1a18` | code blocks and run logs — ink as a *surface*, not as text | ✅ |
+| `--ink-terminal-fg` | `#ece8df` | paper on that surface | ✅ |
+
+**Rule.** `#000` and `#fff` do not appear in Nibbi except inside the QR code (`.phonev .qr`, which must be true white to scan) and the attachment delete badge. Both are exceptions with reasons; there are no others.
+
+### 2.2 The ink veil
+
+Translucent ink over paper is how Nibbi builds every hover, well and hairline. There are currently **25 distinct alphas** of `rgba(21,20,19,…)`. Collapse to seven:
+
+| token | alpha | role |
+|---|---|---|
+| `--veil-hairline` | `.10` | `--line`, every border |
+| `--veil-well` | `.04` | a recessed field (`.rsum`, `.sin`) |
+| `--veil-hover` | `.06` | the standard hover wash — the most-used value in the codebase (10×) |
+| `--veil-press` | `.12` | active state |
+| `--veil-edge` | `.16` | a border that must be seen (`.planr`, focused pill) |
+| `--veil-strong` | `.22` | a border that must be *read* (review turn, playtest pill) |
+| `--veil-solid` | `.92` | filled ink at rest under glass (toast, hovered chip, armed) |
+
+The values between (`.045`, `.05`, `.055`, `.07`, `.075`, `.08`, `.09`, `.14`, `.18`) are 40 uses that each land within `.02` of one of the seven. Merging them is invisible and removes the whole class of "which grey was that".
+
+### 2.3 Semantic colour — the biggest drift in the system
+
+Colour means *machine verdict*. There are exactly two verdicts, and they currently have **four reds and two greens** depending on which file you were editing:
+
+| meaning | current values | used in |
+|---|---|---|
+| fail / removed | `#b5533d`, `#9a3f2c`, `#7a3a2e`, `#873f35`, `#743b2f`, `#65432c` | `styles.css` uses the first three, `project-workspace.css` and `margins.css` use `#873f35` |
+| pass / added | `#2f6b3a`, `#365342` | `styles.css` vs `project-workspace.css` |
+
+Proposed ramp — one per verdict, three roles each:
+
+| token | value | role |
+|---|---|---|
+| `--fail-mark` | `#b5533d` | the dot, the bar, the fill — colour as object |
+| `--fail-text` | `#9a3f2c` | failure text on paper |
+| `--fail-quiet` | `#7a3a2e` | failure prose, longer than a phrase |
+| `--fail-wash` | `rgba(181,83,61,.10)` | the background behind a removed line |
+| `--fail-edge` | `rgba(181,83,61,.35)` | a failure border |
+| `--pass-text` | `#2f6b3a` | success text, added lines |
+| `--pass-wash` | `rgba(76,140,86,.10)` | the background behind an added line |
+| `--pass-edge` | `rgba(76,140,86,.40)` | a success border |
+
+`#873f35`, `#743b2f`, `#65432c`, `#365342` retire into these. The three that survive in `styles.css` are the ones with measured contrast behind them; the workspace variants were picked independently and are the ones to drop.
+
+**Rule.** There is no warning colour and no info colour. A warning is a `--fail-edge` border with ink text (`.chip.warn`, `.planr .prwarn` already do this). Info is ink. Adding an amber or a blue would break principle 1.
+
+### 2.4 Agent tint
+
+The character accepts a tint (`u_tint`, `u_tintAmt` in `public/nibbi.js`) to render companion fixers as coloured ink. This is the **only** place chromatic colour is licensed, because it is identity, not status. Tints are assigned per fixer and carry no meaning beyond "which one".
+
+**Rule.** A tint never appears outside the character. A fixer's colour must not leak into its card, its chip, or its text — those stay ink, and the card is identified by name.
+
+### 2.5 Contrast contract
+
+Floors, by the model that fits the surface:
+
+| context | floor | model | status |
+|---|---|---|---|
+| body text on paper | 7:1 | WCAG 2 AA+ | `--ink` on `--paper` = 13.4:1 ✅ |
+| muted text ≥12px on paper | 4.5:1 | WCAG 2 AA | `--ink-3` on `#f5f2ec` ✅ |
+| muted text ≤11.5px | 4.5:1 minimum, measured per surface | WCAG 2 AA | ⚠️ `margins.css` already forks to `#5f5b55` because `--ink-3` is 4.33:1 on `#ece8e0` |
+| any text over glass | measured against a **black desktop**, not against the tint | WCAG 2 AA | ✅ documented at `styles.css:425`; `--ink-3` forks to `#4f4b46` |
+| text on translucent paper generally | — | **WCAG 2 is the wrong model here** | ⚠️ see below |
+
+**The one recommendation that changes a decision.** WCAG 2's contrast ratio is a poor predictor for dark-warm text on light-warm translucent surfaces, which is most of Nibbi. [APCA](https://www.myndex.com/APCA/) models this correctly and [Huetone](https://huetone.ardov.me/) edits ramps against it. The `--ink-2/3/4` ramp was picked by eye and then patched twice (`#5f5b55`, `#4f4b46`) when it failed in context. Rebuilding it once as a measured APCA ramp — in [OKLCH](https://oklch.com/) so the lightness steps are perceptually even — removes both forks and makes the glass budget derivable rather than hand-measured.
+
+### 2.6 Dark
+
+There is none, and that is currently correct: the character is ink on paper, and inverting it makes it a different creature. If it is ever wanted, it is a **separate material**, not an inverted palette — the character's shader, the paper grain and the glass budget all have to be redesigned together. Do not ship a `prefers-color-scheme` block that only swaps the token values.
+
+---
+
+## 3. Type
+
+### 3.1 Families
+
+| family | use |
+|---|---|
+| `Geist` (variable, 100–900) | everything |
+| `Geist Mono` (variable) | machine text only: commands, paths, tool names, diffs, logs, run output, tails, cost figures |
+
+**Rule.** Mono is a semantic, not a style. If the string came from a machine or must be typed back exactly, it is mono. Otherwise it is Geist, no exceptions.
+
+### 3.2 Scale
+
+20 sizes today, unevenly spaced. Proposed 10-step scale, chosen so that every existing literal moves ≤1px (except the heading cluster, noted):
+
+| token | px | role | absorbs |
+|---|---|---|---|
+| `--type-micro` | 10.5 | uppercase labels, `.06em` tracking | 10 |
+| `--type-meta` | 11.5 | counts, card metadata, tails | 11 |
+| `--type-fine` | 12 | timestamps, step detail, mono detail | 12.5 |
+| `--type-control` | 13 | chips, menu rows, buttons | 13.5 |
+| `--type-body` | 14.5 | your message, card body, dense prose | 14, 15 |
+| `--type-base` | 16 | root, phone reply | — |
+| `--type-read` | 17 | Nibbi's reply — the one thing meant to be *read* | — |
+| `--type-field` | 19 | the composer | 18 |
+| `--type-title` | 21 | panel headings | 20, 22, 23 (Δ2 — check by eye) |
+| `--type-display` | 26 | the one display size | — |
+
+**Rule.** The reply is the largest text on screen that is not a heading. Nothing new may exceed `--type-read` without also being a heading.
+
+### 3.3 Weight, tracking, numerics
+
+- Weights used: 500 (mono emphasis, menu rows, the next milestone), 600 (headings, names, `.meta` buttons), inherit otherwise. **No 700.** Ink is dark enough that 600 reads as bold.
+- Tracking: `-.035em` on `--type-title` only. `+.06em` with `text-transform: uppercase` on `--type-micro` only. Body text is never tracked.
+- **`font-variant-numeric: tabular-nums` on every number that can change in place** — timers, counts, costs, percentages. Already applied in 8 places; this is a rule, not a habit. Any new count must carry it or it will jitter.
+
+### 3.4 Fluid
+
+Everything above is fixed px, and Nibbi runs on three surfaces: a browser window, a Tauri window over glass, and a paired phone. The only current response is a `≤640px` block that overrides six values by hand.
+
+**Recommendation.** Generate the scale with [Utopia](https://utopia.fyi/) so `--type-*` and `--space-*` interpolate between a 390px and a 1440px viewport. This deletes most of the `@media (max-width: 640px)` overrides, and it is the single change that would most improve the phone surface — which today gets the desktop scale minus a few patches.
+
+---
+
+## 4. Space
+
+### 4.1 Grid
+
+**4px base, 2px half-step.** The real distribution already agrees: `8px` (79 uses), `6px` (56), `10px` (36), `12px` (35), `4px` (31), `2px` (26), `16px` (22).
+
+| token | px | role |
+|---|---|---|
+| `--space-0` | 2 | hairline gaps, badge padding |
+| `--space-1` | 4 | icon-to-label in dense rows |
+| `--space-2` | 6 | chip gaps, tight stacks |
+| `--space-3` | 8 | **the default gap** |
+| `--space-4` | 10 | control padding |
+| `--space-5` | 12 | card padding, comfortable gaps |
+| `--space-6` | 16 | section padding |
+| `--space-7` | 20 | page edges |
+| `--space-8` | 24 | panel padding |
+| `--space-9` | 32 | rare, large separation |
+
+### 4.2 The odd values
+
+`3, 5, 7, 9, 11, 14, 18, 22, 26, 28, 34, 36, 48` — 45 uses. Most are optical: a 7px dot centred against 13px text, `padding: 0 3px` on a 58px avatar. These are legitimate.
+
+**Rule.** An off-grid value is allowed only for optical alignment of a round or irregular object, and must carry a comment saying so. The codebase already writes comments at exactly this standard (`styles.css` has 30+ explanatory comments); this just makes it required for one case.
+
+### 4.3 Layout constants
+
+| token | value | role |
+|---|---|---|
+| `--measure-feed` | `min(680px, 100vw - 48px)` | the conversation column |
+| `--measure-wide` | `min(980px, 100vw - 48px)` | widened when a diff leads (`≥1400px`) |
+| `--measure-dock` | `min(720px, 100vw - 56px)` | composer and chips |
+| `--measure-panel` | `min(760px, 100vw - 28px)` | platform dialogs |
+| `--measure-card` | `304px` | margin cards |
+| `--measure-menu` | `248px` / `320px` | dock panel / project menu |
+| `--pill-h` | `72px` → `60px` ≤640px | composer height |
+| `--feed-top` | `40vh` | where the conversation starts under the character |
+| `--feed-bottom` | `140px` | where it stops above the composer |
+
+**Rule.** `--feed-bottom` is tracked by `.chips` and `.jump` via `calc()`. Anything new that sits above the composer must track it too — a fixed offset broke this once already (see the comment at the end of the `≤640px` block).
+
+---
+
+## 5. Shape
+
+### 5.1 Radius ladder
+
+15 radii today. Eight, with a meaning each:
+
+| token | px | meaning | absorbs |
+|---|---|---|---|
+| `--r-bar` | 2 | progress bars, the steer dot | 3 |
+| `--r-inline` | 6 | inline code, tiny badges, avatars in text | 4 |
+| `--r-well` | 8 | a recessed strip inside a card | 9 |
+| `--r-control` | 10 | menu rows, thumbnails, small wells | — |
+| `--r-card` | 12 | code blocks, images, cards, diff bodies | — |
+| `--r-panel` | 14 | the send squircle, margin cards, agent cards | — |
+| `--r-surface` | 18 | palettes, dialogs, the dock panel | 16, 20 |
+| `--r-pill` | 999 | anything that reads as a token or a lozenge | — |
+| `--r-dock` | 40 / 30 | the composer only, responsive | — |
+
+### 5.2 Shape vocabulary
+
+Four shapes carry meaning, and they are not interchangeable:
+
+| shape | means | examples |
+|---|---|---|
+| **circle** | a living thing or its state | the character, agent avatars, status dot, step dots, project dot, the `+` ring |
+| **pill** (`999`) | a thing you can say or do — a token of language | chips, segments, the composer, the toast, state badges |
+| **squircle** (`10–18`) | a surface that holds content | cards, menus, panels, code blocks |
+| **bar** (`2`) | quantity | plan bars, progress |
+
+**Rule.** Do not put a chip in a squircle or a card in a pill. This vocabulary is consistent across all four CSS files today and is one of the reasons the surface feels coherent.
+
+### 5.3 The bubble
+
+Nibbi's reply bubble is the signature: `border-radius: 18px` with `border-top-left-radius: 10px`, a 6px ink dot at `7px, 7px`, no avatar and no tail. Your message is the mirror: `18px 18px 6px 18px`, ink wash, no dot. This asymmetry is the whole speaker system — there is no name, no avatar and no colour doing that work.
+
+**Rule.** Never add an avatar to the bubble. The dot *is* the avatar. When a steps fold is present the dot is suppressed, because the fold's own bullet occupies the same corner — one mark, not two. That rule is already enforced by `:has()` and must survive any refactor.
+
+---
+
+## 6. Elevation
+
+### 6.1 The formula
+
+Every shadow in the codebase, whether or not it was written deliberately, obeys the same shape: **warm ink, y-offset `n`, blur `≈2.5n`, spread `≈-0.6×blur`, alpha `.25–.34`**, plus a `0 1px 0 rgba(255,255,255,.7) inset` paper highlight on anything that reads as lifted paper. Naming it:
+
+| token | value | used by |
+|---|---|---|
+| `--e-seated` | `0 1px 2px rgba(21,20,19,.12)` | the on-segment in a segmented control |
+| `--e-raised` | `0 8px 24px -18px rgba(21,20,19,.25)` | the reply bubble |
+| `--e-floating` | `0 10px 30px -12px rgba(21,20,19,.25)` | status menu, project menu, agent card |
+| `--e-docked` | `0 12px 34px -18px rgba(21,20,19,.28)` | the composer, the dock panel, the palette |
+| `--e-lifted` | `0 16px 36px -20px rgba(21,20,19,.28), 0 3px 8px -5px rgba(21,20,19,.14)` | margin cards, switch menu |
+| `--e-dialog` | `0 20px 60px -24px rgba(21,20,19,.30)` | platform panels |
+| `--e-highlight` | `0 1px 0 rgba(255,255,255,.7) inset` | additive, on every lifted paper surface |
+
+⚠️ The toast is the one shadow using `rgba(0,0,0,.4)` instead of ink. It should be `--e-floating` at ink.
+
+### 6.2 Blur ladder
+
+| token | px | role |
+|---|---|---|
+| `--blur-scrim` | 3 | behind a modal backdrop |
+| `--blur-light` | 10 | chips, jump — small floating tokens |
+| `--blur-glass` | 14 | **the standard**: composer, menus, cards, palette |
+| `--blur-heavy` | 16 | the Tauri glass shell |
+
+`12px` and `18px` are one use each and fold into 14 and 16. Every blur is paired with `saturate(1.1)` — that pairing is what keeps the paper warm behind glass and should be part of the token.
+
+### 6.3 Layers
+
+Twelve numeric z-indexes with no names. Eight named layers, in order:
+
+| token | z | occupant |
+|---|---|---|
+| `--z-vignette` | 0 | the lit-from-above wash on `body::before` |
+| `--z-character` | 1–2 | `canvas#ink`, then `canvas#fx` |
+| `--z-feed` | 3 | the conversation |
+| `--z-perch` | 5 | chips, agents, jump — things that sit on the composer's shoulder |
+| `--z-dock` | 6 | composer, status, project label |
+| `--z-transient` | 7 | toasts |
+| `--z-overlay` | 8 | palette, and the composer while its panel is open |
+| `--z-sheet` | 9–12 | margin card, switch menu, sidebar backdrop, sidebar |
+
+**Rule.** The comment at `.pill.dock-open` — *"an open panel paints over transient toasts (z 7) so every row stays clickable"* — is the kind of reasoning that has to be recoverable. Named layers make it recoverable; `z-index: 8` does not.
+
+---
+
+## 7. Motion
+
+### 7.1 Tokens
+
+| token | value | role |
+|---|---|---|
+| `--ease` | `cubic-bezier(.2,.7,.2,1)` | the only easing curve in the system |
+| `--t1` | 120ms | colour, background, small state |
+| `--t2` | 220ms | entrances, exits, hover reveals |
+| `--t3` | 420ms | layout — the feed moving, the composer resizing |
+
+Three durations, one curve, applied consistently across 1,101 lines. **This is the strongest part of the existing system.** Leave it alone.
+
+### 7.2 The three motions
+
+| animation | what it says |
+|---|---|
+| `arrive` — `translateY(10px)` + fade, `--t3` | this is new, and it came from below |
+| `leave` — `translateY(8px)` + fade, `--t2` | this is gone; faster than arriving |
+| `pulse` / `think` — scale + opacity, 1.1–1.4s loop | work is happening right now |
+
+**Rule.** New UI uses one of these three or it does not animate. A fourth animation needs a fourth thing to say.
+
+### 7.3 Press feedback
+
+`scale(1.05)` on hover, `scale(.96)` on active, `--t1`, `--ease`. On the send button only. Extend to any new primary action; never to secondary ones.
+
+### 7.4 Reduced motion
+
+Global kill switch at `styles.css:211` (`1ms !important` on everything), plus JS-side handling in `nibbi.js` and `pocket-motion.js` (`reduced=true` returns a *spatially static pose*, not a frozen frame). The character contract requires a reduced expression per action that is identical for every `t` — this is better than most shipped products and should be held to for anything new.
+
+### 7.5 Where to take motion next
+
+The curve `cubic-bezier(.2,.7,.2,1)` was chosen once and never compared. [Easing Wizard](https://easingwizard.com/) generates and diffs spring-derived curves; [Devouring Details](https://devouringdetails.com/) is the closest published work to the standard `pocket-motion.js` already holds. Neither implies adopting a library — `pocket-motion.js` is analytic, dependency-free, and better than what a library would give.
+
+One concrete gap: **numbers that change in place snap**. The GitHub build counts in `public/lib/github-ui.js`, fixer costs, plan percentages. [NumberFlow](https://number-flow.barvian.me/) is the reference implementation; verify it ships a framework-free build before adopting, or copy the technique — the animation is a masked digit column.
+
+---
+
+## 8. The character
+
+Contracted in `design/character-lab/CONTRACT.md`. Summarised here because the rest of the language has to live beside it.
+
+- **Material:** ink on cream paper, monochrome, WebGL raymarch with a Canvas2D fx pass. `tint` swaps the ink colour and nothing else. No gradient may read as glossy plastic.
+- **Rig:** `x, lift, sx, sy, rotate, eyeX, eyeY, blink, wide, happy, phase`, foot-anchored, R units, lift positive up.
+- **Sizes:** `hero`, `pill` (R≈26), `tiny` (R≈12). At pill and tiny, fine detail — halos, hatching, bristles, specks — drops and eyes stay legible.
+- **Moods:** 8 (`idle, listening, thinking, working, speaking, happy, error, sleep`), each with breath rate, boil rate, lid position, gaze bias, blink gap and drip timing.
+- **Poses:** 24 one-shots in 6 groups (Greetings, Bounces, Shape tricks, Delight, Attention, Rest/reaction), 1.25s–3.8s.
+
+**Rule.** The character is the only element in Nibbi permitted personality in its motion. Everything else gets `arrive`, `leave`, `pulse`. This is what keeps it a character rather than a theme.
+
+**Rule.** The character never blocks reading. `--feed-top: 40vh` exists to hold it above the conversation; at the tenth message it has already yielded.
+
+---
+
+## 9. Components
+
+The parts vocabulary as it stands. A new surface should be assembled from these before a new one is invented.
+
+| part | shape | type | elevation | rule |
+|---|---|---|---|---|
+| **bubble** | `18px`/`10px` TL, 6px ink dot | `--type-read` | `--e-raised` | never gets an avatar |
+| **your message** | `18 18 6 18`, `--veil-hover` | `--type-body` | none | right-aligned, max 78% |
+| **chip** | pill, `--veil-hairline` border | `--type-control` | none, `--blur-light` | hover inverts to solid ink; `.warn` takes `--fail-edge` |
+| **step** | row, 7px dot | `--type-fine` | none | dot state: live=ink+pulse, done=`--ink-3` at `scale(.75)`, fail=`--fail-mark` |
+| **steps fold** | one row | `--type-fine` | none | replaces the whole list when complete |
+| **composer (pill)** | `--r-dock` | `--type-field` | `--e-docked` + `--e-highlight` | `+` left, send squircle right; both drop to the last line when tall |
+| **dock panel** | `--r-surface` | `--type-control` | `--e-docked` | rows are 44px minimum |
+| **menu** (status, project) | `--r-surface` | `--type-fine`/`--type-control` | `--e-floating` | opens on hover *and* focus-within |
+| **palette** | `--r-surface` | `--type-control`, mono for the command | `--e-docked` | command mono, argument mono muted, description right-aligned and truncated |
+| **agent** | 58×46 avatar, tinted character | — | — | card on hover/focus/pinned, 260px, fixed-positioned on phones |
+| **toast** | pill, solid ink | `--type-control` | `--e-floating` ⚠️ currently black | z below an open dock panel |
+| **diff** | `--r-card` wells, mono | `--type-fine` | none | `--pass-*` added, `--fail-*` removed, per-file `<details>` |
+| **plan review** | `--r-panel`, `--veil-edge` border | `--type-body` | none | state badge is `--type-micro` uppercase in a pill |
+| **margin card** | `--r-panel`, `304px` | `--type-fine` | `--e-lifted` | forks `--ink-3` to `#5f5b55` for its bar |
+| **platform panel** | `--r-surface`, `760px` | `--type-body` | `--e-dialog` | `::backdrop` is `--veil-edge` + `--blur-scrim` |
+| **jump to latest** | pill | `--type-fine` | `--e-floating` | tracks `--feed-bottom` |
+| **day divider** | rule + label | `--type-meta` | none | 40px hairlines either side |
+
+### Missing parts
+
+Three things the system does not have and will need:
+
+1. **An empty state.** No component covers "no projects yet", "no fixers", "nothing to review". Today these surfaces render empty. This is the highest-value new part, and it is where the character earns its keep — a `sleep` or `curious` pose plus one line.
+2. **An inline error that is not a failure.** `--fail-*` is for machine verdicts. "Gateway unreachable" is a different thing and currently borrows the same red.
+3. **A skeleton / pending state.** Polling surfaces currently pop. `pulse` on a `--veil-well` block is the house-consistent answer.
+
+---
+
+## 10. Body states
+
+Nibbi drives most of its UI from `body` attributes and classes. The full set, because it is not documented anywhere else:
+
+| hook | set by | effect |
+|---|---|---|
+| `data-mode="talk"` | app | reveals the feed |
+| `data-link="busy\|demo\|offline\|booting"` | gateway | status dot appearance |
+| `.rest` | idle timer | feed drops to `.38` opacity, restores on hover |
+| `.busy` | a turn running | composer border softens, send becomes a stop square |
+| `.busy.steer-ready` | steerable turn + text in field | send returns as steer |
+| `.glass` | Tauri shell only | translucent paper, darkened `--ink-3` |
+| `.standalone` | PWA | safe-area insets on status and feed |
+| `.playtest` | playtest mode | labelled border on the composer |
+| `.link-fresh` | recent state change | status label stays open |
+
+**Rule.** New state goes on `body` as an attribute when it has 3+ values, a class when it is binary. Never a JS-set inline style — `.glass` is applied by `app.js` precisely so browsers and the PWA are untouched, and that separation is what keeps the contrast budget honest.
+
+---
+
+## 11. Voice
+
+Governed by `docs/PERSONALITY.md`, which is more thorough than most product voice guides. The UI-side obligations:
+
+- **Chips come from meaning or from state, never from a regex.** This is the hardest-won rule in the project (`docs/IMPROVEMENT-PLAN.md` §A) and it is a design rule as much as a model rule: an action that appears must be an action that exists.
+- **Labels are lowercase sentence case.** `new thread`, `jump to latest`, `plan first`. Uppercase appears only at `--type-micro` with tracking, for machine categories (`TOOL`, `EXECUTED`).
+- **Numbers, not adjectives.** `4 files · +82 −14`, not "several changes".
+- **A truncated string always carries a `title`.** Taken from the sidebar lab's reading of Cursor's live complaint about untitled truncated repo names.
+
+---
+
+## 12. Accessibility contract
+
+Already met, and worth stating so it stays met:
+
+| requirement | implementation |
+|---|---|
+| focus visible | `2px solid var(--ink)`, `offset: 3px` (2px inside dense panels), on every interactive element |
+| touch targets | 44px minimum at `≤640px` and `pointer: coarse` |
+| reduced motion | global 1ms override + per-surface + character-level static poses |
+| screen reader | `.sr` clip pattern, `aria-expanded` on the `+`, `aria-pressed` on toggles, `aria-describedby` on the field |
+| hover-only content | every hover reveal also fires on `:focus-within` |
+| colour alone | no state is carried by colour alone — dots also change size, borders also change weight |
+| contrast | §2.5 |
+
+**Gap.** `@media (hover: none)` is handled for `.meta` only. Any other hover-revealed content (agent cards, project menu) needs the same treatment or it is unreachable on a phone without a tap target.
+
+---
+
+## 13. Platforms
+
+| surface | differences |
+|---|---|
+| **browser** | the baseline |
+| **Tauri desktop** | `.glass` — translucent paper over Liquid Glass, `--ink-3` darkened to `#4f4b46`, `--blur-heavy`. The titlebar belongs to the traffic lights and an overlay title; do not put tabs there |
+| **PWA** | `.standalone` — safe-area insets |
+| **phone** | `≤640px`: shorter composer, 44px targets, thumbnails on their own row, fixed-position agent cards, status label hidden |
+
+**Rule.** A feature ships on all four or states which one it is for. The phone is a paired device, not a smaller desktop — `docs/POCKET-*.md` treats it that way and the CSS should too.
+
+---
+
+## 14. Adding new UI — the checklist
+
+1. Can it be assembled from §9? If yes, do that.
+2. Does it need a colour? Almost certainly not. Ink, veil, or a `--fail-*`/`--pass-*` verdict.
+3. Which of the four shapes (§5.2) is it?
+4. Which elevation, and does it need `--e-highlight`?
+5. Which named layer, and what does it need to sit above or below?
+6. `arrive`, `pulse`, or nothing.
+7. 44px at coarse pointer; focus ring; `:focus-within` for anything hover-revealed.
+8. If it holds a changing number: `tabular-nums`.
+9. If it sits above the composer: track `--feed-bottom`.
+10. If it truncates: `title`.
+11. Does it render correctly with `reduced-motion`, under `.glass`, and at 390px?
+
+---
+
+## 15. Drift register
+
+Everything found that is the same intent rendered two ways. Each is a one-line fix.
+
+| # | drift | where | fix |
+|---|---|---|---|
+| 1 | four reds for one verdict | `#873f35` (workspace, margins) vs `#9a3f2c`/`#7a3a2e`/`#b5533d` (chat) | collapse to `--fail-*` |
+| 2 | two greens for one verdict | `#365342` (workspace) vs `#2f6b3a` (chat) | collapse to `--pass-*` |
+| 3 | raised paper is `#faf8f3` in three places, `#faf8f4` in `margins.css` | `styles.css`, `platform.css` vs `margins.css` | one token |
+| 4 | inverse ink is `#f5f2ec` in some places, `#f5f2ea` in three | `styles.css` | one token |
+| 5 | toast shadow is black, everything else is ink | `styles.css` `.toast` | `--e-floating` |
+| 6 | `--ink-3` forked twice by hand (`#5f5b55`, `#4f4b46`) | `margins.css`, `.glass` | rebuild the ramp on APCA |
+| 7 | 25 ink alphas where 7 would do | all four files | §2.2 |
+| 8 | 20 font sizes where 10 would do | all four files | §3.2 |
+| 9 | 15 radii where 8 would do | all four files | §5.1 |
+| 10 | 6 blurs where 4 would do | all four files | §6.2 |
+| 11 | 12 anonymous z-indexes | all four files | §6.3 |
+| 12 | `margins.css` writes `220ms` literally instead of `--t2` | `margins.css:68` | use the token |
+
+---
+
+## 16. References
+
+Sources consulted for the recommendations above. Resource discovery via [designeer.xyz](https://designeer.xyz).
+
+| topic | resource | what it settles |
+|---|---|---|
+| contrast model | [APCA](https://www.myndex.com/APCA/) | the right maths for dark-warm ink on light-warm translucent paper |
+| ramp editing | [Huetone](https://huetone.ardov.me/) | builds `--ink-*` as one measured ramp instead of four picks and two patches |
+| colour space | [OKLCH](https://oklch.com/) | perceptually even lightness steps; keeps glass alphas honest |
+| fluid scale | [Utopia](https://utopia.fyi/) | one type+space scale across 390px→1440px, deletes most `≤640px` overrides |
+| easing | [Easing Wizard](https://easingwizard.com/) | a comparison for `cubic-bezier(.2,.7,.2,1)`, which has never had one |
+| interaction detail | [Devouring Details](https://devouringdetails.com/) | the published standard closest to `design/*-lab/` practice |
+| numeric transitions | [NumberFlow](https://number-flow.barvian.me/) | the technique for build counts and costs |
+| shader craft | [Book of Shaders](https://thebookofshaders.com/), [Paper Shaders](https://shaders.paper.design/) | reference for `character-lab/raymarch.mjs` |
+| sound | [@web-kits/audio](https://audio.raphaelsalaja.com/), [soundcn](https://soundcn.xyz/) | voice and wake-word acknowledgement, currently silent |
+| component comparison | [Component Gallery](https://component.gallery/) | the one-component-many-products method `sidebar-lab/references.md` already uses |
+| chat surface patterns | [Prompt Kit](https://www.prompt-kit.com/) | a state taxonomy for streaming, tool calls and prompt input to check §9 against |
+
+**Not adopted, deliberately.** The React + Tailwind component libraries that make up most of designeer.xyz's `/components` (shadcn, Magic UI, Aceternity, Cult, Kibo and ~100 others) do not apply: Nibbi is vanilla ES modules and hand-written CSS, and the parts vocabulary in §9 is better tuned to this product than anything installable. They are reading material, not dependencies.
