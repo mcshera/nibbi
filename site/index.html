@@ -53,10 +53,12 @@ footer a{color:var(--ink-3)}
 
   <footer>Nibbi is made by Matthew Shera. <a href="mailto:matthewshera@gmail.com?subject=Nibbi">matthewshera@gmail.com</a></footer>
 </main>
+<script src="pocket-motion.js"></script>
 <script src="nibbi.js"></script>
 <script>
 (() => {
-  const n = createNibbi({ ink: document.getElementById('ink'), fx: document.getElementById('fx') });
+  const n = createNibbi({ ink: document.getElementById('ink'), fx: document.getElementById('fx'), character: 'pool-velvet', motion: 'pocket' });
+  window.nibbi = n;
   document.body.style.backgroundImage = 'url(' + n.paperDataURL() + ')';
   const place = () => { const W = innerWidth, H = innerHeight; n.setTarget({ x: W / 2, y: Math.min(H * 0.3, 260), r: Math.max(64, Math.min(140, Math.min(W, H) * 0.15)) }); };
   place(); addEventListener('resize', place); n.snapTarget({ x: innerWidth / 2, y: Math.min(innerHeight * 0.3, 260), r: Math.max(64, Math.min(140, Math.min(innerWidth, innerHeight) * 0.15)) });
