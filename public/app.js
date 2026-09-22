@@ -15,7 +15,7 @@ import { localReplyMetadata, localReplyLabel, updateLocalReply, settleLocalReply
 import { installPocketInteractions } from './lib/pocket-interactions.js';
 import { createClient, parseSse, subscribeEvents, requestId } from './lib/client.ts';
 import { platformPanel } from './lib/platform.ts';
-import { escapeHtml, md, parseActs, firstSentences, stripMd, TOOL_LABEL, toolLabel, humanError, questionActs, relTime, parseDiff } from './lib/text.js';
+import { escapeHtml, md, parseActs, firstSentences, stripMd, TOOL_LABEL, toolLabel, humanError, errorKind, questionActs, relTime, parseDiff } from './lib/text.js';
 import { createFrameFlush } from './lib/frame-flush.js';
 import { cleanReply, splitBlocks } from './lib/stream-md.js';
 import { describeToolEvent, stepSummaryLine, elapsedLabel, inputLine } from './lib/transcript.js';
@@ -1402,7 +1402,8 @@ async function send(text, images, opts) {
   T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
   $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + (ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200));
   T.done = true;
-  if (!ok) T.nib.classList.add('error');
+  // A verdict is a failure; a gateway that cannot be reached is a notice. They do not look alike.
+  if (!ok) T.nib.classList.add(errorKind(result.raw || result.text) === 'notice' ? 'notice' : 'error');
   if (result.proposal && typeof result.proposal === 'object') renderProposalCard(T, result.proposal, text);
   S.busy = false; body.classList.remove('busy'); S.abort = null; syncSendButton(); syncMargins();
   // The settled turn is written now rather than on a later tick. A turn that finished after its
@@ -2212,7 +2213,7 @@ function restoreStep(T, row) {
 }
 function persistTranscript() {
   try {
-    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
+    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), notice: T.nib.classList.contains('notice'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
     LS.set(transcriptKey(), { at: Date.now(), rows });
   } catch { /* quota */ }
 }
@@ -2226,7 +2227,7 @@ function restoreTranscript() {
       T.stepLine = r.steps || stepSummaryLine(T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s)));
       T.fold.querySelector('.l').innerHTML = escapeHtml(T.stepLine) + ' — <u>show</u>'; T.steps.classList.add('folded');
     } else if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
-    setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error');
+    setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error'); if (r.notice) T.nib.classList.add('notice');
     T.at = r.at; setMeta(T, { costUsd: r.cost, ...localReplyMetadata(r) }); T.el.removeAttribute('aria-busy');
   }
   S.stick = true; scrollFeed(true); body.classList.add('rest');

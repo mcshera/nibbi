@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseActs, questionActs, humanError, toolLabel, stripMd, firstSentences, parseDiff, relTime, escapeHtml } from '../public/lib/text.js';
+import { parseActs, questionActs, humanError, errorKind, toolLabel, stripMd, firstSentences, parseDiff, relTime, escapeHtml } from '../public/lib/text.js';
 
 test('parseActs strips the »acts: line and yields up to 4 chips', () => {
   const r = parseActs('Done.\n»acts: dispatch 8.2 | show the diff | not now | a | b\nMore text.');
@@ -64,4 +64,14 @@ test('governed Nibbi tools get honest human labels and keep their exact names re
   assert.equal(governedToolName('mcp__nibbi__web_fetch'), 'web_fetch');
   assert.equal(governedToolName('Read'), null);
   assert.equal(toolLabel('mcp__github__list_issues'), 'on github');
+});
+
+test('a machine verdict and a machine being unreachable are different kinds of bad news', () => {
+  for (const failure of ['Empty change; nothing to stage', 'Checks failed on the staged branch', 'Unknown project', 'Agent changed history; work preserved for inspection']) {
+    assert.equal(errorKind(failure), 'failure', failure);
+  }
+  for (const notice of ['error: Failed to authenticate: OAuth session expired', 'Gateway offline', 'NetworkError when attempting to fetch resource', 'HTTP 502', 'rate limit exceeded', 'ECONNREFUSED 127.0.0.1:4527']) {
+    assert.equal(errorKind(notice), 'notice', notice);
+  }
+  assert.equal(errorKind(''), 'failure', 'with nothing to go on, say nothing reassuring');
 });

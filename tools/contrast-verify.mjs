@@ -38,6 +38,12 @@ const rgbToken = name => {
   assert.ok(rgba, `--${name} is a colour, got ${v}`);
   return { rgb: [1, 2, 3].map(i => +rgba[i]), alpha: rgba[4] === undefined ? 1 : +rgba[4] };
 };
+// an rgba token declared in :root, as {rgb, alpha}
+const rgbaToken = name => {
+  const m = css.match(new RegExp(`--${name}:\\s*rgba\\(\\s*(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)[,\\s]+([\\d.]+)\\s*\\)`));
+  assert.ok(m, `tokens.css declares --${name}`);
+  return { rgb: [1, 2, 3].map(i => +m[i]), alpha: +m[4] };
+};
 // the alpha a token carries inside the body.glass block, not in :root
 const glassToken = name => {
   const block = css.match(/body\.glass\s*\{([\s\S]*?)\n\}/);
@@ -65,6 +71,12 @@ const surfaces = [
   { label: 'glass paper', bg: over(glassToken('paper'), BLACK_DESKTOP), bands: GLASS_BANDS },
   { label: 'glass pill', bg: over(glassToken('pill-bg'), BLACK_DESKTOP), bands: GLASS_BANDS },
   { label: 'glass chip', bg: over(glassToken('chip-bg'), BLACK_DESKTOP), bands: GLASS_BANDS },
+  // The reply's own surface. It carries the most-read text in the app and was the one text-bearing
+  // surface nobody measured. The quieter event bubble is a lighter wash of the same white over the
+  // same paper, so it sits between the page and this and needs no row of its own.
+  { label: 'bubble', bg: over(rgbaToken('bubble-bg'), hex2rgb(token('paper'))), bands: OPAQUE_BANDS },
+  { label: 'notice', bg: hex2rgb(token('notice-bed')), bands: OPAQUE_BANDS },   // a reply that could not reach the gateway is still a reply
+  { label: 'glass bubble', bg: over(rgbaToken('bubble-bg'), over(glassToken('paper'), BLACK_DESKTOP)), bands: GLASS_BANDS },
 ];
 
 const failures = [];
@@ -89,4 +101,4 @@ for (const name of ['paper', 'pill-bg', 'chip-bg']) {
 }
 
 if (failures.length) { console.error('\nFAIL\n' + failures.join('\n')); process.exit(1); }
-console.log('\nContrast checks passed: one ink ramp, every step clear of its band on all seven surfaces.');
+console.log(`\nContrast checks passed: one ink ramp, every step clear of its band on all ${surfaces.length} surfaces.`);

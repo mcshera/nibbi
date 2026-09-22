@@ -1,6 +1,6 @@
 /* Advanced forms share the margin cards' paper, ink and pill controls. */
 .platform-panel {
-  width: min(760px, calc(100vw - 28px));
+  width: var(--measure-panel);
   max-width: calc(100vw - 28px);
   max-height: min(820px, calc(100dvh - 40px));
   box-sizing: border-box;
@@ -37,7 +37,7 @@
   box-sizing: border-box;
   max-width: 100%;
   border: 1px solid var(--veil-edge);
-  background: rgba(255,255,255,.46);
+  background: var(--wash-rest);
   color: inherit;
   font: inherit;
   padding: 8px 12px;
@@ -62,7 +62,7 @@
 .platform-panel button:disabled { opacity: .5; cursor: not-allowed; }
 .platform-panel :is(button, select, input, textarea, a):focus-visible { outline: 2px solid var(--ink, #151413); outline-offset: 3px; }
 .platform-panel .platform-content { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--veil-strong) transparent; padding: 3px 5px 4px; margin: 0 -5px; }
-.platform-panel fieldset { min-width: 0; border: 1px solid var(--line, var(--veil-hairline)); border-radius: var(--r-panel); background: rgba(255,255,255,.24); padding: 14px 16px 16px; margin: 8px 0 18px; }
+.platform-panel fieldset { min-width: 0; border: 1px solid var(--line, var(--veil-hairline)); border-radius: var(--r-panel); background: var(--wash-faint); padding: 14px 16px 16px; margin: 8px 0 18px; }
 .platform-panel legend { padding: 0 6px; color: var(--ink, #151413); font-weight: 600; }
 .platform-panel label { display: block; margin: 12px 0; font-size: var(--type-control); }
 .platform-panel input:not([type=checkbox]), .platform-panel textarea { display: block; width: 100%; margin-top: 6px; border-radius: var(--r-control); }
@@ -105,9 +105,9 @@
 @media (max-width: 520px) {
   .platform-panel { width: calc(100vw - 20px); max-width: calc(100vw - 20px); max-height: calc(100dvh - 20px); padding: 14px; }
   .platform-panel fieldset { padding: 12px; }
-  .platform-panel button, .platform-panel select { min-height: 44px; }
+  .platform-panel button, .platform-panel select { min-height: var(--touch); }
   .platform-panel input:not([type=checkbox]), .platform-panel textarea { font-size: var(--type-base); }
-  .platform-panel .platform-check { min-height: 44px; margin: 0; }
+  .platform-panel .platform-check { min-height: var(--touch); margin: 0; }
   .platform-panel .platform-check input[type=checkbox] { width: 22px; height: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .platform-panel button { transition: none; } }

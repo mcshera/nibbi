@@ -57,6 +57,17 @@
   /* the translucent paper of the composer and everything docked with it */
   --pill-bg: rgba(250, 248, 243, .86);
   --chip-bg: rgba(250, 248, 243, .70);
+  --bubble-bg: rgba(255, 255, 255, .62);        /* the reply's own surface — the most-read text in the app */
+  --bubble-bg-quiet: rgba(255, 255, 255, .45);  /* an event that was not said to you */
+
+  /* --------------------------------------------------------- the paper wash
+   * the veil is ink over paper; this is paper over paper. It lifts a control off
+   * the bar without a shadow, which is why the bar had seven white alphas and no
+   * name for any of them. Four steps, matching the veil's job at the other end. */
+  --wash-faint: rgba(255, 255, 255, .28);   /* under glass, where the bar is already translucent */
+  --wash-rest: rgba(255, 255, 255, .42);    /* a control at rest on the bar */
+  --wash-field: rgba(255, 255, 255, .56);   /* an input on a card */
+  --wash-hover: rgba(255, 255, 255, .74);   /* either of those, hovered */
 
   /* ----------------------------------------------------------- the ink veil
    * translucent ink over paper. seven steps; every other alpha in the codebase
@@ -190,7 +201,8 @@
   --measure-panel: min(760px, calc(100vw - 28px));
   --measure-card: 304px;
   --measure-menu: min(248px, calc(100vw - 40px));
-  --measure-project-menu: 320px;
+  --sidebar-width: 256px;                          /* docked; body.sidebar-open reads it as --workspace-left */
+  --sidebar-width-narrow: min(300px, calc(100vw - 40px));   /* the drawer below 900px */
   --pill-h: 72px;
   --feed-top: 40vh;
   --feed-bottom: 140px;      /* anything perched above the composer must track this */

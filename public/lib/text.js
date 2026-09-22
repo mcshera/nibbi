@@ -10,6 +10,13 @@ export const GOVERNED_LABEL = { web_search: 'searching the web', web_fetch: 'rea
 export const governedToolName = (n) => n.startsWith('mcp__nibbi__') ? n.slice('mcp__nibbi__'.length) : null;
 export const toolLabel = (n) => { const governed = governedToolName(n); if (governed) return GOVERNED_LABEL[governed] || (governed.startsWith('ext_') ? 'using ' + governed.split('_')[1] : governed.replace(/_/g, ' ')); return n.startsWith('mcp__github') ? 'on github' : n.startsWith('mcp__') ? 'using ' + n.split('__')[1] : (TOOL_LABEL[n] || n.toLowerCase()); };
 
+/* Colour means a machine verdict: a tool failed, a merge failed, the model said no. Not being able
+   to reach the gateway is a different kind of bad news, and borrowing the failure red for it
+   overstates what happened — nothing was judged, something was unreachable. */
+export function errorKind(raw) {
+  const m = String(raw || '').replace(/^\s*error:\s*/i, '');
+  return /oauth|authenticate|token|gateway offline|failed to fetch|networkerror|ECONNREFUSED|isn't reachable|HTTP 5\d\d|rate.?limit|429|queued|busy/i.test(m) ? 'notice' : 'failure';
+}
 export function humanError(raw) {
   const m = String(raw || '').replace(/^\s*error:\s*/i, '');
   if (/oauth|authenticate|token/i.test(m)) return 'I spilled the ink pot — the gateway\'s login has expired. Run `claude setup-token`, then I\'ll try again.';

@@ -31,7 +31,7 @@ async function harness(browser, viewport) {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.route('https://workspace.test/**', route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><link rel="stylesheet" href="/project-workspace.css"><style>:root{--ink:#151413;--ink-2:#484139;--ink-3:#6a645b;--paper:#f8f5ef;--line:#ddd7ce;--feed-top:30px;--feed-bottom:30px;--workspace-left:0px}body{background:var(--paper);font:14px Arial}*{box-sizing:border-box}[hidden]{display:none!important}</style></head><body><input id="conversation-draft" value="A draft worth keeping" hidden></body></html>' });
+    if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/project-workspace.css"><style>:root{--ink:#151413;--ink-2:#484139;--ink-3:#6a645b;--paper:#f8f5ef;--line:#ddd7ce;--feed-top:30px;--feed-bottom:30px;--workspace-left:0px}body{background:var(--paper);font:14px Arial}*{box-sizing:border-box}[hidden]{display:none!important}</style></head><body><input id="conversation-draft" value="A draft worth keeping" hidden></body></html>' });
     try { return route.fulfill({ contentType: extname(path) === '.css' ? 'text/css' : 'text/javascript', body: readFileSync(resolve(root, '.' + path)) }); } catch { return route.fulfill({ status: 404 }); }
   });
   await page.goto('https://workspace.test/');
