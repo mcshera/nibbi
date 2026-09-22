@@ -76,6 +76,19 @@ try {
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.evaluate(() => window.nibbiApp.send('/project fixture'));
   await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  // Escape dismisses. It used to clear the conversation from the composer, and before that it was
+  // swallowed by the docked bar, so it never reached the composer at all.
+  const turnsBeforeEscape = await page.evaluate(() => window.nibbiApp.state().turns.length);
+  assert.ok(turnsBeforeEscape > 0, 'there is a conversation to lose');
+  await page.locator('#ask').focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.evaluate(() => window.nibbiApp.state().turns.length), turnsBeforeEscape, 'Escape in the composer keeps the conversation');
+  assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false', 'and leaves the docked bar open');
+  await page.locator('#status').click();
+  await page.locator('.margin-card:not([hidden])').waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.margin-card:not([hidden])').count(), 0, 'Escape still closes an open card first');
+  assert.equal(await page.evaluate(() => window.nibbiApp.state().turns.length), turnsBeforeEscape);
   await page.evaluate(() => window.nibbiApp.send('/goal finish M1'));
   const goal = await (await fetch(fixture.base + '/nibbi/goal')).json(); assert.equal(goal.fixture.focus, 'M1: Fixture'); assert.equal(goal.fixture.mode, 'stage');
   await page.evaluate(() => window.nibbiApp.send('/goal stop'));

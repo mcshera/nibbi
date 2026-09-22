@@ -1982,7 +1982,9 @@ ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
   if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: 'smooth' }); }
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
-  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else { ask.blur(); if (S.mode === 'talk' && !S.busy) tidy(); } }
+  // Escape dismisses; it does not destroy. Clearing the whole conversation is a two-step action and
+  // lives on the Settings card's Tidy conversation, next to what it affects.
+  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else ask.blur(); }
 });
 /* mid-run steering: typed text while a steerable turn runs becomes guidance for that turn; an empty send still stops it */
 async function steerTurn(text) {
@@ -2013,7 +2015,6 @@ pill.addEventListener('submit', (e) => {
 addEventListener('keydown', (e) => {
   if (keyboardInputOwned(e, true)) return;
   if (e.altKey && e.code === 'Space') { e.preventDefault(); if (!e.repeat && !window.__TAURI__?.event) void toggleListen(); return; }
-  if (e.key === 'Escape' && document.activeElement !== ask && S.mode === 'talk' && !S.busy) { tidy(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.activeElement !== ask && !e.repeat && S.turns.length && !S.busy) { const map = { d: /^(diff|what changed)$/, p: /^preview$/, a: /^approve/, s: /^stop/, o: /^open/ }; const rx = map[e.key.toLowerCase()]; if (rx) { const chip = [...S.turns[S.turns.length - 1].body.querySelectorAll('.acts .chip')].find((c) => rx.test(c.textContent)); if (chip) { e.preventDefault(); chip.click(); chip.focus(); return; } } }
   if (e.key === ' ' && e.target instanceof Element && e.target.closest('button, summary, [role="button"], a[href]')) return;   // Space activates the focused control (a step's summary, a chip); it is not a character for the composer

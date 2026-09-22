@@ -113,6 +113,24 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     await page.locator('.margin-tab[data-margin-tab="chat"]').click();
     assert.equal(await page.evaluate(() => calls.length), beforeChat + 1, 'the Chat tab dispatches even when its conversation is already the open one');
     assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action:'thread',id:'alpha',value:'home'});
+    // A thread's name is one clipped line in a 256px bar, and the first thing that will truncate.
+    await page.evaluate(() => {const long='Rework the turn lock so an abort clears it before the stream closes';model.view=null;model.projects[0].threads=[{id:'home',title:'Home',active:true},{id:'long',title:long,lastAt:new Date().toISOString()}];ui.update(model);window.longTitle=long;});
+    const longRow = page.locator('[data-thread-id="long"]');
+    assert.equal(await longRow.getAttribute('title'), await page.evaluate(() => window.longTitle), 'the whole name is reachable even though the row shows one line of it');
+    assert.ok(await longRow.locator('.project-section-copy').evaluate(el => el.scrollWidth > el.clientWidth), 'and it really is clipped, so the title is not decoration');
+
+    // Escape belongs to whatever you are actually in. Docked, the bar is open all day; swallowing
+    // every Escape meant the composer and the palette never saw one.
+    await page.locator('#outside').focus();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false', 'Escape from the page leaves the docked bar alone');
+    await page.locator('.sidebar-collapse').focus();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true', 'Escape from inside the bar closes it');
+    assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-label'), 'Open sidebar', 'the toggle names what pressing it does');
+    await page.locator('#sidebar-toggle').click();
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false');
+
     await page.evaluate(() => {model.view=null;ui.update(model);});
     await openMenu();
     assert.equal(await (await gear('alpha')).getAttribute('aria-label'), 'Project settings for Alpha <img src=x onerror=alert(1)>');
@@ -226,6 +244,16 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('[data-project-section]').count(), 3);
     assert.equal(await page.locator('.project-thread-new').count(), 1);
     assert.equal(await page.locator('.margin-switch-trigger').getAttribute('data-current-project'), 'p-0');
+    // A card is a dialog with a form and a dozen bound controls in it. Sixty projects are sixty rows,
+    // not sixty dialogs: the one that exists is Settings, and a project's is built when it is opened.
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 1, 'no project card is built until one is asked for');
+    await openMenu();
+    await page.locator('.margin-switch-menu [data-project-id="p-3"]').locator('xpath=following-sibling::button').click();
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 2, 'opening a project builds its card');
+    assert.match(await page.locator('.margin-card:not([hidden]) h2').innerText(), /3$/, 'and it opens showing that project, not an empty one');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => ui.update(model));
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 2, 'a refresh does not build the other fifty-nine');
     await openMenu();
     const settingsBefore = await page.locator('#status').boundingBox();
     const menuList = page.locator('.margin-switch-menu .margin-project-list');

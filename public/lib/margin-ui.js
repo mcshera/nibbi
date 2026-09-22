@@ -6,16 +6,11 @@ const glyphs = {
   sidebar: ['M4 4h16v16H4z', 'M9 4v16'],
   folder: ['M3 7V5h6l2 2h10v12H3V7Z'],
   plus: ['M12 5v14M5 12h14'],
-  chevron: ['m9 5 7 7-7 7'],
   build: ['M4 7 12 3l8 4v10l-8 4-8-4V7Z', 'm4 7 8 4 8-4M12 11v10'],
   issue: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M12 7v6M12 16h.01'],
   plan: ['M5 3h14v18H5z', 'M9 8h6M9 12h6M9 16h4'],
   thread: ['M4 5h16v10H9l-5 4V5Z'],
   newThread: ['M12 6v8M8 10h8', 'M4 5h16v10H9l-5 4V5Z'],
-  microphone: ['M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z', 'M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M9 21h6'],
-  voice: ['M11 5 6 9H3v6h3l5 4V5Z', 'M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14'],
-  model: ['m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z'],
-  notifications: ['M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3Z', 'M10 20h4M12 2v2'],
   search: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z', 'm16.2 16.2 3.8 3.8'],
   caret: ['m6 9 6 6 6-6'],
   settings: ['M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M9.5 3h5l.5 2.4 1.8 1 2.3-.7 2.5 4.3-1.8 1.6v.8l1.8 1.6-2.5 4.3-2.3-.7-1.8 1-.5 2.4h-5L9 18.6l-1.8-1-2.3.7L2.4 14l1.8-1.6v-.8L2.4 10l2.5-4.3 2.3.7 1.8-1L9.5 3Z'],
@@ -126,7 +121,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     sidebar.setAttribute('aria-hidden', String(!value));
     toggle.hidden = value;
     toggle.setAttribute('aria-expanded', String(value));
-    toggle.setAttribute('aria-label', 'Open sidebar'); toggle.title = 'Projects and settings';
+    toggle.setAttribute('aria-label', value ? 'Close sidebar' : 'Open sidebar'); toggle.title = 'Projects and settings';
     backdrop.hidden = !value || !narrow.matches;
     sidebar.setAttribute('role', narrow.matches ? 'dialog' : 'complementary');
     if (narrow.matches && value) sidebar.setAttribute('aria-modal', 'true');
@@ -269,21 +264,17 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   settings.body.append(actions);
   settings.body.append(metadata);
-  const rightButtons = {};
-  for (const [action, label] of [['settings','Settings']]) {
-    const el = button('', 'margin-glyph', () => action === 'settings' ? open(settings, el) : void dispatch(action));
-    el.id = action === 'settings' ? 'status' : `margin-${action}`;
-    el.setAttribute('aria-label', label);
-    const core = node('span', 'margin-glyph-core'); core.append(icon(action));
-    const caption = node('span', 'label margin-glyph-label', label);
-    el.append(core, caption); right.append(el); rightButtons[action] = {el, caption};
-    if (action === 'settings') disclose(el, settings);
-    else bind(el, action, undefined, () => action === 'notifications' && model.settings.notificationsSupported === false);
-  }
+  // The foot of the bar holds one control. Settings for a thing live on the thing; this is the rest.
+  const settingsGlyph = button('', 'margin-glyph', () => open(settings, settingsGlyph));
+  settingsGlyph.id = 'status';
+  settingsGlyph.setAttribute('aria-label', 'Settings');
+  const settingsCore = node('span', 'margin-glyph-core'); settingsCore.append(icon('settings'));
+  settingsGlyph.append(settingsCore, node('span', 'label margin-glyph-label', 'Settings'));
+  right.append(settingsGlyph); disclose(settingsGlyph, settings);
 
   /** A row in the dropdown: the project, what it wants from you in words, and its settings. */
   function createProject(id) {
-    const entry = {id, data: {}, dirty: false};
+    const entry = {id, data: {}, dirty: false, card: null};
     const group = node('div', 'project-group');
     const headingRow = node('div', 'project-heading-row');
     const row = button('', 'margin-project', () => select(entry));
@@ -291,12 +282,22 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     const ring = node('span', 'project-folder'); ring.append(icon('folder'));
     const labels = node('span', 'margin-project-labels'); const name = node('span', 'margin-project-name');
     const summary = node('span', 'margin-project-summary'); labels.append(name, summary); row.append(ring, labels);
-    const card = makeCard('Project');
-    const options = button('', 'project-options', () => open(card, options)); options.append(icon('settings')); disclose(options, card);
+    const options = button('', 'project-options', () => open(cardFor(entry), options)); options.append(icon('settings'));
+    options.setAttribute('aria-haspopup', 'dialog'); options.setAttribute('aria-expanded', 'false');   // aria-controls waits for the card: it must not name an id that does not exist
     headingRow.append(row, options); group.append(headingRow);
-    buildProjectCard(entry, card, id);
-    Object.assign(entry, {group, row, ring, name, summary, card, options});
+    Object.assign(entry, {group, row, ring, name, summary, options});
     list.append(group); projects.set(id, entry); return entry;
+  }
+  /* A project's card is built the first time it is opened. Every project used to mint a full hidden
+     dialog at mount, with a dozen bound controls that were then walked on every refresh — a cost
+     paid for sixty projects to look at one. */
+  function cardFor(entry) {
+    if (entry.card) return entry.card;
+    const card = entry.card = makeCard('Project');
+    buildProjectCard(entry, card, entry.id);
+    disclose(entry.options, card);
+    paintCard(entry); refreshDisabled();
+    return card;
   }
   /** Everything inside the project card. Unchanged from the tree: this is not what the bar is about. */
   function buildProjectCard(entry, card, id) {
@@ -493,6 +494,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       const when = thread.lastAt ? relative(Date.parse(thread.lastAt)) : '';
       el.append(icon('thread'), node('span', 'project-section-copy', text(thread.title, 'Thread')),
         node('span', 'project-thread-when', when));
+      el.title = text(thread.title, 'Thread');   // the copy is one clipped line; the whole name has to be reachable
       el.setAttribute('aria-label', `${text(thread.title, 'Thread')} thread in ${text(data.name)}${when ? ', last message ' + when : ''}`);
       if (thread.active) el.setAttribute('aria-current', 'true');
       return el;
@@ -540,8 +542,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   function renderProject(entry, data) {
     entry.data = data;
     const active = String(data.id) === String(model.activeProject) || !!data.active;
-    const p = progress(data), mode = text(data.mode, 'off');
-    const inflight = count(data.inFlight), pendingCount = count(data.pending), staged = count(data.staged);
+    const mode = text(data.mode, 'off');
     const note = attentionOf(data) || text(data.branch, '');
     entry.name.textContent = text(data.name, 'Untitled project');
     entry.summary.textContent = note;
@@ -551,6 +552,12 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     entry.row.title = `${text(data.name)}${note ? ' — ' + note : ''}`;
     entry.options.setAttribute('aria-label', `Project settings for ${text(data.name, 'Untitled project')}`);
     entry.options.title = 'Project settings';
+    if (entry.card) paintCard(entry);
+  }
+  /** The card's own contents, from entry.data. Only ever called for a card that exists. */
+  function paintCard(entry) {
+    const data = entry.data, p = progress(data), mode = text(data.mode, 'off');
+    const inflight = count(data.inFlight), pendingCount = count(data.pending), staged = count(data.staged);
     entry.card.heading.textContent = text(data.name, 'Untitled project');
     entry.branch.textContent = `Working branch · ${text(data.branch, 'not available')}`;
     entry.goal.textContent = text(data.goal, 'No goal set');
@@ -576,8 +583,10 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       position++;
     }
     for (const [id, entry] of projects) if (!seen.has(id)) {
+      entry.group.remove(); projects.delete(id);
+      if (!entry.card) continue;
       if (opened === entry.card) close(true);
-      entry.group.remove(); entry.card.el.remove(); cards.delete(entry.card); projects.delete(id);
+      entry.card.el.remove(); cards.delete(entry.card);
       for (const b of bindings) if (entry.card.el.contains(b.el)) bindings.delete(b);
     }
     empty.hidden = seen.size > 0 || !menuOpen;
@@ -597,15 +606,6 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     }
     notificationNote.textContent = s.notificationsSupported === false ? 'Notifications are not supported here.' : text(s.notificationStatus, '');
     notificationNote.hidden = !notificationNote.textContent;
-    for (const [action, item] of Object.entries(rightButtons)) {
-      if (['microphone','voice','notifications'].includes(action)) {
-        item.el.setAttribute('aria-pressed', String(!!s[action]));
-        item.caption.textContent = `${action === 'microphone' ? 'Hey Nibbi' : action === 'voice' ? 'Spoken replies' : 'Notifications'} · ${s[action] ? 'on' : 'off'}`;
-        if (action === 'microphone') item.el.title = s.microphone ? 'Hey Nibbi listening is on — turn microphone off' : 'Turn microphone on, then say “Hey Nibbi”';
-      } else if (action === 'model') {
-        item.caption.textContent = text(s.model, 'Model'); item.el.setAttribute('aria-label', `Model · ${text(s.model, 'not configured')}. Open Providers`);
-      }
-    }
     refreshDisabled();
     notifyVisibility();
   }
@@ -619,7 +619,9 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     if (event.key === 'Escape' && menuOpen) {event.preventDefault(); event.stopImmediatePropagation(); closeMenu(true); return;}
     if (event.key === 'Tab' && menuOpen && menu.contains(event.target) === false && !narrow.matches) closeMenu(false);
     if (menuOpen && menu.contains(event.target)) menuKeys(event);
-    if (event.key === 'Escape' && sidebarOpen && !document.querySelector('dialog[open]')) {
+    // Docked, the bar is open all day, and swallowing every Escape kept it from ever reaching the
+    // composer or the palette. As a drawer it is modal, so Escape closes it from anywhere.
+    if (event.key === 'Escape' && sidebarOpen && (narrow.matches || sidebar.contains(event.target)) && !document.querySelector('dialog[open]')) {
       event.preventDefault(); event.stopImmediatePropagation(); setSidebar(false, true); return;
     }
     if (event.key === 'Tab' && sidebarOpen && narrow.matches) {
