@@ -43,3 +43,27 @@ test('explicit Claude API mode still records API costs without requiring subscri
   const result = await startClaude(input(), fake, async () => ({ mode: 'api-key', env: { ANTHROPIC_API_KEY: 'fixture-only' } })).result;
   assert.equal(result.isError, false); assert.equal(result.costUsd, 0.02);
 });
+test('Claude reports thinking as it happens, and thinking alone is not evidence of an answer', async () => {
+  const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+  const fake = (() => ({ async *[Symbol.asyncIterator]() {
+    yield { type: 'system', subtype: 'init', session_id: 'fixture' };
+    yield { type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'thinking' } } };
+    yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'weighing the lock' } } };
+    yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Found it.' } } };
+    yield { type: 'result', is_error: false, total_cost_usd: 0, session_id: 'fixture', usage: {} };
+  }, accountInfo, close() {}, async interrupt() {} })) as unknown as typeof query;
+  const result = await startClaude({ ...input(), onEvent: (type, payload) => events.push({ type, payload: payload as Record<string, unknown> }) }, fake, connect).result;
+  assert.deepEqual(events.map(event => event.type), ['thinking.delta', 'thinking.delta', 'text.delta'], 'thinking is reported, in order, before the words');
+  assert.equal(events[1].payload.text, 'weighing the lock');
+  assert.equal(result.evidence?.ordinaryTextProduced, true, 'the text after it is still ordinary output');
+});
+test('Claude thinking on its own produces no evidence of ordinary output', async () => {
+  const events: string[] = [];
+  const fake = (() => ({ async *[Symbol.asyncIterator]() {
+    yield { type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'redacted_thinking' } } };
+    yield { type: 'result', is_error: false, total_cost_usd: 0, session_id: 'fixture', usage: {} };
+  }, accountInfo, close() {}, async interrupt() {} })) as unknown as typeof query;
+  const result = await startClaude({ ...input(), onEvent: type => events.push(type) }, fake, connect).result;
+  assert.deepEqual(events, ['thinking.delta'], 'redacted thinking still says that thinking happened');
+  assert.equal(result.evidence?.ordinaryTextProduced, false);
+});

@@ -370,10 +370,39 @@ function finishToolStep(T, ev) {
   if (T.liveStep === st) T.liveStep = null;
   return st;
 }
+/* Thinking is the one step with no result: it is the sound of a turn working before it says
+   anything, and without it a reasoning model looks hung. It opens on the first reasoning token,
+   shows the end of what is being thought, counts, and closes the moment real words start. */
+function noteThinking(T, t) {
+  if (!T.think) {
+    const st = addStep(T, 'thinking', 'think');
+    st.el.querySelector('.l').insertAdjacentHTML('afterend', '<span class="tailwrap"><span class="tail"></span></span>');
+    st.tailText = '';
+    st.timer = setInterval(() => { const el = st.el.querySelector('.t'); if (el) el.textContent = Math.round((performance.now() - st.at) / 1000) + 's'; }, 1000);
+    T.think = st;
+    if (nibbi.mood() !== 'thinking') nibbi.setMood('thinking');
+  }
+  if (!t) return;   // a start signal, or thinking that is redacted and has no words to show
+  T.think.tailText = (T.think.tailText + t).replace(/\s+/g, ' ').slice(-120);
+  const tail = T.think.el.querySelector('.tail'); if (tail) tail.textContent = T.think.tailText;
+}
+function finishThinking(T) {
+  const st = T.think; if (!st || st.finished) return;
+  clearInterval(st.timer); st.finished = true; st.ok = true; st.elapsedMs = performance.now() - st.at;
+  st.label = 'thought'; st.el.querySelector('.l').textContent = 'thought';
+  markStep(st, 'done');
+  st.el.querySelector('.t').textContent = elapsedLabel(st.elapsedMs);
+  if (T.liveStep === st) T.liveStep = null;
+}
 function finishSteps(T, ok) {
+  finishThinking(T);
   if (T.liveStep) { markStep(T.liveStep, ok ? 'done' : 'fail'); T.liveStep = null; }
   if (!T.stepsList.length) return;
-  const rows = T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s));
+  // Thinking is not a step you can inspect, so it is not counted as one. A turn that only thought
+  // has nothing to fold and keeps its single line in view.
+  const thought = T.stepsList.find((s) => s.kind === 'think');
+  const rows = T.stepsList.filter((s) => s.kind !== 'think').flatMap((s) => Array.from({ length: s.n || 1 }, () => s));
+  if (!rows.length) { if (thought) T.stepLine = 'thought for ' + elapsedLabel(thought.elapsedMs); return; }
   const line = (ok ? '' : 'stopped after ') + stepSummaryLine(rows, performance.now() - T.startedAt);
   T.stepLine = line;
   T.fold.querySelector('.l').innerHTML = escapeHtml(line) + ' — <u>show</u>';
@@ -593,6 +622,8 @@ async function* demoTurn(message, _images, signal, mode) {
   }
   if (/\berror\b|\bbreak\b/.test(m)) { yield { ev: 'tool', name: 'Bash' }; await wait(900); yield { ev: 'done', text: 'error: Failed to authenticate: OAuth session expired and could not be refreshed', isError: true, costUsd: 0 }; return; }
   if (/fix|bug|build|make|add|change|ship/.test(m)) {
+    // a real turn thinks before it speaks, and the surface has to show that rather than go quiet
+    for (const t of ['weighing the turn lock ', 'against the abort path — ', 'the stream owes a done either way']) { await wait(300); yield { ev: 'thinking', t }; }
     yield governed('read_file', { path: 'src/session.ts' }); await wait(650); yield finished('read_file', { summary: 'Read 4.1 KB from src/session.ts', bytes: 4198, elapsedMs: 640 });
     yield governed('read_file', { path: 'src/webapp.ts' }); await wait(500); yield finished('read_file', { summary: 'Read 2.8 KB from src/webapp.ts', bytes: 2867, elapsedMs: 480 });
     yield { ev: 'tool', name: 'Grep' }; await wait(800);
@@ -1326,15 +1357,17 @@ async function send(text, images, opts) {
       if (waitStep) { markStep(waitStep, 'done'); if (T.liveStep === waitStep) T.liveStep = null; waitStep = null; }
       if (e.ev === 'start') { S.activeRunId = e.runId; T.runId = e.runId; S.steerable = false; syncSendButton(); }
       else if (e.ev === 'ready') { if (e.runId) { S.activeRunId = e.runId; T.runId = e.runId; } S.steerable = !!e.steerable; syncSendButton(); }
+      else if (e.ev === 'thinking') noteThinking(T, e.t || '');
       else if (e.ev === 'fallback') {
         S.steerable = false; syncSendButton();   // the local fallback cannot take guidance
+        finishThinking(T);
         updateLocalReply(T, e.fallback || e);
         stopSpeaking(); sentenceCursor = 0; sentencesSpoken = 0; S.spokeStream = false;
       } else if (e.ev === 'tool' && e.name && !T.local) {
         const ev = describeToolEvent(e);
         if (ev.phase === 'finished') finishToolStep(T, ev);
         else {
-          toolCount++;
+          toolCount++; finishThinking(T);
           if (spoke && T.acc && !/\n\s*$/.test(T.acc)) appendSaid(T, '\n\n');   // through the same door, or the DOM and T.acc part company
           addStep(T, ev.label, null, ev);
           if (nibbi.mood() !== 'working') nibbi.setMood('working');
@@ -1342,7 +1375,7 @@ async function send(text, images, opts) {
           if (performance.now() - lastFixerPoll > 4000) { lastFixerPoll = performance.now(); pollFixers(T, fixerBefore); }
         }
       } else if (e.ev === 'delta' && e.t) {
-        if (!spoke) { spoke = true; nibbi.setMood('speaking'); if (T.liveStep) { markStep(T.liveStep, 'done'); T.liveStep = null; } }
+        if (!spoke) { spoke = true; finishThinking(T); nibbi.setMood('speaking'); if (T.liveStep) { markStep(T.liveStep, 'done'); T.liveStep = null; } }
         appendSaid(T, e.t);
         nibbi.pulse(Math.min(1, 0.35 + e.t.length * 0.03)); if (!T.local) streamSpeech(T);
       } else if (e.ev === 'done') { updateLocalReply(T, e); result = e; }
@@ -2166,7 +2199,7 @@ function stepRow(s) {
 }
 function restoreStep(T, row) {
   const ev = row.governed || row.name ? { label: row.label, name: row.name, kind: row.kind, source: row.source || (row.governed ? 'governed' : 'native'), input: row.input } : null;
-  const cls = row.fixed ? 'fixer' : row.kind === 'steer' ? 'steer' : null;
+  const cls = row.fixed ? 'fixer' : row.kind === 'steer' ? 'steer' : row.kind === 'think' ? 'think' : null;
   const el = stepEl(row.label || row.name || 'step', cls, ev);
   el.classList.remove('live'); el.classList.add(row.ok === false ? 'fail' : 'done');
   if (row.n > 1) el.querySelector('.n').textContent = '×' + row.n;

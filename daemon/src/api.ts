@@ -85,7 +85,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
       const thread = requireThread(input.project, input.threadId);
       const cmd = await handleCommand(input.message, notify, { project: input.project, idempotencyKey: key + ':slash', threadId: thread });
       const toolFrame = (payload: Record<string, unknown>): void => { const { type, ...rest } = payload; send?.('tool', { ...rest, phase: type === 'tool.finished' ? 'finished' : 'started', at: Date.now() }); };
-      const turnOptions: TurnOptions = { threadId: thread, historySource: input.historySource, onStart: (runId: string) => send?.('start', { runId, threadId: thread }), onReady: (runId: string, info: { steerable: boolean }) => send?.('ready', { runId, threadId: thread, ...info }), onToolEvent: toolFrame };
+      const turnOptions: TurnOptions = { threadId: thread, historySource: input.historySource, onStart: (runId: string) => send?.('start', { runId, threadId: thread }), onReady: (runId: string, info: { steerable: boolean }) => send?.('ready', { runId, threadId: thread, ...info }), onToolEvent: toolFrame, onThinking: (text: string) => send?.('thinking', { t: text }) };
       // Local-fallback frames exist only where that feature is compiled in; assigning keeps this file identical across builds.
       Object.assign(turnOptions, { onFallback: (info: unknown) => send?.('fallback', info as Record<string, unknown>) });
       let result: Record<string, unknown>;

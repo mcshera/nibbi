@@ -31,6 +31,19 @@ try {
     const live = page.locator('.bubble.live');
     await live.waitFor({ timeout: 20_000 });
 
+    // Thinking is shown while it happens: a reasoning model that says nothing for ten seconds must
+    // not look hung. The step counts, shows the end of what it is thinking, and closes into a verdict.
+    await page.locator('.step.think').waitFor({ timeout: 20_000 });
+    const thinking = await page.waitForFunction(() => {
+      const step = document.querySelector('.step.think');
+      const tail = step?.querySelector('.tail')?.textContent ?? '';
+      return tail.trim() ? { label: step.querySelector('.l').textContent, tail, live: step.classList.contains('live') } : null;
+    }, null, { timeout: 20_000 }).then(handle => handle.jsonValue());
+    assert.equal(thinking.label, 'thinking', 'the live step says what it is doing');
+    assert.equal(thinking.live, true);
+    assert.ok(thinking.tail.trim().length, 'and shows the end of what is being thought');
+    if (reducedMotion === 'no-preference') await page.screenshot({ path: out + 'thinking-1180x820.png' });
+
     // The tail is the only part still being rendered; everything above it is finished.
     const tail = page.locator('.bubble.live .said-tail');
     await tail.waitFor({ timeout: 20_000 });
@@ -81,6 +94,9 @@ try {
         probeText: probe.textContent,
         selection: getSelection().toString(),
         acc: window.nibbiApp.state().turns.at(-1).acc,
+        thought: turn.querySelector('.step.think')?.className ?? '',
+        thoughtLabel: turn.querySelector('.step.think .l')?.textContent ?? '',
+        thoughtTime: turn.querySelector('.step.think .t')?.textContent ?? '',
       };
     });
     assert.equal(settled.tails, 0, 'the tail is unwrapped when the reply settles');
@@ -91,6 +107,9 @@ try {
     assert.ok(settled.probeKept, 'the block marked mid-stream is the same node at the end — finished blocks are never re-rendered');
     assert.equal(settled.probeText, held.text, 'and its text never changed');
     assert.equal(settled.selection, held.selection, 'a selection made while the reply was streaming survives it');
+    assert.equal(settled.thoughtLabel, 'thought', 'the thinking step closes into a verdict');
+    assert.ok(settled.thought.includes('done'), 'and is marked done, not left running');
+    assert.ok(/\ds/.test(settled.thoughtTime), 'with how long it took, was ' + JSON.stringify(settled.thoughtTime));
     assert.ok(!settled.text.includes('`'), 'the markdown was rendered, not shown: no raw backticks survive');
     assert.ok(!/(^|\n)- /.test(settled.text), 'and no raw list markers either');
 

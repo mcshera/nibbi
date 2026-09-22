@@ -109,6 +109,12 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .steps .fold .b { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; transform: scale(.75); }
 .steps.folded .fold { display: flex; }
 .steps .fold:hover { color: var(--ink-2); }
+/* thinking: the one step with no result. Its tail shows the end of what is being thought, so it
+   reads as something still running rather than as a truncated sentence, and it goes when it closes. */
+.step.think .l { flex: none; }
+.step.think .tailwrap { flex: 1; min-width: 0; display: flex; justify-content: flex-end; overflow: hidden; color: var(--ink-4); }
+.step.think .tail { flex: none; white-space: nowrap; }
+.step.think.done .tailwrap { display: none; }
 
 .meta { display: flex; gap: 10px; align-items: center; font-size: var(--type-fine); padding: 6px 0 0 6px; color: var(--ink-3); opacity: 0; transition: opacity var(--t2); font-variant-numeric: tabular-nums; }
 .turn:hover .meta, .turn:focus-within .meta { opacity: 1; }

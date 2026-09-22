@@ -73,7 +73,8 @@ test('Codex evidence counts approvals, unknown/native/completed actions and text
     const run = setup(scenario), result = await run.handle.result;
     assert.equal(result.evidence?.toolAttempted, !['quota-reasoning', 'quota-text'].includes(scenario), scenario);
     assert.equal(result.evidence?.ordinaryTextProduced, scenario === 'quota-text', scenario);
-    if (scenario === 'quota-reasoning') assert.ok(!run.events.includes('tool.started'));
+    if (scenario === 'quota-reasoning') { assert.ok(!run.events.includes('tool.started')); assert.ok(run.events.includes('thinking.delta'), 'reasoning is reported as thinking'); }
+    if (scenario !== 'quota-reasoning') assert.ok(!run.events.includes('thinking.delta'), scenario + ' has nothing to think about');
     if (result.evidence?.toolAttempted) assert.ok(run.events.includes('tool.attempted'));
   }
 });

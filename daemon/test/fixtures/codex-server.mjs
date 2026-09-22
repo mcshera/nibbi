@@ -30,6 +30,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       if (mode === 'quota-approval') send({ id: 'approval', method: 'item/commandExecution/requestApproval', params: {} });
       const item = mode === 'quota-reasoning' ? { type: 'reasoning' } : mode === 'quota-tool' ? { type: 'mcpToolCall', tool: 'read_file' } : mode === 'quota-unknown' ? { type: 'futureAction' } : undefined;
       if (item) notify('item/started', { threadId: 'thread-test', item });
+      if (mode === 'quota-reasoning') notify('item/reasoning/summaryTextDelta', { threadId: 'thread-test', delta: 'weighing it' });
       if (mode === 'quota-text') notify('item/agentMessage/delta', { threadId: 'thread-test', delta: 'visible' });
       const codexErrorInfo = { 'quota-rate': 'rateLimitExceeded', 'quota-budget': 'sessionBudgetExceeded', 'quota-auth': 'unauthorized', 'quota-429': { httpConnectionFailed: { httpStatusCode: 429 } }, 'quota-english': null }[mode] ?? 'usageLimitExceeded';
       setTimeout(() => notify('turn/completed', { threadId: 'thread-test', turn: { id: 'turn-test', status: mode === 'quota-interrupted' ? 'interrupted' : mode === 'quota-success' ? 'completed' : 'failed', error: { message: 'usage limit exceeded', codexErrorInfo: mode === 'quota-english' ? null : codexErrorInfo }, items: mode === 'quota-terminal-tool' ? [{ type: 'commandExecution' }] : [] } }), 10); return;
