@@ -1,12 +1,12 @@
 /* Keep the live composer mounted so drafts, attachments and active work survive navigation. */
 body.project-view #pill { display: none; }
 .project-chat-launcher {
-  position: fixed; z-index: 6;
+  position: fixed; z-index: var(--z-dock);
   right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom));
-  min-height: 48px; padding: 12px 20px; border-radius: 40px;
+  min-height: 48px; padding: 12px 20px; border-radius: var(--r-dock);
   background: var(--pill-bg); border: 1px solid var(--line); color: var(--ink);
-  box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 12px 34px -18px rgba(21,20,19,.28), 0 2px 8px -4px rgba(21,20,19,.08);
-  backdrop-filter: blur(14px) saturate(1.1); font: inherit; font-size: 14px; cursor: pointer;
+  box-shadow: var(--e-highlight), var(--e-docked);
+  backdrop-filter: var(--glass); font: inherit; font-size: var(--type-body); cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 .project-chat-launcher:hover { border-color: var(--ink-3); }
