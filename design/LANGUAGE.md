@@ -2,7 +2,9 @@
 
 Read 2026-09-21 out of the shipped surface, not invented over it. Every rule below is either **observed** (the code already does this consistently — the rule just names it) or **proposed** (the code is inconsistent here — the rule picks the winner and says what it costs to adopt). Nothing is aspirational. Where a rule came from outside, the source is linked.
 
-Companion file: **`public/tokens.css`** — the same system as custom properties, 125 of them, linked ahead of `styles.css` in `public/index.html` and therefore live. The drift register in §15 has been applied: every literal in `public/*.css` that the register named now reads a token.
+Companion file: **`public/tokens.css`** — the same system as custom properties, 124 of them, linked ahead of `styles.css` in `public/index.html` and therefore live. The drift register in §15 has been applied: every literal in `public/*.css` that the register named now reads a token.
+
+**A caution this document earned.** Several claims in the first draft were read out of the CSS without checking what the running app actually renders, and three of them were wrong: the "missing" empty states exist, the "missing" pending states exist, and the touch-reachability gap was one control rather than several. Worse, a whole section of CSS — `.status`, `.project`, `.pmenu`, `.plabel`, 45 lines — described a shell that the workspace rail replaced and that nothing constructs any more; this document had been documenting it as live. Those entries are corrected below and the dead CSS is deleted. **Check a claim against the DOM before writing it down here.**
 
 ## Status
 
@@ -14,7 +16,7 @@ Companion file: **`public/tokens.css`** — the same system as custom properties
 | sidebar shape | in lab | `design/sidebar-lab/` |
 | **colour, type, space, shape, elevation** | **shipped, contracted** | this document + `public/tokens.css` |
 
-That last row was the gap. Nibbi had a design language — legible in every file and genuinely good — but it lived as convention in 1,101 lines of CSS rather than as a system. It was not visible as ugliness; it was visible as **drift**: the same intent rendered slightly differently depending on which file you were in when you wrote it.
+That last row was the gap. Nibbi had a design language — legible in every file and genuinely good — but it lived as convention in 1,101 lines of CSS rather than as a system (1,050 now, after the dead shell came out). It was not visible as ugliness; it was visible as **drift**: the same intent rendered slightly differently depending on which file you were in when you wrote it.
 
 Measured before and after applying §15:
 
@@ -26,7 +28,8 @@ Measured before and after applying §15:
 | ink-veil alphas | 25 distinct | **1** (a zero-size shadow that draws nothing) | tokens only |
 | z-index literals | 12 anonymous | **2** (both in a local stacking context, deliberately) | named rungs only |
 | backdrop blur literals | 6 distinct | **0** | tokens only |
-| custom properties declared | 16 | **125** | — |
+| custom properties declared | 16 | **124** | — |
+| dead pre-rail CSS | 45 lines | **0** | — |
 
 The five surviving hexes are all legitimate: `#151413`, `#383633` and `#5f5c57` as `var(--ink, …)` fallbacks (kept in step with the ramp), `#000` inside a `mask-image` gradient — a mask channel, not a colour — and `#fff` once on the QR code, which must be true white to scan.
 
@@ -40,11 +43,11 @@ These are read back out of the code and `docs/PERSONALITY.md`. They are the reas
 
 1. **Ink on paper, and it has to be earned.** One material, monochrome by default. Colour appears only where a machine fact needs a machine colour — a diff line, a failure, a passing check. If a colour is decorative, it is wrong.
 2. **The tenth message is the design target, not the first.** From `docs/IMPROVEMENT-PLAN.md`: the character yields to the conversation. Every surface that competes with reading loses.
-3. **Quiet until it matters.** `.meta` is `opacity: 0` until hover. `.status .label` is `max-width: 0` until hover. The system withholds chrome and returns it on intent. This is the single most characteristic move in the codebase and it should be applied to anything new.
+3. **Quiet until it matters.** `.meta` is `opacity: 0` until hover; the whole feed drops to `.38` at rest and comes back on hover or focus; an agent's card stays closed until you point at it or pin it. The system withholds chrome and returns it on intent. This is the single most characteristic move in the codebase and it should be applied to anything new — with §12's rule attached, that withheld does not mean stranded.
 4. **State is spoken, not signalled.** From the sidebar lab: *"Leave the status dots — Nibbi says attention in words."* Dots carry presence and rhythm; words carry meaning.
 5. **Nothing animates to entertain.** Motion exists to explain where something came from (`arrive`), that work is live (`think`, `pulse`), or that a control took the press (`scale(.96)`). The character is the only element allowed expressive motion, and it is contracted separately.
 6. **Every control is reachable by keyboard and 44px under a finger.** Already enforced at `≤640px` and `pointer: coarse`. Non-negotiable for new work.
-7. **A surface that cannot verify its backdrop must carry contrast alone.** The glass budget at `public/styles.css:413` is the model: assume the worst backdrop, measure, and let the native material be a bonus.
+7. **A surface that cannot verify its backdrop must carry contrast alone.** The glass budget at `public/styles.css:373` is the model: assume the worst backdrop, measure, and let the native material be a bonus.
 
 ---
 
@@ -213,7 +216,14 @@ There is none, and that is currently correct: the character is ink on paper, and
 
 Everything above is fixed px, and Nibbi runs on three surfaces: a browser window, a Tauri window over glass, and a paired phone. The only current response is a `≤640px` block that overrides six values by hand.
 
-**Recommendation.** Generate the scale with [Utopia](https://utopia.fyi/) so `--type-*` and `--space-*` interpolate between a 390px and a 1440px viewport. This deletes most of the `@media (max-width: 640px)` overrides, and it is the single change that would most improve the phone surface — which today gets the desktop scale minus a few patches.
+**Done, and smaller than it first looked.** Auditing the `≤640px` block showed it is almost entirely *layout* — safe-area insets, 44px targets, flex-wrap, the attachment row. Exactly **two** steps differed by viewport, and both are now fluid, interpolating between a 390px and a 1440px viewport with no step change at any width:
+
+| token | 390px | 834px | 1440px |
+|---|---|---|---|
+| `--type-read` | 16px | 16.4px | 17px |
+| `--type-field` | 17px | 17.85px | 19px |
+
+Every other step stays fixed on purpose: they are small UI text, and shrinking those on a phone costs legibility for no layout gain. A full [Utopia](https://utopia.fyi/)-style scale across all ten steps would be change for its own sake here.
 
 ---
 
@@ -358,7 +368,7 @@ Twelve numeric z-indexes with no names. Eight named layers, in order:
 | `--t2` | 220ms | entrances, exits, hover reveals |
 | `--t3` | 420ms | layout — the feed moving, the composer resizing |
 
-Three durations, one curve, applied consistently across 1,101 lines. **This is the strongest part of the existing system.** Leave it alone.
+Three durations, one curve, applied consistently across every file. **This is the strongest part of the existing system.** Leave it alone.
 
 ### 7.2 The three motions
 
@@ -415,7 +425,7 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 | **steps fold** | one row | `--type-fine` | none | replaces the whole list when complete |
 | **composer (pill)** | `--r-dock` | `--type-field` | `--e-docked` + `--e-highlight` | `+` left, send squircle right; both drop to the last line when tall |
 | **dock panel** | `--r-surface` | `--type-control` | `--e-docked` | rows are 44px minimum |
-| **menu** (status, project) | `--r-surface` | `--type-fine`/`--type-control` | `--e-floating` | opens on hover *and* focus-within |
+| **menu** (switch, dock) | `--r-surface` | `--type-fine`/`--type-control` | `--e-floating` | opens on hover *and* focus-within |
 | **palette** | `--r-surface` | `--type-control`, mono for the command | `--e-docked` | command mono, argument mono muted, description right-aligned and truncated |
 | **agent** | 58×46 avatar, tinted character | — | — | card on hover/focus/pinned, 260px, fixed-positioned on phones |
 | **toast** | pill, solid ink | `--type-control` | `--e-floating` ⚠️ currently black | z below an open dock panel |
@@ -428,11 +438,11 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 
 ### Missing parts
 
-Three things the system does not have and will need:
+Checked against the running app rather than inferred from the CSS, which corrected two earlier entries here:
 
-1. **An empty state.** No component covers "no projects yet", "no fixers", "nothing to review". Today these surfaces render empty. This is the highest-value new part, and it is where the character earns its keep — a `sleep` or `curious` pose plus one line.
-2. **An inline error that is not a failure.** `--fail-*` is for machine verdicts. "Gateway unreachable" is a different thing and currently borrows the same red.
-3. **A skeleton / pending state.** Polling surfaces currently pop. `pulse` on a `--veil-well` block is the house-consistent answer.
+1. ~~No empty states.~~ **Wrong — the rail has them**, and they are well written: `No projects yet`, `Nothing is open`, `Nothing is queued`, `Nothing merged yet today`, `No plan written yet`. What is missing is only that they are ad-hoc strings rather than a shared part, so a new surface has nothing to reach for.
+2. ~~No pending state.~~ **Wrong — loading states exist**, as text (`.project-loading`, `aria-busy`, `Loading…`). They are not skeletons, which is a stylistic choice rather than a gap.
+3. **An inline error that is not a failure.** Still real. `--fail-*` is for machine verdicts; "gateway unreachable" is a different thing and currently borrows the same red.
 
 ---
 
@@ -443,14 +453,14 @@ Nibbi drives most of its UI from `body` attributes and classes. The full set, be
 | hook | set by | effect |
 |---|---|---|
 | `data-mode="talk"` | app | reveals the feed |
-| `data-link="busy\|demo\|offline\|booting"` | gateway | status dot appearance |
+| `data-link="busy\|demo\|offline\|booting"` | gateway | set, but nothing styles it since the pre-rail status dot was removed — either give it a home in the rail or stop setting it |
 | `.rest` | idle timer | feed drops to `.38` opacity, restores on hover |
 | `.busy` | a turn running | composer border softens, send becomes a stop square |
 | `.busy.steer-ready` | steerable turn + text in field | send returns as steer |
 | `.glass` | Tauri shell only | translucent paper, darkened `--ink-3` |
 | `.standalone` | PWA | safe-area insets on status and feed |
 | `.playtest` | playtest mode | labelled border on the composer |
-| `.link-fresh` | recent state change | status label stays open |
+| `.link-fresh` | recent state change | same: set on `body`, styled by nothing since the status label went. Vestigial alongside `data-link` |
 
 **Rule.** New state goes on `body` as an attribute when it has 3+ values, a class when it is binary. Never a JS-set inline style — `.glass` is applied by `app.js` precisely so browsers and the PWA are untouched, and that separation is what keeps the contrast budget honest.
 
@@ -481,7 +491,9 @@ Already met, and worth stating so it stays met:
 | colour alone | no state is carried by colour alone — dots also change size, borders also change weight |
 | contrast | §2.5 |
 
-**Gap.** `@media (hover: none)` is handled for `.meta` only. Any other hover-revealed content (agent cards, project menu) needs the same treatment or it is unreachable on a phone without a tap target.
+**Closed.** `@media (hover: none)` used to cover `.meta` alone. Verified against a real touch context at 390px, the only control that was genuinely stranded was the code block's **copy button** — laid out, clickable, and painted at `opacity: 0`, which is worse than no button at all. It now stands down to `opacity: 1` when there is no hover. Agent cards were fine: tapping an agent toggles `.pinned`, which is a deliberate tap path, and revealing all eight cards on a phone would be worse.
+
+**Rule.** A control may hide behind `:hover` only if it also has a tap path — a toggle, `:focus-within`, or a `hover: none` fallback. Laid out and invisible is the one state that is never acceptable.
 
 ---
 

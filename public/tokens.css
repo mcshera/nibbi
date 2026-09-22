@@ -98,8 +98,14 @@
   --type-control: 13px;
   --type-body: 14.5px;
   --type-base: 16px;
-  --type-read: 17px;         /* Nibbi's reply — the one thing meant to be read */
-  --type-field: 19px;        /* the composer */
+  /* The two steps that genuinely differ between a phone and a desktop window.
+   * They used to jump at the 640px breakpoint; now they interpolate between a
+   * 390px and a 1440px viewport, so there is no step change at any width.
+   * read:  16px @390 -> 17px @1440.  field: 17px @390 -> 19px @1440.
+   * Every other step is deliberately fixed: they are small UI text, and
+   * shrinking those on a phone costs legibility for no layout gain. */
+  --type-read: clamp(16px, calc(15.629px + 0.0952vw), 17px);   /* Nibbi's reply — the one thing meant to be read */
+  --type-field: clamp(17px, calc(16.257px + 0.1905vw), 19px);  /* the composer */
   --type-title: 21px;
   --type-display: 26px;
   /* absorbed: 10->micro, 11->meta, 12.5->fine, 13.5->control, 14/15->body,
