@@ -237,8 +237,20 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   // The strip: four glyphs, and the one you are on opens up to say its name and what is waiting.
   const tabs = node('nav', 'margin-tabs'); tabs.setAttribute('aria-label', 'Project sections');
   const body = node('div', 'margin-body');
-  const rollup = node('p', 'margin-muted margin-rollup'); rollup.hidden = true;
-  left.append(switcher, tabs, body, progressStatus, rollup, globalError);
+  // The rollup is a control, not a caption: the sentence about the other projects is also the way
+  // to reach the first one that wants something.
+  const rollup = button('', 'margin-muted margin-rollup', () => {
+    openMenu(false);
+    const wanted = list.querySelector('.project-group.needs-you:not([hidden]) .margin-project');
+    (wanted || search).focus({ preventScroll: true });
+  });
+  rollup.hidden = true;
+  const link = node('p', 'margin-muted margin-link'); link.hidden = true; link.setAttribute('role', 'status');
+  // The conversations take the slack and the rest sits at the foot. Left in the flow they ended up
+  // stranded mid-bar under a two-row thread list, with four hundred pixels of empty paper below.
+  const foot = node('div', 'margin-foot');
+  foot.append(progressStatus, rollup, link, globalError);
+  left.append(switcher, tabs, body, foot);
 
   const settings = makeCard('Settings', 'right');
   const metadata = node('dl', 'margin-metadata');
@@ -410,7 +422,18 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   function renderSwitcher() {
     const entry = activeEntry();
-    const data = entry?.data || {};
+    const loading = model.projectsLoaded === false;
+    if (!entry) {
+      // Nothing to name yet. "No project · no branch · quiet" described a project that does not exist.
+      trigger.dataset.currentProject = '';
+      triggerName.textContent = loading ? 'Loading projects…' : 'No projects yet';
+      triggerSummary.textContent = loading ? '' : 'Create one to get started';
+      trigger.setAttribute('aria-label', loading ? 'Loading projects' : 'No projects yet. Create one to get started');
+      trigger.title = '';
+      rollup.hidden = true;
+      return;
+    }
+    const data = entry.data;
     const name = text(data.name, 'No project');
     const summary = `${text(data.branch, 'no branch')} · ${attentionOf(data) || 'quiet'}`;
     // Not data-project-id: that belongs to the rows you can choose. The trigger names the one
@@ -468,7 +491,14 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     return el;
   }
   function renderBody() {
-    const entry = activeEntry(); if (!entry) { body.replaceChildren(); bodyKey = ''; return; }
+    const entry = activeEntry();
+    if (!entry) {
+      bodyKey = '';
+      if (model.projectsLoaded === false) { body.replaceChildren(node('p', 'margin-empty', 'Loading projects…')); return; }
+      const start = button('New project', 'margin-pill margin-empty-new', () => { close(); void dispatch('newProject'); });
+      body.replaceChildren(node('p', 'margin-empty', 'No projects yet. A project is a repository nibbi can build in.'), start);
+      return;
+    }
     const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
     // The workspace also opens "repository", which the strip has no tab for and the bar has no
     // summary of. Anything outside the three record sections falls back to the conversations.
@@ -547,6 +577,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     entry.name.textContent = text(data.name, 'Untitled project');
     entry.summary.textContent = note;
     entry.row.classList.toggle('is-active', active); entry.row.classList.toggle('is-off', mode === 'off');
+    entry.group.classList.toggle('needs-you', !!attentionOf(data) && !active);
     entry.row.setAttribute('aria-current', active ? 'true' : 'false');
     entry.row.setAttribute('aria-label', `${text(data.name, 'Untitled project')}${note ? ', ' + note : ''}${active ? ', current project' : ''}`);
     entry.row.title = `${text(data.name)}${note ? ' — ' + note : ''}`;
@@ -597,6 +628,9 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     if (focusKey) tabs.querySelector(`[data-margin-tab="${focusKey}"]`)?.focus({preventScroll: true});
     const line = progressLine(model.progress);
     if (progressStatus.textContent !== line) progressStatus.textContent = line;
+    const away = model.link === 'offline' ? 'Offline — nothing is reaching the gateway' : '';
+    if (link.textContent !== away) link.textContent = away;
+    link.hidden = !away;
     const s = model.settings;
     for (const [key, el] of Object.entries(meta)) el.textContent = text(s[key], 'Not available');
     for (const [action, pref] of Object.entries(prefs)) {

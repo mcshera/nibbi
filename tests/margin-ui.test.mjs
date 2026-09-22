@@ -264,6 +264,39 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.deepEqual(await page.locator('#status').boundingBox(), settingsBefore, 'settings stays pinned while the list scrolls');
     assert.ok(settingsBefore.y >= 0 && settingsBefore.y + settingsBefore.height <= 760);
     await page.keyboard.press('Escape');
+    // The foot sits under the conversations and against the bottom of the bar. Left in the flow it
+    // ended up stranded mid-bar with four hundred pixels of empty paper below it.
+    await page.evaluate(() => ui.setSidebar(true));
+    await page.setViewportSize({width: 1180, height: 820});
+    await page.evaluate(() => {model.projects=[model.projects[0]];model.activeProject='p-0';model.projects[0].threads=[{id:'home',title:'Home',active:true}];model.view=null;ui.update(model);});
+    const gap = await page.evaluate(() => {
+      const bar = document.querySelector('#workspace-sidebar').getBoundingClientRect();
+      const foot = document.querySelector('.margin-foot').getBoundingClientRect();
+      const settings = document.querySelector('#settings-rail').getBoundingClientRect();
+      const body = document.querySelector('.margin-body').getBoundingClientRect();
+      return {belowFoot: settings.top - foot.bottom, barBottom: bar.bottom, footBottom: foot.bottom, bodyHeight: body.height};
+    });
+    assert.ok(gap.belowFoot <= 24, 'the foot is contiguous with Settings, not floating above a void: ' + gap.belowFoot);
+    assert.ok(gap.bodyHeight > 200, 'and the conversations take the room that leaves: ' + gap.bodyHeight);
+
+    // A backend that has not answered, and a first run, say so rather than describing a project
+    // that does not exist.
+    await page.evaluate(() => {model.projects=[];model.activeProject=null;model.projectsLoaded=false;ui.update(model);});
+    assert.match(await page.locator('.margin-switch-trigger').innerText(), /Loading projects/);
+    await page.evaluate(() => {model.projectsLoaded=true;ui.update(model);});
+    const firstRun = await page.locator('.margin-switch-trigger').innerText();
+    assert.match(firstRun, /No projects yet/);
+    assert.doesNotMatch(firstRun, /quiet|no branch/, 'nothing is invented about a project that is not there');
+    assert.equal(await page.locator('.margin-body .margin-empty-new').count(), 1, 'and there is one way to start');
+    await page.locator('.margin-body .margin-empty-new').click();
+    assert.equal(await page.evaluate(() => calls.at(-1).action), 'newProject');
+
+    // data-link was set on the body and styled by nothing. It has a home now.
+    await page.evaluate(() => {model.link='offline';ui.update(model);});
+    assert.match(await page.locator('.margin-link').innerText(), /Offline/);
+    await page.evaluate(() => {model.link='live';ui.update(model);});
+    assert.equal(await page.locator('.margin-link').isVisible(), false);
+
     await page.evaluate(() => {model.projects=[];model.activeProject=null;ui.update(model);});
     assert.equal(await page.locator('#project-rail [data-project-id]').count(), 0);
     assert.equal(await page.locator('.project-section').count(), 0);
