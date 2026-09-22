@@ -128,7 +128,7 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
    button over a code block, which is worse than no button at all. */
 @media (hover: none) { .meta { opacity: .7; } .nib .said pre .copycode { opacity: 1; } }
 .meta button { font: inherit; color: var(--ink-3); background: none; border: 0; padding: 0; cursor: pointer; } .meta button:hover { color: var(--ink); }
-.meta .metaacts { display: inline-flex; align-items: baseline; gap: 0; }
+.meta .metaacts { display: inline-flex; align-items: baseline; gap: 10px; }   /* the row's own gap: a flex item drops the spaces inside it, so the separator cannot carry them */
 
 
 /* actions nibbi offers after a reply (contextual) */

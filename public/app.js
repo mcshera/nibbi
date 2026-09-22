@@ -494,7 +494,7 @@ function setMeta(T, r) {
   const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => { navigator.clipboard?.writeText(T.acc); toast('copied'); };
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
   const acts = document.createElement('span'); acts.className = 'metaacts'; acts.setAttribute('role', 'group'); acts.setAttribute('aria-label', 'reply actions');
-  const dot = () => { const d = document.createElement('span'); d.textContent = ' · '; d.setAttribute('aria-hidden', 'true'); return d; };   // a separator is punctuation, not a word to read out
+  const dot = () => { const d = document.createElement('span'); d.textContent = '·'; d.setAttribute('aria-hidden', 'true'); return d; };   // a separator is punctuation, not a word to read out; the gap around it is the row's own
   acts.append(quote, dot(), copy, dot(), again);
   T.meta.append(dot(), acts);
 }
