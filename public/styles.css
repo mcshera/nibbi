@@ -128,6 +128,8 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
    button over a code block, which is worse than no button at all. */
 @media (hover: none) { .meta { opacity: .7; } .nib .said pre .copycode { opacity: 1; } }
 .meta button { font: inherit; color: var(--ink-3); background: none; border: 0; padding: 0; cursor: pointer; } .meta button:hover { color: var(--ink); }
+.meta .metaacts { display: inline-flex; align-items: baseline; gap: 0; }
+
 
 /* actions nibbi offers after a reply (contextual) */
 .acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0 2px; }
@@ -178,6 +180,8 @@ body.busy .pill { border-color: var(--veil-hover); }
 /* send: an ink squircle */
 .pill .send { flex: none; width: var(--touch); height: var(--touch); border-radius: var(--r-panel); border: 0; background: var(--ink); display: grid; place-items: center; padding: 0; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
 .pill .send:hover { transform: scale(1.05); } .pill .send:active { transform: scale(.96); }
+/* The same press the send button takes, on the other controls that commit something. */
+.chip.armed:active, .planr .acts .chip:active { transform: scale(.96); }
 .pill.tall .dock, .pill.tall .send { align-self: flex-end; }   /* a multi-line field: the controls sit on its last line, not floating mid-height */
 .pill .send:disabled { opacity: .35; cursor: default; transform: none; }
 body.busy .pill .send { background: var(--ink-3); }
@@ -296,6 +300,7 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 
 
 /* ---------- jump to latest ---------- */
+.jump .jumpn { font-variant-numeric: tabular-nums; }
 .jump { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--feed-bottom) - 2px); z-index: var(--z-perch); display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 10px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--pill-bg); backdrop-filter: var(--glass-light); color: var(--ink-2); font: inherit; font-size: var(--type-fine); cursor: pointer; box-shadow: var(--e-raised); animation: arrive var(--t2) var(--ease) both; }
 .jump:hover { background: var(--ink); color: var(--ink-inverse); border-color: transparent; }
 .when { text-align: center; font-size: var(--type-meta); letter-spacing: .04em; color: var(--ink-3); margin: 6px 0 16px; }

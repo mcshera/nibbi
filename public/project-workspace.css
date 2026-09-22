@@ -6,6 +6,11 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-workspace { transition: opacity var(--t2) var(--ease), translate var(--t2) var(--ease); }
 @starting-style { .project-workspace:not([hidden]) { opacity: 0; translate: 0 10px; } }
 .project-workspace-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 0 12px; }
+/* The way out, on the thing you are looking at. */
+.project-close { flex: none; width: var(--touch); height: var(--touch); margin-right: -10px; border: 0; border-radius: 50%; background: transparent; color: var(--ink-3); font-size: var(--type-title); line-height: 1; cursor: pointer; transition: background var(--t1), color var(--t1); }
+.project-close:hover { background: var(--veil-hover); color: var(--ink); }
+.project-close:active { background: var(--veil-press); }
+.project-close:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .project-workspace h1 { margin: 0; font-size: var(--type-display); line-height: 1.25; letter-spacing: -.025em; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .project-workspace h1:focus { outline: none; }
 .project-workspace h2 { font-size: var(--type-field); font-weight: 550; line-height: 1.4; margin: 0 0 8px; }

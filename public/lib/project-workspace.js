@@ -37,12 +37,17 @@ const lobbyWidth = matchMedia('(min-width: 900px)');
 const byDecision = runs => DECISION_ORDER.flatMap(group => runs.filter(run => buildListGroup(run) === group));
 
 /** Section views retain their own drafts, filters and reading position. The app owns commands. */
-export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate, onAction, onData, load = loadProjectSection } = {}) {
+export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate, onAction, onData, onClose, load = loadProjectSection } = {}) {
   const el = node('section', 'project-workspace'); el.id = 'project-workspace'; el.hidden = true;
   el.setAttribute('aria-labelledby', 'project-workspace-title');
   const head = node('header', 'project-workspace-head');
   const title = node('h1', '', 'Project'); title.id = 'project-workspace-title'; title.tabIndex = -1;
-  head.append(title);
+  const back = node('button', 'project-close'); back.type = 'button';
+  back.setAttribute('aria-label', 'Close and return to the conversation');
+  back.title = 'Back to the conversation (Esc)';
+  back.textContent = '×';
+  back.addEventListener('click', () => onClose?.());
+  head.append(title, back);
   const body = node('div', 'project-workspace-body'); body.tabIndex = 0;
   body.setAttribute('role', 'region'); body.setAttribute('aria-label', 'Project content');
   const notice = node('div', 'project-notice'); notice.setAttribute('role', 'status'); notice.hidden = true;
@@ -626,6 +631,13 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   // click, when activeElement is briefly body; replacing rows there drops clicks.
   // Builds keys, matching the chat reviewer: move through the queue and decide without
   // reaching for the mouse. Typing anywhere in the workspace keeps its own keys.
+  // Escape leaves the section, from anywhere inside it. The app's global keys stand down within the
+  // workspace because it owns j/k/a/x/p, so this is where Escape has to live for a focused reader.
+  el.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (content.querySelector('.project-confirmation:not([hidden])')) return;   // one that is actually asking owns its own Cancel
+    event.preventDefault(); event.stopPropagation(); onClose?.();
+  });
   body.addEventListener('keydown', event => {
     if (!current || current.section !== 'builds' || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
     const target = event.target;
@@ -647,7 +659,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     if (event.key === 'p') { const play = stage?.querySelector('.project-build-play'); if (play && !play.disabled) { play.click(); event.preventDefault(); } return; }
     if (event.key === 'a') { if (press('Approve & merge')) { event.preventDefault(); content.querySelector('.project-confirmation .project-action')?.focus({ preventScroll: true }); } return; }
     if (event.key === 'x') { if (press('Discard')) { event.preventDefault(); content.querySelector('.project-confirmation .project-action')?.focus({ preventScroll: true }); } return; }
-    // Escape is not ours: the sidebar claims it first and closes itself. A confirmation is
+    // Escape is handled by the app, which owns what leaving a section means; a confirmation is
     // cancelled with its own Cancel button, and the queue is left with "All builds".
   });
   body.addEventListener('scroll', () => { if (current) getView().scroll = body.scrollTop; }, { passive: true });

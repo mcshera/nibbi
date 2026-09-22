@@ -89,6 +89,19 @@ try {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.margin-card:not([hidden])').count(), 0, 'Escape still closes an open card first');
   assert.equal(await page.evaluate(() => window.nibbiApp.state().turns.length), turnsBeforeEscape);
+  // A section had no way out of itself: the only exits were a floating button in the far corner and
+  // a tab in a bar that is closed by default on a phone.
+  await page.locator('.margin-tab[data-margin-tab="builds"], [data-project-section="builds"]').first().click();
+  await page.locator('#project-workspace:not([hidden])').waitFor();
+  await page.locator('.project-close').click();
+  await page.waitForFunction(() => document.querySelector('#project-workspace').hidden, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => document.body.classList.contains('project-view')), false, 'the close control returns to the conversation');
+  await page.locator('.margin-tab[data-margin-tab="builds"], [data-project-section="builds"]').first().click();
+  await page.locator('#project-workspace:not([hidden])').waitFor();
+  await page.locator('.project-workspace-body').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('#project-workspace').hidden, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => document.body.classList.contains('project-view')), false, 'and Escape leaves a section from inside it');
   await page.evaluate(() => window.nibbiApp.send('/goal finish M1'));
   const goal = await (await fetch(fixture.base + '/nibbi/goal')).json(); assert.equal(goal.fixture.focus, 'M1: Fixture'); assert.equal(goal.fixture.mode, 'stage');
   await page.evaluate(() => window.nibbiApp.send('/goal stop'));

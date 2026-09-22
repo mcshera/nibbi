@@ -82,7 +82,7 @@ if (S.voiceOn) body.classList.add('voice-on');
 let visibleProjectIds = [];
 const projectSummaries = createProjectSummaryStore({ onChange: () => syncMargins() });
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
-const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
+const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: () => closeProjectView(), onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
 const chatLauncher = document.createElement('button');
 chatLauncher.type = 'button'; chatLauncher.id = 'project-chat-launcher'; chatLauncher.className = 'project-chat-launcher';
 chatLauncher.textContent = 'Chat with Nibbi'; chatLauncher.hidden = true; chatLauncher.setAttribute('aria-controls', 'pill');
@@ -233,12 +233,19 @@ scheduleIdleTimers();
 setInterval(() => { for (const T of S.turns) if (T.timeEl) T.timeEl.textContent = relTime(T.at); }, 60000);
 
 /* ------------------------------------------------------------------ scrolling: chronological, pinned to the bottom until you scroll up */
-const jumpBtn = document.createElement('button'); jumpBtn.id = 'jump'; jumpBtn.type = 'button'; jumpBtn.className = 'jump'; jumpBtn.hidden = true; jumpBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M9 3.5v11M9 14.5l-5-5M9 14.5l5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> latest'; document.body.appendChild(jumpBtn);
+const jumpBtn = document.createElement('button'); jumpBtn.id = 'jump'; jumpBtn.type = 'button'; jumpBtn.className = 'jump'; jumpBtn.hidden = true; jumpBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M9 3.5v11M9 14.5l-5-5M9 14.5l5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> <span class="jumpn">latest</span>'; document.body.appendChild(jumpBtn);
 S.stick = true;
-let scrollRaf = 0;
+let scrollRaf = 0, unread = 0;
+const jumpLabel = jumpBtn.querySelector('.jumpn');
+function noteUnread(n) {
+  if (S.stick || jumpBtn.hidden) { unread = 0; jumpLabel.textContent = 'latest'; return; }
+  unread += n;
+  jumpLabel.textContent = unread ? unread + ' new' : 'latest';
+  jumpBtn.setAttribute('aria-label', unread ? unread + ' new below — jump to the latest' : 'Jump to the latest');
+}
 function scrollFeed(force) { if (!force && !S.stick) return; if (scrollRaf) return; scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; feed.scrollTop = feed.scrollHeight; }); }
-feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; } }, { passive: true });
-jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); };
+feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; if (atBottom) noteUnread(0); } }, { passive: true });
+jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); };
 new MutationObserver(() => scrollFeed(false)).observe(feed, { childList: true, subtree: true, characterData: true });
 new ResizeObserver(() => scrollFeed(false)).observe(feed);
 
@@ -300,7 +307,11 @@ function newTurn(text, images, at) {
   nibBody.append(bubble, meta);
   nib.append(nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
-  feed.appendChild(turn); S.stick = true; scrollFeed(true);
+  feed.appendChild(turn);
+  // Your own message always pulls the feed down. Something that arrived on its own while you were
+  // reading further up does not: it waits, and the jump button says how much of it there is.
+  if (text === null && !S.stick) noteUnread(1);
+  else { S.stick = true; scrollFeed(true); }
   const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null, flush: null, tail: null, stable: 0 };
   S.turns.push(T);
   return T;
@@ -482,7 +493,10 @@ function setMeta(T, r) {
   const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; focusComposer(); autosize(); };
   const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => { navigator.clipboard?.writeText(T.acc); toast('copied'); };
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
-  T.meta.append(document.createTextNode(' · '), quote, document.createTextNode(' · '), copy, document.createTextNode(' · '), again);
+  const acts = document.createElement('span'); acts.className = 'metaacts'; acts.setAttribute('role', 'group'); acts.setAttribute('aria-label', 'reply actions');
+  const dot = () => { const d = document.createElement('span'); d.textContent = ' · '; d.setAttribute('aria-hidden', 'true'); return d; };   // a separator is punctuation, not a word to read out
+  acts.append(quote, dot(), copy, dot(), again);
+  T.meta.append(dot(), acts);
 }
 function addActs(T, acts, opts) {
   if (!acts.length) return;
@@ -1975,7 +1989,12 @@ function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer 
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
-function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
+/* Writing height, reading scrollHeight and then relaying the whole shell is a forced layout, and it
+   ran on every keystroke — including while a reply streamed into the feed above. Once a frame.
+   The handle lives on S because autosize is hoisted and called during start-up, before a
+   module-level binding declared down here would exist. */
+function autosize() { if (S.autosizeRaf) return; S.autosizeRaf = requestAnimationFrame(() => { S.autosizeRaf = 0; resizeField(); }); }
+function resizeField() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
 ask.addEventListener('focus', () => { layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
@@ -2016,6 +2035,9 @@ pill.addEventListener('submit', (e) => {
 addEventListener('keydown', (e) => {
   if (keyboardInputOwned(e, true)) return;
   if (e.altKey && e.code === 'Space') { e.preventDefault(); if (!e.repeat && !window.__TAURI__?.event) void toggleListen(); return; }
+  // Escape leaves a project section, wherever focus happens to be inside it — unless something in
+  // it is asking for confirmation, which owns its own Cancel.
+  if (e.key === 'Escape' && S.projectView && !$('#project-workspace')?.querySelector('.project-confirmation:not([hidden])')) { e.preventDefault(); closeProjectView(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.activeElement !== ask && !e.repeat && S.turns.length && !S.busy) { const map = { d: /^(diff|what changed)$/, p: /^preview$/, a: /^approve/, s: /^stop/, o: /^open/ }; const rx = map[e.key.toLowerCase()]; if (rx) { const chip = [...S.turns[S.turns.length - 1].body.querySelectorAll('.acts .chip')].find((c) => rx.test(c.textContent)); if (chip) { e.preventDefault(); chip.click(); chip.focus(); return; } } }
   if (e.key === ' ' && e.target instanceof Element && e.target.closest('button, summary, [role="button"], a[href]')) return;   // Space activates the focused control (a step's summary, a chip); it is not a character for the composer
