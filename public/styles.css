@@ -415,14 +415,18 @@ body.busy.steer-ready .pill .send::after { display: none; }
    The window itself carries Liquid Glass; everything here is the paper laid over it.
    Alphas come from a contrast budget measured against the worst case, a black desktop
    wallpaper. The budget deliberately ignores the native tint, because the surface cannot
-   verify that the glass material is present: the paper veil alone must carry it. At .78
-   over black the page reads rgb(191,189,184), where #151413 is 13.4:1 and the muted ink
-   has to darken from #6f6b65 (2.7:1, failing) to #4f4b46 (4.6:1). With the window's glass
-   behind it the real values sit higher still.
-   The budget itself now lives with the tokens: body.glass in tokens.css redefines
-   --paper, --paper-raised, --paper-sunken, --pill-bg, --chip-bg, --surface and
-   --ink-3, so every surface that reads those follows the shell automatically and
-   there is nothing left here to keep in sync. */
+   verify that the glass material is present: the paper veil alone must carry it. With the
+   window's glass behind it the real values sit higher still.
+
+   That budget was rebuilt on APCA in 2026-09. The old note here claimed .78 was fine
+   because #151413 measured 13.4:1 over the composite; it is 9.8:1, and by APCA it is
+   Lc 67 — below the Lc 75 body-text band. Darkening the ink could not have fixed that:
+   at .78 the composite is rgb(191,189,184), where pure black tops out at Lc 68. So the
+   paper moved instead, to .86, the lowest alpha at which the whole ramp clears.
+
+   The budget now lives with the tokens: body.glass in tokens.css redefines --paper,
+   --paper-raised, --paper-sunken, --pill-bg, --chip-bg and --surface, so every surface
+   that reads those follows the shell automatically. The ink ramp no longer forks. */
 html.glass, body.glass { background-color: transparent; }
 /* the one thing a token cannot carry: the opaque panel gains a blur it does not have on paper */
 body.glass .dock-menu { backdrop-filter: var(--glass-heavy); }

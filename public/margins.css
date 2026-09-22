@@ -1,8 +1,9 @@
 /* 5c2 project rings + 5c1 glyphs + 5c3 paper cards. */
 .margin-rail, .margin-card {
   --margin-ink: var(--ink, #151413);
-  /* #6f6b65 on the bar's var(--paper-bar) is 4.33:1 — under the floor at the 10-12px this type is used at. */
-  --margin-muted: var(--ink-3);   /* tokens.css forks --ink-3 to #5f5b55 in this scope */
+  /* the bar no longer forks its muted ink: the derived --ink-3 is Lc 69 on var(--paper-bar),
+     clear of the Lc 65 band for this 10-12px type. see tokens.css and design/LANGUAGE.md 2.5. */
+  --margin-muted: var(--ink-3);
   --margin-line: var(--veil-press);
   font: var(--type-fine)/var(--leading-body) var(--font);
   color: var(--margin-ink);
@@ -28,7 +29,7 @@
 .margin-close:active { background: var(--veil-press); }
 .margin-card p { margin: 6px 0; overflow-wrap: anywhere; }
 .margin-muted, .margin-project-stats { color: var(--margin-muted); font-size: var(--type-meta); }
-.margin-goal { color: var(--ink-2, #3a3835); }
+.margin-goal { color: var(--ink-2, #383633); }
 .margin-progress { height: 4px; border-radius: var(--r-bar); background: var(--veil-hairline); margin: 9px 0 12px; overflow: hidden; }
 .margin-progress > span { display: block; height: 100%; background: var(--margin-ink); border-radius: inherit; }
 .margin-field-label { color: var(--margin-muted); font-size: var(--type-meta); }
@@ -37,7 +38,7 @@
 .margin-mode[aria-pressed="true"] { background: var(--paper-raised); color: var(--margin-ink) !important; box-shadow: var(--e-seated); }
 .margin-mode:last-child[aria-pressed="true"] { background: var(--margin-ink); color: var(--ink-inverse) !important; }
 .margin-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
-.margin-pill { min-height: 32px; padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--margin-line); background: var(--bed); color: var(--ink-2, #3a3835) !important; font-size: var(--type-meta) !important; }
+.margin-pill { min-height: 32px; padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--margin-line); background: var(--bed); color: var(--ink-2, #383633) !important; font-size: var(--type-meta) !important; }
 .margin-pill:hover:not(:disabled) { background: var(--bed-hover); border-color: var(--veil-strong); }
 .margin-pill:active:not(:disabled) { background: var(--bed-press); }
 .margin-primary { background: var(--margin-ink); color: var(--ink-inverse) !important; border-color: transparent; }
@@ -51,7 +52,7 @@
 .margin-metadata { margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--margin-line); }
 .margin-data-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 4px 0; }
 .margin-data-row dt { flex: none; color: var(--margin-muted); font-size: var(--type-meta); }
-.margin-data-row dd { margin: 0; color: var(--ink-2, #3a3835); text-align: right; overflow-wrap: anywhere; min-width: 0; font-variant-numeric: tabular-nums; }
+.margin-data-row dd { margin: 0; color: var(--ink-2, #383633); text-align: right; overflow-wrap: anywhere; min-width: 0; font-variant-numeric: tabular-nums; }
 .margin-pref { width: 100%; min-height: 36px; border: 0; border-bottom: 1px solid var(--veil-hover); background: transparent; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; text-align: left; }
 .margin-pref:hover:not(:disabled) { background: var(--veil-well); }
 .margin-pref:active:not(:disabled) { background: var(--veil-hover); }

@@ -8,7 +8,7 @@
   border: 1px solid var(--line, var(--veil-hairline));
   border-radius: var(--r-surface);
   background: var(--paper-raised);
-  color: var(--ink-2, #3a3835);
+  color: var(--ink-2, #383633);
   box-shadow: var(--e-dialog), var(--e-highlight);
   font: var(--type-body)/var(--leading-body) var(--font);
   overflow: auto;
@@ -69,8 +69,8 @@
 .platform-panel select { border-radius: var(--r-control); min-height: 38px; }
 .platform-panel input[type=checkbox] { accent-color: var(--ink, #151413); margin: 0 8px 0 0; vertical-align: middle; }
 .platform-panel textarea { resize: vertical; min-height: 100px; }
-.platform-panel .platform-project { margin: 0 0 14px; color: var(--ink-3, #6f6b65); }
-.platform-panel .platform-project select { display: block; width: 100%; margin-top: 6px; color: var(--ink-2, #3a3835); }
+.platform-panel .platform-project { margin: 0 0 14px; color: var(--ink-3, #5f5c57); }
+.platform-panel .platform-project select { display: block; width: 100%; margin-top: 6px; color: var(--ink-2, #383633); }
 .platform-panel .platform-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .platform-panel .platform-roles > :only-child, .platform-panel .platform-commands, .platform-panel .platform-web, .platform-panel .platform-mcp-server, .platform-panel .platform-mcp-form { grid-column: 1 / -1; }
 .platform-panel .platform-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
@@ -90,7 +90,7 @@
 .platform-panel .platform-reveal > pre { font-size: var(--type-control); user-select: all; -webkit-user-select: all; }
 .platform-panel .platform-connections { border-top: 1px solid var(--line, var(--veil-hairline)); padding-top: 14px; margin-bottom: 12px; }
 .platform-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--veil-well); padding: 14px; border: 1px solid var(--line, var(--veil-hairline)); border-radius: var(--r-card); max-height: 45vh; overflow: auto; font: var(--type-fine)/1.65 var(--font-mono); }
-.platform-panel small { display: block; color: var(--ink-3, #6f6b65); font-size: var(--type-fine); overflow-wrap: anywhere; }
+.platform-panel small { display: block; color: var(--ink-3, #5f5c57); font-size: var(--type-fine); overflow-wrap: anywhere; }
 .platform-panel article { border-bottom: 1px solid var(--line, var(--veil-hairline)); padding: 14px 0; overflow-wrap: anywhere; }
 .platform-panel .panel-message { flex: none; max-height: 25dvh; overflow: auto; margin: 0 0 14px; padding: 10px 12px; border: 1px solid rgba(122,58,46,.18); border-radius: var(--r-card); color: var(--fail-quiet); background: var(--fail-wash); }
 .platform-panel .panel-message:empty { margin: 0; padding: 0; border: 0; }

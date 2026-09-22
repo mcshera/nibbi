@@ -4,10 +4,9 @@
  * single source for every surface: styles.css, margins.css, platform.css,
  * project-workspace.css and voice.css now read tokens rather than literals.
  *
- * The drift register in design/LANGUAGE.md 15 has been applied. What remains open
- * is one thing only: the muted-ink ramp still forks per surface (see body.glass and
- * the rail scope at the end of this file). Unifying it needs an APCA rebuild, which
- * is a deliberate visual change, not a cleanup — LANGUAGE.md 15 has the numbers.
+ * The drift register in design/LANGUAGE.md 15 is fully applied, including the ink
+ * ramp, which is now derived on APCA rather than picked by eye and patched per
+ * surface. tools/contrast-verify.mjs recomputes it on every `npm run verify`.
  *
  * Adding a value here is how you change the look of Nibbi. Adding a literal to a
  * component file is how you start the drift again.
@@ -20,11 +19,23 @@
   --paper-sunken: #fbfaf7;   /* diff bodies, file wells */
   --paper-bar: #ece8e0;      /* the workspace sidebar — the only surface darker than the page */
 
-  /* ------------------------------------------------------------------ ink */
+  /* ------------------------------------------------------------------ ink
+   * One ramp, no forks. Derived, not picked: constant OKLCH hue 78, chroma
+   * C = 0.024L - 0.002 (the relation the old values already followed), and
+   * even lightness steps of 0.142. Each step clears its APCA band on every
+   * opaque surface — page, raised paper, sunken paper and the workspace bar:
+   *
+   *   token     band    page    raised   sunken   bar
+   *   --ink     Lc 90   Lc 97   Lc 101   Lc 102   Lc 92
+   *   --ink-2   Lc 75   Lc 90   Lc  93   Lc  95   Lc 84
+   *   --ink-3   Lc 65   Lc 75   Lc  79   Lc  80   Lc 69
+   *   --ink-4   Lc 45   Lc 57   Lc  60   Lc  61   Lc 51
+   *
+   * tools/contrast-verify.mjs recomputes this and fails if it stops holding. */
   --ink: #151413;
-  --ink-2: #3a3835;
-  --ink-3: #6f6b65;          /* forks to #5f5b55 on --paper-bar and #4f4b46 under .glass */
-  --ink-4: #8a857c;
+  --ink-2: #383633;
+  --ink-3: #5f5c57;
+  --ink-4: #8a857d;
   --ink-inverse: #f5f2ec;    /* text on filled ink; absorbed #f5f2ea and #fff */
   --ink-terminal: #1b1a18;   /* ink as a surface: code blocks, run logs */
   --ink-terminal-fg: #ece8df;
@@ -193,20 +204,24 @@
  * the surface cannot verify the native material is present, so the budget is
  * measured against a black desktop. see LANGUAGE.md 2.5. */
 body.glass {
-  --paper: rgba(245, 242, 236, .78);
+  --paper: rgba(245, 242, 236, .86);
   --paper-raised: rgba(250, 248, 243, .90);
   --paper-sunken: rgba(251, 250, 247, .90);
-  --pill-bg: rgba(250, 248, 243, .78);
-  --chip-bg: rgba(250, 248, 243, .82);
+  --pill-bg: rgba(250, 248, 243, .86);
+  --chip-bg: rgba(250, 248, 243, .86);
   --surface: rgba(250, 248, 244, .86);
-  --ink-3: #4f4b46;          /* #6f6b65 is 2.7:1 here; this is 4.6:1 */
+  /* No ink fork: the ramp above is unchanged here. What changed is the paper.
+   * At .78 over a black desktop the composite is rgb(191,189,184), where PURE
+   * BLACK tops out at Lc 68 — the body-text band was unreachable by any colour,
+   * so darkening the ink could never have fixed it, and the old #4f4b46 fork
+   * only moved the muted step while primary text sat at Lc 67. .86 is the
+   * lowest alpha at which the whole ramp clears the glass budget, which runs
+   * one band below the opaque one: Lc 75 / 65 / 55 / 35. A deliberately
+   * translucent surface buys its translucency with exactly one band, and says
+   * so rather than quietly failing. tools/contrast-verify.mjs enforces both. */
 }
 
-/* the workspace bar is the one surface darker than the page, so muted ink
- * darkens there too: #6f6b65 on #ece8e0 is 4.33:1, under the floor at the
- * 10-12px this type is used at. */
-.margin-rail,
-.margin-card,
-.workspace-sidebar {
-  --ink-3: #5f5b55;
-}
+/* The workspace bar used to fork --ink-3 to #5f5b55, because #6f6b65 was
+ * 4.33:1 there and WCAG 2 wanted 4.5:1. The fork is gone: the derived --ink-3
+ * (#5f5c57) lands within 0.003 OKLCH lightness of that fork, so the ramp now
+ * simply is what the bar always needed. One value, four surfaces. */

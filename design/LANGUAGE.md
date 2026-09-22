@@ -22,15 +22,15 @@ Measured before and after applying §15:
 |---|---|---|---|
 | font-size literals | 20 distinct | **0** | tokens only |
 | border-radius literals | 15 distinct | **1** (`30px`, the phone dock) | tokens only |
-| hex colours | 45 distinct | **7** | see below |
+| hex colours | 45 distinct | **5** | see below |
 | ink-veil alphas | 25 distinct | **1** (a zero-size shadow that draws nothing) | tokens only |
 | z-index literals | 12 anonymous | **2** (both in a local stacking context, deliberately) | named rungs only |
 | backdrop blur literals | 6 distinct | **0** | tokens only |
 | custom properties declared | 16 | **125** | — |
 
-The seven surviving hexes are all legitimate: `#151413` / `#3a3835` / `#6f6b65` as `var(--ink, #151413)` fallbacks, `#5f5b55` and `#4f4b46` inside explanatory comments, `#000` twice inside a `mask-image` gradient (a mask, not a colour), and `#fff` once on the QR code, which must be true white to scan.
+The five surviving hexes are all legitimate: `#151413`, `#383633` and `#5f5c57` as `var(--ink, …)` fallbacks (kept in step with the ramp), `#000` inside a `mask-image` gradient — a mask channel, not a colour — and `#fff` once on the QR code, which must be true white to scan.
 
-Verified after the change: `npm run build` green, `npm run test:unit` 221/221, `npm run verify` — both fixture-backed browser regression suites pass.
+Verified after the change: `npm run build` green, `npm run test:unit` 221/221, `npm run verify` — the contrast contract plus both fixture-backed browser regression suites pass.
 
 ---
 
@@ -44,7 +44,7 @@ These are read back out of the code and `docs/PERSONALITY.md`. They are the reas
 4. **State is spoken, not signalled.** From the sidebar lab: *"Leave the status dots — Nibbi says attention in words."* Dots carry presence and rhythm; words carry meaning.
 5. **Nothing animates to entertain.** Motion exists to explain where something came from (`arrive`), that work is live (`think`, `pulse`), or that a control took the press (`scale(.96)`). The character is the only element allowed expressive motion, and it is contracted separately.
 6. **Every control is reachable by keyboard and 44px under a finger.** Already enforced at `≤640px` and `pointer: coarse`. Non-negotiable for new work.
-7. **A surface that cannot verify its backdrop must carry contrast alone.** The glass budget at `public/styles.css:425` is the model: assume the worst backdrop, measure, and let the native material be a bonus.
+7. **A surface that cannot verify its backdrop must carry contrast alone.** The glass budget at `public/styles.css:413` is the model: assume the worst backdrop, measure, and let the native material be a bonus.
 
 ---
 
@@ -57,14 +57,14 @@ Two substances. **Paper** is warm, slightly yellow, never white. **Ink** is warm
 | token | value | role | observed |
 |---|---|---|---|
 | `--paper` | `#f5f2ec` | the page | ✅ |
-| `--paper-raised` | `#faf8f3` | menus, panels, cards — paper lifted off the page | ⚠️ drifts to `#faf8f4` in `margins.css` |
+| `--paper-raised` | `#faf8f3` | menus, panels, cards — paper lifted off the page | merged from `#faf8f4` |
 | `--paper-sunken` | `#fbfaf7` | diff bodies, file wells — paper pressed in | ✅ |
 | `--paper-bar` | `#ece8e0` | the workspace sidebar; the only surface darker than the page | ✅ |
 | `--ink` | `#151413` | primary text, filled controls, the character | ✅ |
-| `--ink-2` | `#3a3835` | secondary text, body copy in dense surfaces | ✅ |
-| `--ink-3` | `#6f6b65` | muted — labels, timestamps, counts | ⚠️ fails contrast in two contexts, see 2.5 |
-| `--ink-4` | `#8a857c` | faintest — step dots at rest, hunk headers, disabled marks | ✅ |
-| `--ink-inverse` | `#f5f2ec` | text on filled ink (toast, hovered chip, ship segment) | ⚠️ drifts to `#f5f2ea` in 3 places |
+| `--ink-2` | `#383633` | secondary text, body copy in dense surfaces | derived, §2.5 |
+| `--ink-3` | `#5f5c57` | muted — labels, timestamps, counts | derived, §2.5 |
+| `--ink-4` | `#8a857d` | faintest — step dots at rest, hunk headers, disabled marks | derived, §2.5 |
+| `--ink-inverse` | `#f5f2ec` | text on filled ink (toast, hovered chip, ship segment) | merged from `#f5f2ea` and `#fff` |
 | `--ink-terminal` | `#1b1a18` | code blocks and run logs — ink as a *surface*, not as text | ✅ |
 | `--ink-terminal-fg` | `#ece8df` | paper on that surface | ✅ |
 | `--ink-faint` | `#c9c4bb` | a dot at rest — presence without state | merged from `#cfcac1` |
@@ -74,7 +74,7 @@ Two substances. **Paper** is warm, slightly yellow, never white. **Ink** is warm
 
 ### 2.2 The ink veil
 
-Translucent ink over paper is how Nibbi builds every hover, well and hairline. There are currently **25 distinct alphas** of `rgba(21,20,19,…)`. Collapse to seven:
+Translucent ink over paper is how Nibbi builds every hover, well and hairline. There were **25 distinct alphas** of `rgba(21,20,19,…)`; they are now seven:
 
 | token | alpha | role |
 |---|---|---|
@@ -139,19 +139,33 @@ The character accepts a tint (`u_tint`, `u_tintAmt` in `public/nibbi.js`) to ren
 
 **Rule.** A tint never appears outside the character. A fixer's colour must not leak into its card, its chip, or its text — those stay ink, and the card is identified by name.
 
-### 2.5 Contrast contract
+### 2.5 Contrast contract — the derived ramp
 
-Floors, by the model that fits the surface:
+The ramp is **computed, not picked**. `tools/contrast-verify.mjs` recomputes it from `public/tokens.css` on every `npm run verify` and fails if a step stops clearing its band, so it cannot drift back into hand-chosen values.
 
-| context | floor | model | status |
-|---|---|---|---|
-| body text on paper | 7:1 | WCAG 2 AA+ | `--ink` on `--paper` = 13.4:1 ✅ |
-| muted text ≥12px on paper | 4.5:1 | WCAG 2 AA | `--ink-3` on `#f5f2ec` ✅ |
-| muted text ≤11.5px | 4.5:1 minimum, measured per surface | WCAG 2 AA | ⚠️ `margins.css` already forks to `#5f5b55` because `--ink-3` is 4.33:1 on `#ece8e0` |
-| any text over glass | measured against a **black desktop**, not against the tint | WCAG 2 AA | ✅ documented at `styles.css:425`; `--ink-3` forks to `#4f4b46` |
-| text on translucent paper generally | — | **WCAG 2 is the wrong model here** | ⚠️ see below |
+**Construction.** Constant OKLCH hue **78**, chroma **C = 0.024L − 0.002** (the relation the old values already followed), even lightness steps of **0.142**. `--ink` is pinned at `#151413` because it is the character's ink, not a text-only value; the other three are solved.
 
-**The one recommendation that changes a decision.** WCAG 2's contrast ratio is a poor predictor for dark-warm text on light-warm translucent surfaces, which is most of Nibbi. [APCA](https://www.myndex.com/APCA/) models this correctly and [Huetone](https://huetone.ardov.me/) edits ramps against it. The `--ink-2/3/4` ramp was picked by eye and then patched twice (`#5f5b55`, `#4f4b46`) when it failed in context. Rebuilding it once as a measured APCA ramp — in [OKLCH](https://oklch.com/) so the lightness steps are perceptually even — removes both forks and makes the glass budget derivable rather than hand-measured.
+**Bands.** [APCA](https://www.myndex.com/APCA/) Lc, not WCAG 2 ratios — Nibbi is dark-warm ink on light-warm, often translucent paper, which is precisely where WCAG 2's ratio misreports. Lc 90 is the preferred body-text level, 75 the body-text minimum, 60 supporting text, 45 large or text-like marks, 30 the absolute floor.
+
+| token | band | page | raised | sunken | bar | glass paper | glass pill/chip |
+|---|---|---|---|---|---|---|---|
+| `--ink` | 90 / 75 glass | 97 | 101 | 102 | 92 | 78 | 81 |
+| `--ink-2` | 75 / 65 glass | 90 | 93 | 95 | 84 | 70 | 73 |
+| `--ink-3` | 65 / 55 glass | 75 | 79 | 80 | 69 | 56 | 58 |
+| `--ink-4` | 45 / 35 glass | 57 | 60 | 61 | 51 | 37 | 40 |
+
+The glass column runs **one band below** the opaque budget. That is the deal a deliberately translucent surface makes, and stating it is better than quietly failing the opaque budget, which is what was happening.
+
+**What the rebuild found.**
+
+1. **The old ramp was not a ramp.** Hue drifted 67.7 → 82.4 across the four values and the lightness steps were 0.150 / 0.188 / 0.088 — the gap between `--ink-3` and `--ink-4` was half the gap above it. Constant hue and even steps fix both.
+2. **The bar fork was unnecessary, and also correct.** WCAG 2 said `#6f6b65` was 4.33:1 on `#ece8e0` and forked it to `#5f5b55`. The derived `--ink-3` is `#5f5c57` — within **0.003** OKLCH lightness of that fork. The fork had been the right value all along; the ramp had simply never adopted it. One value now serves page, raised paper and bar.
+3. **The glass surface could not be fixed by ink at all.** At `--paper` alpha `.78` over a black desktop the composite is `rgb(191,189,184)`, where **pure black tops out at Lc 68** — the Lc 75 body-text band was unreachable by *any* colour. The old `#4f4b46` fork darkened the muted step while primary text sat at Lc 67, below body-text level, and the WCAG-based budget never noticed. **The fix was more paper, not darker ink:** `.86` is the lowest alpha at which the whole ramp clears, so `--paper`, `--pill-bg` and `--chip-bg` under `.glass` all moved to `.86`, and both ink forks retired.
+4. **A stale figure in the old budget.** The comment at the glass block claimed `#151413` measured 13.4:1 over the composite. It is 9.8:1. Nothing was broken by it — the value passes either way — but it was the number the budget was being justified with.
+
+**What visibly changed.** `--ink-2` moved 0.8% in lightness and `--ink-4` by one hex digit; both are invisible. `--ink-3` darkened 5.4% (`#6f6b65` → `#5f5c57`, 4.74:1 → 5.96:1 on paper) — every muted label, timestamp and count is slightly firmer, matching what the workspace bar already showed. And the desktop shell is less translucent at `.86` than at `.78`.
+
+**Still open.** The glass budget is measured against a pure-black desktop wallpaper and deliberately ignores the native Liquid Glass tint, because the surface cannot verify the material is present. That is conservative by design; real backdrops read higher. If that assumption is ever relaxed, `.78` becomes viable again and `tools/contrast-verify.mjs` is where the new floor goes.
 
 ### 2.6 Dark
 
@@ -502,7 +516,7 @@ Already met, and worth stating so it stays met:
 
 ## 15. Drift register — applied
 
-Everything found that was the same intent rendered two ways. **11 of 12 rows are applied**; row 6 is applied in part, for a stated reason.
+Everything found that was the same intent rendered two ways. **All 12 rows are applied.**
 
 | # | drift | fix | status |
 |---|---|---|---|
@@ -511,7 +525,7 @@ Everything found that was the same intent rendered two ways. **11 of 12 rows are
 | 3 | raised paper `#faf8f3` in three places, `#faf8f4` in `margins.css` | `--paper-raised` | ✅ |
 | 4 | inverse ink `#f5f2ec` in some places, `#f5f2ea` in three, `#fff` in three more | `--ink-inverse` | ✅ |
 | 5 | toast shadow black, every other shadow ink | `--e-floating` | ✅ |
-| 6 | `--ink-3` forked twice by hand (`#5f5b55`, `#4f4b46`) | forks are now measured, scoped token overrides in `tokens.css`, not literals patched into two files | ◐ partial — see below |
+| 6 | `--ink-3` forked twice by hand (`#5f5b55`, `#4f4b46`) | ramp rebuilt on APCA: constant hue, even steps, **both forks retired**; the glass surface fixed with paper alpha `.86` rather than darker ink | ✅ §2.5 |
 | 7 | 25 ink alphas where 7 would do | `--veil-*`, 25 → 1 | ✅ |
 | 8 | 20 font sizes where 10 would do | `--type-*`, 20 → 0 literals | ✅ |
 | 9 | 15 radii where 8 would do | `--r-*`, 15 → 1 literal | ✅ |
@@ -520,29 +534,6 @@ Everything found that was the same intent rendered two ways. **11 of 12 rows are
 | 12 | `margins.css` wrote `220ms` literally instead of `--t2` | uses the token | ✅ |
 
 Two families were found while applying the register and are now documented rather than left loose: the opaque interaction beds (§2.2b, eight near-identical warm greys across two files) and the elevation ladder's one horizontal shadow, `--e-rail`.
-
-### Row 6, and the decision it needs
-
-The *drift* is fixed: the two forks are no longer hand-patched literals sitting in two unrelated files, they are scoped overrides next to the measurement that justifies them. What is **not** done is unifying them into one value, and that is deliberate, because the numbers make it a design decision rather than a cleanup.
-
-Measured (WCAG 2, which is the model the existing budget in `styles.css` uses, so these are comparable to the figures already in the code):
-
-| backdrop | `--ink-3` = `#6f6b65` | required for 4.5:1 |
-|---|---|---|
-| page `#f5f2ec` | 4.74:1 ✅ | — |
-| workspace bar `#ece8e0` | 4.33:1 ❌ | hence the `#5f5b55` fork |
-| glass at `.78` over a black desktop, i.e. `rgb(191,189,184)` | 2.70:1 ❌ | hence the `#4f4b46` fork |
-
-The glass case is roughly twice as demanding as the page. A single unified value therefore has to be about `#4f4b46`, which on the page reads **7.75:1** — muted text everywhere would go from comfortably quiet to nearly as dark as body copy. That trades away principle 3 for tidiness.
-
-Two honest options:
-
-1. **Keep the forks** (current state). Three measured values, each derived from its own surface, expressed as tokens. The ramp is legible; it is just not one number.
-2. **Rebuild the ramp on APCA** ([Huetone](https://huetone.ardov.me/), [OKLCH](https://oklch.com/)) and pick a muted step that clears the bar on all three by the model that actually fits translucent warm-on-warm. This is the only route to one value that does not simply darken everything, and it is a deliberate visual change that wants your eye on it before it lands.
-
-Option 2 is the recommendation, as a separate pass.
-
----
 
 ## 16. References
 
