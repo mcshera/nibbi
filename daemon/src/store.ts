@@ -15,7 +15,11 @@ export class RuntimeStore {
     this.db = new Database(join(directory, 'runtime.sqlite'));
     if (Number(this.db.pragma('user_version', { simple: true })) > 1) { this.db.close(); throw new Error('This runtime database needs a newer Nibbi version'); }
     this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = FULL');
+    // NORMAL, not FULL: FULL fsyncs the WAL on every insert, which during a streamed reply meant one
+    // flush per token and paced delivery by the disk. Under WAL, NORMAL still survives a process
+    // crash; only an OS crash or power loss can drop commits since the last checkpoint, and the one
+    // record that would notice — a claimed command — is already reconciled by interruptCommands().
+    this.db.pragma('synchronous = NORMAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(`
@@ -65,8 +69,10 @@ export class RuntimeStore {
     this.events.emit('event', result);
     return result;
   }
-  replay(after = 0, limit = 1000): RunEvent[] {
-    return (this.db.prepare('SELECT * FROM events WHERE id>? ORDER BY id LIMIT ?').all(after, Math.max(1, Math.min(limit, 5000))) as Array<{ id: number; run_id: string | null; project_id: string | null; type: string; at: number; payload: string }>).map(row => ({ id: row.id, runId: row.run_id ?? undefined, projectId: row.project_id ?? undefined, type: row.type, at: row.at, payload: JSON.parse(row.payload) }));
+  /** Excluded types are filtered in SQL, so the limit counts rows the caller will actually receive. */
+  replay(after = 0, limit = 1000, exclude: string[] = []): RunEvent[] {
+    const filter = exclude.length ? ' AND type NOT IN (' + exclude.map(() => '?').join(',') + ')' : '';
+    return (this.db.prepare('SELECT * FROM events WHERE id>?' + filter + ' ORDER BY id LIMIT ?').all(after, ...exclude, Math.max(1, Math.min(limit, 5000))) as Array<{ id: number; run_id: string | null; project_id: string | null; type: string; at: number; payload: string }>).map(row => ({ id: row.id, runId: row.run_id ?? undefined, projectId: row.project_id ?? undefined, type: row.type, at: row.at, payload: JSON.parse(row.payload) }));
   }
   cursor(): number { return (this.db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM events').get() as { id: number }).id; }
   claimCommand(id: string, input: unknown): { state: string; result?: unknown } {

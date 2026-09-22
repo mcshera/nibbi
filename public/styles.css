@@ -26,6 +26,7 @@ canvas#fx.grab { cursor: pointer; }
   position: fixed; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 48px));
   top: var(--feed-top); bottom: var(--feed-bottom); z-index: var(--z-feed);
   overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 8px 6px 28px; scroll-padding-bottom: 20px;
+  overflow-anchor: none;   /* scrollFeed pins the bottom itself; browser anchoring only fights it while a reply grows */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 40px), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 40px), transparent 100%);
   opacity: 0; pointer-events: none; transition: opacity var(--t3) var(--ease), top var(--t3) var(--ease);
@@ -38,7 +39,9 @@ body[data-mode="talk"] .feed { opacity: 1; pointer-events: auto; }
 body[data-mode="talk"].rest .feed { opacity: .38; }
 body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus-within { opacity: 1; }
 
-.turn { display: flex; flex-direction: column; gap: 6px; margin: 0 0 26px; animation: arrive var(--t3) var(--ease) both; transition: opacity var(--t3) var(--ease), font-size var(--t3) var(--ease); }
+/* No font-size transition: the reply's size comes from the fluid --type-read and never steps, so the
+   transition only ever armed a layout-animating property on the element receiving live text. */
+.turn { display: flex; flex-direction: column; gap: 6px; margin: 0 0 26px; animation: arrive var(--t3) var(--ease) both; transition: opacity var(--t3) var(--ease); }
 
 @keyframes arrive { from { opacity: 0; transform: translateY(10px); } }
 .turn.leave { animation: leave var(--t2) var(--ease) both; }

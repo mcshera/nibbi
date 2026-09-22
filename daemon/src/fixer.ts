@@ -21,6 +21,7 @@ import { connectionFor } from './github-repositories.js';
 import { isGithubBuild, reserveBuildBinding, prepareBuildBinding, githubBuildSummary } from './github-builds.js';
 import { boundedInput, summarizeResult, diffFor } from './tool-transcript.js';
 import { recordDelivery } from './progress.js';
+import { coalesceText } from './event-text.js';
 export { games, mergeTarget, registerProject, createProject, type GameCfg } from './projects.js';
 export { previewStart, previewStop, playStart, playStop, playStatus } from './previews.js';
 
@@ -202,7 +203,13 @@ async function executeFixer(f: Fixer, control: { abort: AbortController; handle?
   const timeout = setTimeout(() => control.abort.abort(new Error('Run exceeded 45-minute deadline')), 45 * 60_000);
   let lease: Awaited<ReturnType<typeof leaseTools>> | undefined;
   let remoteBaseUnavailable = false;
-  const event = (type: string, payload: Record<string, unknown>): void => { runtime().emit({ runId: f.id, projectId: f.game, type, payload: { ...payload, attemptId: f.attemptId } }); };
+  const writeEvent = (type: string, payload: Record<string, unknown>): void => { runtime().emit({ runId: f.id, projectId: f.game, type, payload: { ...payload, attemptId: f.attemptId } }); };
+  // A build's only record of what it said is these rows, and it wrote one per token.
+  const textRows = coalesceText(text => writeEvent('text.delta', { text }));
+  const event = (type: string, payload: Record<string, unknown>): void => {
+    if (type === 'text.delta') { textRows.push(String(payload.text ?? '')); return; }
+    textRows.flush(); writeEvent(type, payload);
+  };
   try {
     const cfg = games()[f.game]; if (!cfg || cfg.repo !== f.repo) throw new Error('Project configuration changed; dispatch a new run');
     mkdirSync(config.workDir, { recursive: true });
@@ -264,7 +271,7 @@ async function executeFixer(f: Fixer, control: { abort: AbortController; handle?
     f.status = signal.aborted ? (shuttingDown ? 'interrupted' : 'cancelled') : 'failed';
     f.summary = (error as Error).message; f.endedAt = new Date().toISOString(); save(f);
     await notify(f.id + ' ' + f.status + ': ' + f.summary + '. Worktree preserved.').catch(() => undefined);
-  } finally { clearTimeout(timeout); await lease?.close(); if (control.handle) await control.handle.cancel().catch(() => undefined); }
+  } finally { textRows.flush(); clearTimeout(timeout); await lease?.close(); if (control.handle) await control.handle.cancel().catch(() => undefined); }
 }
 export function stopFixer(id: string): string {
   const f = runtime().get<Fixer>('fixers', id); if (!f) throw new Error('Unknown run');

@@ -22,6 +22,7 @@ import { z } from 'zod';
 import { webTools } from './web-tools.js';
 import { mcpToolsFor } from './mcp-clients.js';
 import { boundedInput, summarizeResult, diffFor } from './tool-transcript.js';
+import { coalesceText } from './event-text.js';
 
 let dispatchNotify: (message: string) => Promise<void> = async () => undefined;
 export function setDispatchNotify(fn: (message: string) => Promise<void>): void { dispatchNotify = fn; }
@@ -147,10 +148,16 @@ export async function runTurn(prompt: string, onText?: (text: string) => void, c
     let fallback: FallbackInfo | undefined;
     // Governed calls are reported once, with input and result, by the lease hooks; the provider's own name-only notice for the same call is dropped.
     const governedName = (name: unknown): boolean => !!lease?.names.includes(String(name ?? '').replace(/^mcp__nibbi__/, ''));
+    const textRows = coalesceText(text => store.emit({ type: 'text.delta', runId, projectId: project, payload: { text } }));
     const emit = (type: string, payload: Record<string, unknown>): void => {
       if (type === 'tool.started' && payload.source !== 'governed' && governedName(payload.name)) return;
+      if (type === 'text.delta') {
+        // The surface hears the token first; the durable row is coalesced behind it.
+        const text = String(payload.text); onDelta?.(text); textRows.push(text); return;
+      }
+      // Buffered text belongs before the row that follows it, so the trail reads in order.
+      textRows.flush();
       store.emit({ type, runId, projectId: project, payload });
-      if (type === 'text.delta') onDelta?.(String(payload.text));
       if (type === 'tool.started') onTool?.(String(payload.name));
       if (type === 'tool.started' || type === 'tool.finished') options.onToolEvent?.({ ...payload, type });
     };
@@ -263,6 +270,7 @@ export async function runTurn(prompt: string, onText?: (text: string) => void, c
       store.put('lead-runs', runId, { id: runId, project, provider, status: abort.signal.aborted ? 'interrupted' : 'failed', error: message, endedAt: Date.now() });
       emit('turn.failed', { message }); throw error;
     } finally {
+      textRows.flush();   // a throw, a cancel or the deadline must not lose the last partial row
       control.phase = 'closed'; clearTimeout(guard); options.signal?.removeEventListener('abort', forwardAbort);
       if (control.handle) await control.handle.cancel().catch(() => undefined); await lease?.close(); active.delete(runId);
     }

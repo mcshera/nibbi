@@ -905,6 +905,11 @@ function refreshBadge() { const n = (S.fixers || []).filter((f) => f.status === 
 
 /* ------------------------------------------------------------------ host event stream: exact history of what fixers did, even while the window was closed */
 let evSource = null, evReady = false, evReplay = [];
+/* The cursor only has to survive the window closing, so it is written on a trailing tick rather
+   than on every event: a busy minute used to mean a synchronous localStorage write per event. */
+let cursorPending = null, cursorTimer = 0;
+function flushCursor() { if (cursorTimer) { clearTimeout(cursorTimer); cursorTimer = 0; } if (cursorPending !== null) { LS.set('eventCursor', cursorPending); cursorPending = null; } }
+function rememberCursor(id) { cursorPending = id; if (!cursorTimer) cursorTimer = setTimeout(() => { cursorTimer = 0; flushCursor(); }, 500); }
 function connectEvents() {
   if (S.demo || evSource || !Number.isSafeInteger(S.snapshotCursor)) return;
   // A first visit already has current state from the snapshot. Start there;
@@ -913,7 +918,9 @@ function connectEvents() {
   const after = Number.isSafeInteger(savedCursor) && savedCursor > 0 ? savedCursor : S.snapshotCursor;
   LS.set('eventCursor', after);
   const close = subscribeEvents({
-    after, onCursor: (id) => LS.set('eventCursor', id),
+    // text.delta arrives on the turn's own stream and has no branch below; excluding it keeps a
+    // streamed reply from crossing this connection twice and writing localStorage per token.
+    after, exclude: ['text.delta'], onCursor: rememberCursor,
     onReady: () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; refreshStatus(); scheduleProjectRefresh(); },
     onOffline: () => { evReady = false; setLink('offline'); projectSummaries.markStale(); },
     onEvent: (event) => {
@@ -1289,6 +1296,10 @@ async function send(text, images, opts) {
   if (!ok) T.nib.classList.add('error');
   if (result.proposal && typeof result.proposal === 'object') renderProposalCard(T, result.proposal, text);
   S.busy = false; body.classList.remove('busy'); S.abort = null; syncSendButton(); syncMargins();
+  // The settled turn is written now rather than on a later tick. A turn that finished after its
+  // thread was left belongs to that thread's saved state, which openThread already wrote.
+  if (S.liveThreadKey === activeThreadKey()) persistTranscript();
+  S.liveThreadKey = null;
   nibbi.lookFree();
   if (!ok) { nibbi.setMood('error'); addActs(T, T.local ? [{ label: 'try again', run: () => send(T.text) }] : errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
   else if (!result.aborted) { nibbi.setMood('happy'); interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); }
@@ -2111,16 +2122,24 @@ function restoreTranscript() {
   S.stick = true; scrollFeed(true); body.classList.add('rest');
 }
 function reattachFixerActs() { for (const T of S.turns) { if (!T.fixerId || T.body.querySelector('.acts')) continue; const f = fixerById(T.fixerId); if (f && (f.status === 'staged' || ACTIVE.has(f.status))) addActs(T, fixerActs(f), { sticky: true }); } }
-function reportState() { persistTranscript(); clearTimeout(stateTimer); stateTimer = setTimeout(() => { try { fetch('/nibbi/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(snapshot()), keepalive: true }).catch(() => {}); } catch { /* offline */ } }, 400); }
-new MutationObserver(reportState).observe(feed, { childList: true, subtree: true, characterData: true });
+/* The transcript is written when a turn settles, not on every mutation. A live reply changes the
+   feed once a frame, and only finished turns are ever serialised, so a per-mutation
+   JSON.stringify + localStorage.setItem of the whole history bought nothing and stalled the frame. */
+let persistTimer = 0;
+function schedulePersist(delay = 1000) {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => { persistTimer = 0; if (S.busy) { schedulePersist(2000); return; } persistTranscript(); }, delay);
+}
+function reportState() { clearTimeout(stateTimer); stateTimer = setTimeout(() => { try { fetch('/nibbi/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(snapshot()), keepalive: true }).catch(() => {}); } catch { /* offline */ } }, 400); }
+new MutationObserver(() => { reportState(); schedulePersist(); }).observe(feed, { childList: true, subtree: true, characterData: true });
 new MutationObserver(reportState).observe(chipsEl, { childList: true });
-setInterval(reportState, 15000);
+setInterval(() => { reportState(); persistTranscript(); }, 15000);
 const clientLog = (level, msg, extra) => { try { fetch('/nibbi/client-log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ level, msg: String(msg).slice(0, 400), ...(extra || {}), url: location.href }), keepalive: true }).catch(() => {}); } catch { /* */ } };
 addEventListener('error', (e) => clientLog('error', e.message, { src: (e.filename || '').split('/').pop() + ':' + e.lineno }));
 addEventListener('unhandledrejection', (e) => clientLog('error', (e.reason && (e.reason.message || e.reason)) || 'unhandled rejection'));
 const _toast = toast; window.__toastLog = true;
 
-addEventListener('pagehide', () => LS.set('lastSeen', Date.now()));
-document.addEventListener('visibilitychange', () => { if (document.hidden) LS.set('lastSeen', Date.now()); });
+addEventListener('pagehide', () => { LS.set('lastSeen', Date.now()); flushCursor(); persistTranscript(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { LS.set('lastSeen', Date.now()); flushCursor(); persistTranscript(); } });
 window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout, interactions, voice: { snapshot: () => ({ enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }) } };
 })();
