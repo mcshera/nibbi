@@ -22,12 +22,13 @@ import { z } from 'zod';
 import { webTools } from './web-tools.js';
 import { mcpToolsFor } from './mcp-clients.js';
 import { boundedInput, summarizeResult, diffFor } from './tool-transcript.js';
+import { coalesceText } from './event-text.js';
 
 let dispatchNotify: (message: string) => Promise<void> = async () => undefined;
 export function setDispatchNotify(fn: (message: string) => Promise<void>): void { dispatchNotify = fn; }
 export interface TurnResult { text: string; costUsd?: number; sessionId?: string; isError: boolean; ctxTokens?: number; voice?: string; local?: boolean; localModel?: string; fallback?: FallbackInfo; runId?: string }
 export interface ImageAttachment { media_type: string; data: string }
-export interface TurnOptions { project?: string; threadId?: string; provider?: ProviderId; signal?: AbortSignal; allowDispatch?: boolean; historySource?: 'test'; onStart?: (runId: string) => void; onReady?: (runId: string, info: { steerable: boolean }) => void; onFallback?: (info: FallbackInfo) => void; onToolEvent?: (payload: Record<string, unknown>) => void }
+export interface TurnOptions { project?: string; threadId?: string; provider?: ProviderId; signal?: AbortSignal; allowDispatch?: boolean; historySource?: 'test'; onStart?: (runId: string) => void; onReady?: (runId: string, info: { steerable: boolean }) => void; onFallback?: (info: FallbackInfo) => void; onToolEvent?: (payload: Record<string, unknown>) => void; onThinking?: (text: string) => void }
 export function splitVoice(text: string): { text: string; voice?: string } {
   const parts = text.split(/»voice:\s*/);
   if (parts.length === 1) return { text };
@@ -147,10 +148,31 @@ export async function runTurn(prompt: string, onText?: (text: string) => void, c
     let fallback: FallbackInfo | undefined;
     // Governed calls are reported once, with input and result, by the lease hooks; the provider's own name-only notice for the same call is dropped.
     const governedName = (name: unknown): boolean => !!lease?.names.includes(String(name ?? '').replace(/^mcp__nibbi__/, ''));
+    const textRows = coalesceText(text => store.emit({ type: 'text.delta', runId, projectId: project, payload: { text } }));
+    // Thinking is live, not history: the words are forwarded to whoever is watching and never
+    // written down, and what the trail keeps is one line saying how long it took.
+    const thinking = { startedAt: 0, chars: 0, reported: false };
+    const reportThinking = (): void => {
+      if (!thinking.startedAt || thinking.reported) return;
+      thinking.reported = true;
+      const ms = Date.now() - thinking.startedAt;
+      store.emit({ type: 'thinking.summary', runId, projectId: project, payload: { ms, chars: thinking.chars } });
+    };
     const emit = (type: string, payload: Record<string, unknown>): void => {
       if (type === 'tool.started' && payload.source !== 'governed' && governedName(payload.name)) return;
+      if (type === 'thinking.delta') {
+        const text = String(payload.text ?? '');
+        if (!thinking.startedAt) thinking.startedAt = Date.now();
+        thinking.chars += text.length; options.onThinking?.(text); return;
+      }
+      if (type === 'text.delta') {
+        // The surface hears the token first; the durable row is coalesced behind it.
+        reportThinking();   // thought, then said: the trail reads in the order it happened
+        const text = String(payload.text); onDelta?.(text); textRows.push(text); return;
+      }
+      // Buffered text belongs before the row that follows it, so the trail reads in order.
+      textRows.flush(); reportThinking();
       store.emit({ type, runId, projectId: project, payload });
-      if (type === 'text.delta') onDelta?.(String(payload.text));
       if (type === 'tool.started') onTool?.(String(payload.name));
       if (type === 'tool.started' || type === 'tool.finished') options.onToolEvent?.({ ...payload, type });
     };
@@ -263,6 +285,7 @@ export async function runTurn(prompt: string, onText?: (text: string) => void, c
       store.put('lead-runs', runId, { id: runId, project, provider, status: abort.signal.aborted ? 'interrupted' : 'failed', error: message, endedAt: Date.now() });
       emit('turn.failed', { message }); throw error;
     } finally {
+      textRows.flush(); reportThinking();   // a throw, a cancel or the deadline must not lose the last partial row
       control.phase = 'closed'; clearTimeout(guard); options.signal?.removeEventListener('abort', forwardAbort);
       if (control.handle) await control.handle.cancel().catch(() => undefined); await lease?.close(); active.delete(runId);
     }

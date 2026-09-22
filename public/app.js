@@ -15,7 +15,9 @@ import { localReplyMetadata, localReplyLabel, updateLocalReply, settleLocalReply
 import { installPocketInteractions } from './lib/pocket-interactions.js';
 import { createClient, parseSse, subscribeEvents, requestId } from './lib/client.ts';
 import { platformPanel } from './lib/platform.ts';
-import { escapeHtml, md, parseActs, firstSentences, stripMd, TOOL_LABEL, toolLabel, humanError, questionActs, relTime, parseDiff } from './lib/text.js';
+import { escapeHtml, md, parseActs, firstSentences, stripMd, TOOL_LABEL, toolLabel, humanError, errorKind, questionActs, relTime, parseDiff } from './lib/text.js';
+import { createFrameFlush } from './lib/frame-flush.js';
+import { cleanReply, splitBlocks } from './lib/stream-md.js';
 import { describeToolEvent, stepSummaryLine, elapsedLabel, inputLine } from './lib/transcript.js';
 import { narrate, deliveryTransition, deliveryContext, streakIncrease, runStatusChange } from './lib/narration.js';
 /* app.js — Nibbi: the surface. One character, one pill, and UI that only shows up when it's needed. */
@@ -80,7 +82,7 @@ if (S.voiceOn) body.classList.add('voice-on');
 let visibleProjectIds = [];
 const projectSummaries = createProjectSummaryStore({ onChange: () => syncMargins() });
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
-const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
+const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: () => closeProjectView(), onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
 const chatLauncher = document.createElement('button');
 chatLauncher.type = 'button'; chatLauncher.id = 'project-chat-launcher'; chatLauncher.className = 'project-chat-launcher';
 chatLauncher.textContent = 'Chat with Nibbi'; chatLauncher.hidden = true; chatLauncher.setAttribute('aria-controls', 'pill');
@@ -231,20 +233,28 @@ scheduleIdleTimers();
 setInterval(() => { for (const T of S.turns) if (T.timeEl) T.timeEl.textContent = relTime(T.at); }, 60000);
 
 /* ------------------------------------------------------------------ scrolling: chronological, pinned to the bottom until you scroll up */
-const jumpBtn = document.createElement('button'); jumpBtn.id = 'jump'; jumpBtn.type = 'button'; jumpBtn.className = 'jump'; jumpBtn.hidden = true; jumpBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M9 3.5v11M9 14.5l-5-5M9 14.5l5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> latest'; document.body.appendChild(jumpBtn);
+const jumpBtn = document.createElement('button'); jumpBtn.id = 'jump'; jumpBtn.type = 'button'; jumpBtn.className = 'jump'; jumpBtn.hidden = true; jumpBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M9 3.5v11M9 14.5l-5-5M9 14.5l5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> <span class="jumpn">latest</span>'; document.body.appendChild(jumpBtn);
 S.stick = true;
-let scrollRaf = 0;
+let scrollRaf = 0, unread = 0;
+const jumpLabel = jumpBtn.querySelector('.jumpn');
+function noteUnread(n) {
+  if (S.stick || jumpBtn.hidden) { unread = 0; jumpLabel.textContent = 'latest'; return; }
+  unread += n;
+  jumpLabel.textContent = unread ? unread + ' new' : 'latest';
+  jumpBtn.setAttribute('aria-label', unread ? unread + ' new below — jump to the latest' : 'Jump to the latest');
+}
 function scrollFeed(force) { if (!force && !S.stick) return; if (scrollRaf) return; scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; feed.scrollTop = feed.scrollHeight; }); }
-feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; } }, { passive: true });
-jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); };
+feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; if (atBottom) noteUnread(0); } }, { passive: true });
+jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); };
 new MutationObserver(() => scrollFeed(false)).observe(feed, { childList: true, subtree: true, characterData: true });
 new ResizeObserver(() => scrollFeed(false)).observe(feed);
 
 /* ------------------------------------------------------------------ markdown */
-function renderMd(src) {
+function mdFragment(src) {
   let html = '';
-  // raw HTML from the brain is shown, not run — but leave code spans/fences alone (marked escapes those itself); lone ~ (as in ~$4.75) is not strikethrough
-  const safe = String(src || '').split(/(```[\s\S]*?```|`[^`\n]*`)/g).map((seg, i) => i % 2 ? seg : seg.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/(^|[^~\\])~(?!~)/g, '$1\\~')).join('');
+  // raw HTML from the brain is shown, not run — but leave code spans/fences alone (marked escapes those itself); lone ~ (as in ~$4.75) is not strikethrough.
+  // A fence that is still open counts as code: without the `|$` arm its body fell through as prose, was escaped here and escaped again by marked, so streaming code read "&lt;" until the closing fence arrived.
+  const safe = String(src || '').split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g).map((seg, i) => i % 2 ? seg : seg.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/(^|[^~\\])~(?!~)/g, '$1\\~')).join('');
   try { html = marked.parse(safe, { gfm: true, breaks: true }); } catch { html = escapeHtml(src); }
   const tpl = document.createElement('template'); tpl.innerHTML = html;
   for (const el of tpl.content.querySelectorAll('script,style,iframe,object,embed,link,meta')) el.remove();
@@ -253,10 +263,24 @@ function renderMd(src) {
     if (el.tagName === 'A') { el.target = '_blank'; el.rel = 'noopener'; }
     if (el.tagName === 'IMG' && /^\//.test(el.getAttribute('src') || '')) el.src = '/api/file?p=' + encodeURIComponent(el.getAttribute('src'));
   }
-  for (const pre of tpl.content.querySelectorAll('pre')) { const b = document.createElement('button'); b.type = 'button'; b.className = 'copycode'; b.textContent = 'copy'; b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/copy$/, '').replace(/show all \(\d+ lines\)$/, '')); toast('copied'); }; pre.appendChild(b); const n = (pre.textContent.match(/\n/g) || []).length; if (n > 16) { pre.classList.add('capped'); const x = document.createElement('button'); x.type = 'button'; x.className = 'expand'; x.textContent = 'show all (' + n + ' lines)'; x.onclick = () => { pre.classList.remove('capped'); x.remove(); }; pre.appendChild(x); } }
   for (const tb of tpl.content.querySelectorAll('table')) { const w = document.createElement('div'); w.className = 'tblwrap'; tb.replaceWith(w); w.appendChild(tb); }
   return tpl.content;
 }
+/* The controls on a code block are attached once the reply has settled. While it streams the fence
+   is still growing, so a cap that appears at sixteen lines and a copy button for half a program are
+   both wrong, and rebuilding them every frame is what made the block flicker. */
+function decoratePre(root) {
+  for (const pre of root.querySelectorAll('pre')) {
+    if (pre.querySelector('.copycode')) continue;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'copycode'; b.textContent = 'copy';
+    b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/copy$/, '').replace(/show all \(\d+ lines\)$/, '')); toast('copied'); };
+    pre.appendChild(b);
+    const n = (pre.textContent.match(/\n/g) || []).length;
+    if (n > 16) { pre.classList.add('capped'); const x = document.createElement('button'); x.type = 'button'; x.className = 'expand'; x.textContent = 'show all (' + n + ' lines)'; x.onclick = () => { pre.classList.remove('capped'); x.remove(); }; pre.appendChild(x); }
+  }
+  return root;
+}
+function renderMd(src) { const frag = mdFragment(src); decoratePre(frag); return frag; }
 
 /* ------------------------------------------------------------------ feed */
 
@@ -283,8 +307,12 @@ function newTurn(text, images, at) {
   nibBody.append(bubble, meta);
   nib.append(nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
-  feed.appendChild(turn); S.stick = true; scrollFeed(true);
-  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null };
+  feed.appendChild(turn);
+  // Your own message always pulls the feed down. Something that arrived on its own while you were
+  // reading further up does not: it waits, and the jump button says how much of it there is.
+  if (text === null && !S.stick) noteUnread(1);
+  else { S.stick = true; scrollFeed(true); }
+  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null, flush: null, tail: null, stable: 0 };
   S.turns.push(T);
   return T;
 }
@@ -353,21 +381,105 @@ function finishToolStep(T, ev) {
   if (T.liveStep === st) T.liveStep = null;
   return st;
 }
+/* Thinking is the one step with no result: it is the sound of a turn working before it says
+   anything, and without it a reasoning model looks hung. It opens on the first reasoning token,
+   shows the end of what is being thought, counts, and closes the moment real words start. */
+function noteThinking(T, t) {
+  if (!T.think) {
+    const st = addStep(T, 'thinking', 'think');
+    st.el.querySelector('.l').insertAdjacentHTML('afterend', '<span class="tailwrap"><span class="tail"></span></span>');
+    st.tailText = '';
+    st.timer = setInterval(() => { const el = st.el.querySelector('.t'); if (el) el.textContent = Math.round((performance.now() - st.at) / 1000) + 's'; }, 1000);
+    T.think = st;
+    if (nibbi.mood() !== 'thinking') nibbi.setMood('thinking');
+  }
+  if (!t) return;   // a start signal, or thinking that is redacted and has no words to show
+  T.think.tailText = (T.think.tailText + t).replace(/\s+/g, ' ').slice(-120);
+  const tail = T.think.el.querySelector('.tail'); if (tail) tail.textContent = T.think.tailText;
+}
+function finishThinking(T) {
+  const st = T.think; if (!st || st.finished) return;
+  clearInterval(st.timer); st.finished = true; st.ok = true; st.elapsedMs = performance.now() - st.at;
+  st.label = 'thought'; st.el.querySelector('.l').textContent = 'thought';
+  markStep(st, 'done');
+  st.el.querySelector('.t').textContent = elapsedLabel(st.elapsedMs);
+  if (T.liveStep === st) T.liveStep = null;
+}
 function finishSteps(T, ok) {
+  finishThinking(T);
   if (T.liveStep) { markStep(T.liveStep, ok ? 'done' : 'fail'); T.liveStep = null; }
   if (!T.stepsList.length) return;
-  const rows = T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s));
+  // Thinking is not a step you can inspect, so it is not counted as one. A turn that only thought
+  // has nothing to fold and keeps its single line in view.
+  const thought = T.stepsList.find((s) => s.kind === 'think');
+  const rows = T.stepsList.filter((s) => s.kind !== 'think').flatMap((s) => Array.from({ length: s.n || 1 }, () => s));
+  if (!rows.length) { if (thought) T.stepLine = 'thought for ' + elapsedLabel(thought.elapsedMs); return; }
   const line = (ok ? '' : 'stopped after ') + stepSummaryLine(rows, performance.now() - T.startedAt);
   T.stepLine = line;
   T.fold.querySelector('.l').innerHTML = escapeHtml(line) + ' — <u>show</u>';
   T.steps.classList.add('folded');   // the screen reader hears T.stepLine once, composed into the reply's announcement by the caller; individual tool frames are never announced
 }
-function setSaid(T, text, live) {
+/* A command's output is text with links in it, never markdown. */
+function renderPlain(T, clean) {
+  T.said.classList.add('plain'); T.said.replaceChildren();
+  for (const part of clean.split(/(https?:\/\/[^\s)]+)/g)) {
+    if (/^https?:\/\//.test(part)) { const a = document.createElement('a'); a.href = part; a.textContent = part; a.target = '_blank'; a.rel = 'noopener'; T.said.appendChild(a); }
+    else T.said.appendChild(document.createTextNode(part));
+  }
+}
+/* Keep the leading children that are already right and replace from the first difference. A tail
+   that grows a word keeps its paragraph, its images and any selection inside the part that stood. */
+function patchChildren(parent, frag) {
+  const next = [...frag.childNodes], current = [...parent.childNodes];
+  let i = 0;
+  while (i < next.length && i < current.length && current[i].isEqualNode(next[i])) i++;
+  for (let j = current.length - 1; j >= i; j--) current[j].remove();
+  for (let j = i; j < next.length; j++) parent.appendChild(next[j]);
+}
+/* One render of the live reply. Finished blocks are rendered once and never touched again; only the
+   tail — the block still being written — is rebuilt, into its own element so the caret has somewhere
+   to live and so the rest of the reply is out of reach. */
+function renderLive(T) {
+  const clean = cleanReply(T.acc, { partial: true });
+  if (T.plain) { renderPlain(T, clean); return; }
+  const blocks = splitBlocks(clean), settled = blocks.length - 1;
+  if (!T.tail) { T.tail = document.createElement('div'); T.tail.className = 'said-tail'; T.said.appendChild(T.tail); T.stable = 0; }
+  if (settled > T.stable) { T.said.insertBefore(mdFragment(blocks.slice(T.stable, settled).join('\n\n')), T.tail); T.stable = settled; }
+  else if (settled < T.stable) { T.said.replaceChildren(mdFragment(blocks.slice(0, settled).join('\n\n')), T.tail); T.stable = settled; }   // a boundary cannot retreat while text only grows; rebuild rather than trust it
+  patchChildren(T.tail, mdFragment(blocks[settled]));
+}
+function scheduleLive(T) {
+  (T.flush ||= createFrameFlush({ onFlush: () => renderLive(T), hidden: () => document.hidden })).mark();
+  return T.flush;
+}
+/* Tokens go in here. The text is the turn's own; this only asks for a frame. */
+function appendSaid(T, chunk) { T.acc += chunk; scheduleLive(T); }
+function endLive(T) {
+  if (T.flush) { T.flush.cancel(); T.flush = null; }
+  if (T.tail) { T.tail.remove(); T.tail = null; }
+  T.stable = 0;
+}
+/* The end of a streamed reply, when the result is the text that was streamed. The tail's children
+   move up and the whole reply is compared against how it would have rendered had it arrived at once;
+   only a difference is worth replacing, so in the ordinary case nothing on screen moves. */
+function settleSaid(T, text) {
+  T.flush?.finish();
+  if (T.tail) { while (T.tail.firstChild) T.said.insertBefore(T.tail.firstChild, T.tail); T.tail.remove(); }
+  T.flush = null; T.tail = null; T.stable = 0;
+  const full = mdFragment(cleanReply(text));
+  const probe = document.createElement('div'); probe.appendChild(full.cloneNode(true));
+  if (probe.innerHTML !== T.said.innerHTML) T.said.replaceChildren(full);
+  decoratePre(T.said);
   T.acc = text;
-  const clean = parseActs(text.replace(/»voice:\s*(?:(?!»voice:)[^\n])*\n?/g, '')).clean;
-  if (T.plain) { T.said.classList.add('plain'); T.said.replaceChildren(); const parts = clean.split(/(https?:\/\/[^\s)]+)/g); for (const part of parts) { if (/^https?:\/\//.test(part)) { const a = document.createElement('a'); a.href = part; a.textContent = part; a.target = '_blank'; a.rel = 'noopener'; T.said.appendChild(a); } else T.said.appendChild(document.createTextNode(part)); } return; }
-  if (live) { if (!T.raf) T.raf = setTimeout(() => { T.raf = 0; T.said.replaceChildren(renderMd(parseActs(T.acc.replace(/»voice:\s*(?:(?!»voice:)[^\n])*\n?/g, '')).clean)); }, 60); }
-  else { if (T.raf) { clearTimeout(T.raf); T.raf = 0; } T.said.replaceChildren(renderMd(clean)); }
+}
+/* The whole reply at once: restored history, a command's output, an error, a rewritten fallback. */
+function setSaid(T, text, live) {
+  if (live) { T.acc = text; scheduleLive(T); return; }
+  endLive(T);
+  T.acc = text;
+  const clean = cleanReply(text);
+  if (T.plain) { renderPlain(T, clean); return; }
+  T.said.replaceChildren(renderMd(clean));
 }
 function setMeta(T, r) {
   updateLocalReply(T, r);
@@ -381,7 +493,10 @@ function setMeta(T, r) {
   const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; focusComposer(); autosize(); };
   const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => { navigator.clipboard?.writeText(T.acc); toast('copied'); };
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
-  T.meta.append(document.createTextNode(' · '), quote, document.createTextNode(' · '), copy, document.createTextNode(' · '), again);
+  const acts = document.createElement('span'); acts.className = 'metaacts'; acts.setAttribute('role', 'group'); acts.setAttribute('aria-label', 'reply actions');
+  const dot = () => { const d = document.createElement('span'); d.textContent = '·'; d.setAttribute('aria-hidden', 'true'); return d; };   // a separator is punctuation, not a word to read out; the gap around it is the row's own
+  acts.append(quote, dot(), copy, dot(), again);
+  T.meta.append(dot(), acts);
 }
 function addActs(T, acts, opts) {
   if (!acts.length) return;
@@ -521,6 +636,8 @@ async function* demoTurn(message, _images, signal, mode) {
   }
   if (/\berror\b|\bbreak\b/.test(m)) { yield { ev: 'tool', name: 'Bash' }; await wait(900); yield { ev: 'done', text: 'error: Failed to authenticate: OAuth session expired and could not be refreshed', isError: true, costUsd: 0 }; return; }
   if (/fix|bug|build|make|add|change|ship/.test(m)) {
+    // a real turn thinks before it speaks, and the surface has to show that rather than go quiet
+    for (const t of ['weighing the turn lock ', 'against the abort path — ', 'the stream owes a done either way']) { await wait(300); yield { ev: 'thinking', t }; }
     yield governed('read_file', { path: 'src/session.ts' }); await wait(650); yield finished('read_file', { summary: 'Read 4.1 KB from src/session.ts', bytes: 4198, elapsedMs: 640 });
     yield governed('read_file', { path: 'src/webapp.ts' }); await wait(500); yield finished('read_file', { summary: 'Read 2.8 KB from src/webapp.ts', bytes: 2867, elapsedMs: 480 });
     yield { ev: 'tool', name: 'Grep' }; await wait(800);
@@ -905,6 +1022,11 @@ function refreshBadge() { const n = (S.fixers || []).filter((f) => f.status === 
 
 /* ------------------------------------------------------------------ host event stream: exact history of what fixers did, even while the window was closed */
 let evSource = null, evReady = false, evReplay = [];
+/* The cursor only has to survive the window closing, so it is written on a trailing tick rather
+   than on every event: a busy minute used to mean a synchronous localStorage write per event. */
+let cursorPending = null, cursorTimer = 0;
+function flushCursor() { if (cursorTimer) { clearTimeout(cursorTimer); cursorTimer = 0; } if (cursorPending !== null) { LS.set('eventCursor', cursorPending); cursorPending = null; } }
+function rememberCursor(id) { cursorPending = id; if (!cursorTimer) cursorTimer = setTimeout(() => { cursorTimer = 0; flushCursor(); }, 500); }
 function connectEvents() {
   if (S.demo || evSource || !Number.isSafeInteger(S.snapshotCursor)) return;
   // A first visit already has current state from the snapshot. Start there;
@@ -913,7 +1035,9 @@ function connectEvents() {
   const after = Number.isSafeInteger(savedCursor) && savedCursor > 0 ? savedCursor : S.snapshotCursor;
   LS.set('eventCursor', after);
   const close = subscribeEvents({
-    after, onCursor: (id) => LS.set('eventCursor', id),
+    // text.delta arrives on the turn's own stream and has no branch below; excluding it keeps a
+    // streamed reply from crossing this connection twice and writing localStorage per token.
+    after, exclude: ['text.delta'], onCursor: rememberCursor,
     onReady: () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; refreshStatus(); scheduleProjectRefresh(); },
     onOffline: () => { evReady = false; setLink('offline'); projectSummaries.markStale(); },
     onEvent: (event) => {
@@ -1247,24 +1371,26 @@ async function send(text, images, opts) {
       if (waitStep) { markStep(waitStep, 'done'); if (T.liveStep === waitStep) T.liveStep = null; waitStep = null; }
       if (e.ev === 'start') { S.activeRunId = e.runId; T.runId = e.runId; S.steerable = false; syncSendButton(); }
       else if (e.ev === 'ready') { if (e.runId) { S.activeRunId = e.runId; T.runId = e.runId; } S.steerable = !!e.steerable; syncSendButton(); }
+      else if (e.ev === 'thinking') noteThinking(T, e.t || '');
       else if (e.ev === 'fallback') {
         S.steerable = false; syncSendButton();   // the local fallback cannot take guidance
+        finishThinking(T);
         updateLocalReply(T, e.fallback || e);
         stopSpeaking(); sentenceCursor = 0; sentencesSpoken = 0; S.spokeStream = false;
       } else if (e.ev === 'tool' && e.name && !T.local) {
         const ev = describeToolEvent(e);
         if (ev.phase === 'finished') finishToolStep(T, ev);
         else {
-          toolCount++;
-          if (spoke && T.acc && !/\n\s*$/.test(T.acc)) { T.acc += '\n\n'; }
+          toolCount++; finishThinking(T);
+          if (spoke && T.acc && !/\n\s*$/.test(T.acc)) appendSaid(T, '\n\n');   // through the same door, or the DOM and T.acc part company
           addStep(T, ev.label, null, ev);
           if (nibbi.mood() !== 'working') nibbi.setMood('working');
           if (toolCount % 3 === 1) nibbi.spatter(1, 0.9);
           if (performance.now() - lastFixerPoll > 4000) { lastFixerPoll = performance.now(); pollFixers(T, fixerBefore); }
         }
       } else if (e.ev === 'delta' && e.t) {
-        if (!spoke) { spoke = true; nibbi.setMood('speaking'); if (T.liveStep) { markStep(T.liveStep, 'done'); T.liveStep = null; } }
-        setSaid(T, T.acc + e.t, true);
+        if (!spoke) { spoke = true; finishThinking(T); nibbi.setMood('speaking'); if (T.liveStep) { markStep(T.liveStep, 'done'); T.liveStep = null; } }
+        appendSaid(T, e.t);
         nibbi.pulse(Math.min(1, 0.35 + e.t.length * 0.03)); if (!T.local) streamSpeech(T);
       } else if (e.ev === 'done') { updateLocalReply(T, e); result = e; }
     }
@@ -1276,19 +1402,28 @@ async function send(text, images, opts) {
   result = settleLocalReply(result, T);
   if (T.local && (result.isError || result.aborted)) { stopSpeaking(); S.spokeStream = false; }
   const squash = (s) => String(s || '').replace(/»(voice|acts):[^\n]*\n?/g, '').replace(/\s+/g, '');
-  if (T.acc && result.text && squash(T.acc) === squash(result.text)) result.text = T.acc.replace(/»voice:[^\n]*\n?/g, '');
+  const streamedEqual = !!(T.acc && result.text && squash(T.acc) === squash(result.text));
+  if (streamedEqual) result.text = T.acc.replace(/»voice:[^\n]*\n?/g, '');
   const ok = !result.isError;
   if (!ok) { result.raw = result.text; if (!T.local) result.text = humanError(result.text); }
   finishSteps(T, ok);
-  setSaid(T, result.text || '', false);
+  // The reply that was read is the reply that stays. Anything else — an error, a rewritten local
+  // answer, a command's output — is a different text and is rendered whole.
+  if (T.flush && streamedEqual && ok && !T.plain) settleSaid(T, result.text || '');
+  else setSaid(T, result.text || '', false);
   setMeta(T, result);
   if (result.costUsd) S.sessionCost += result.costUsd; S.sessionTurns++;
   T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
   $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + (ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200));
   T.done = true;
-  if (!ok) T.nib.classList.add('error');
+  // A verdict is a failure; a gateway that cannot be reached is a notice. They do not look alike.
+  if (!ok) T.nib.classList.add(errorKind(result.raw || result.text) === 'notice' ? 'notice' : 'error');
   if (result.proposal && typeof result.proposal === 'object') renderProposalCard(T, result.proposal, text);
   S.busy = false; body.classList.remove('busy'); S.abort = null; syncSendButton(); syncMargins();
+  // The settled turn is written now rather than on a later tick. A turn that finished after its
+  // thread was left belongs to that thread's saved state, which openThread already wrote.
+  if (S.liveThreadKey === activeThreadKey()) persistTranscript();
+  S.liveThreadKey = null;
   nibbi.lookFree();
   if (!ok) { nibbi.setMood('error'); addActs(T, T.local ? [{ label: 'try again', run: () => send(T.text) }] : errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
   else if (!result.aborted) { nibbi.setMood('happy'); interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1500); }
@@ -1854,7 +1989,12 @@ function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer 
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
-function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
+/* Writing height, reading scrollHeight and then relaying the whole shell is a forced layout, and it
+   ran on every keystroke — including while a reply streamed into the feed above. Once a frame.
+   The handle lives on S because autosize is hoisted and called during start-up, before a
+   module-level binding declared down here would exist. */
+function autosize() { if (S.autosizeRaf) return; S.autosizeRaf = requestAnimationFrame(() => { S.autosizeRaf = 0; resizeField(); }); }
+function resizeField() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
 ask.addEventListener('focus', () => { layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
@@ -1862,7 +2002,9 @@ ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
   if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: 'smooth' }); }
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
-  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else { ask.blur(); if (S.mode === 'talk' && !S.busy) tidy(); } }
+  // Escape dismisses; it does not destroy. Clearing the whole conversation is a two-step action and
+  // lives on the Settings card's Tidy conversation, next to what it affects.
+  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else ask.blur(); }
 });
 /* mid-run steering: typed text while a steerable turn runs becomes guidance for that turn; an empty send still stops it */
 async function steerTurn(text) {
@@ -1893,7 +2035,9 @@ pill.addEventListener('submit', (e) => {
 addEventListener('keydown', (e) => {
   if (keyboardInputOwned(e, true)) return;
   if (e.altKey && e.code === 'Space') { e.preventDefault(); if (!e.repeat && !window.__TAURI__?.event) void toggleListen(); return; }
-  if (e.key === 'Escape' && document.activeElement !== ask && S.mode === 'talk' && !S.busy) { tidy(); return; }
+  // Escape leaves a project section, wherever focus happens to be inside it — unless something in
+  // it is asking for confirmation, which owns its own Cancel.
+  if (e.key === 'Escape' && S.projectView && !$('#project-workspace')?.querySelector('.project-confirmation:not([hidden])')) { e.preventDefault(); closeProjectView(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (document.activeElement !== ask && !e.repeat && S.turns.length && !S.busy) { const map = { d: /^(diff|what changed)$/, p: /^preview$/, a: /^approve/, s: /^stop/, o: /^open/ }; const rx = map[e.key.toLowerCase()]; if (rx) { const chip = [...S.turns[S.turns.length - 1].body.querySelectorAll('.acts .chip')].find((c) => rx.test(c.textContent)); if (chip) { e.preventDefault(); chip.click(); chip.focus(); return; } } }
   if (e.key === ' ' && e.target instanceof Element && e.target.closest('button, summary, [role="button"], a[href]')) return;   // Space activates the focused control (a step's summary, a chip); it is not a character for the composer
@@ -2079,7 +2223,7 @@ function stepRow(s) {
 }
 function restoreStep(T, row) {
   const ev = row.governed || row.name ? { label: row.label, name: row.name, kind: row.kind, source: row.source || (row.governed ? 'governed' : 'native'), input: row.input } : null;
-  const cls = row.fixed ? 'fixer' : row.kind === 'steer' ? 'steer' : null;
+  const cls = row.fixed ? 'fixer' : row.kind === 'steer' ? 'steer' : row.kind === 'think' ? 'think' : null;
   const el = stepEl(row.label || row.name || 'step', cls, ev);
   el.classList.remove('live'); el.classList.add(row.ok === false ? 'fail' : 'done');
   if (row.n > 1) el.querySelector('.n').textContent = '×' + row.n;
@@ -2091,7 +2235,7 @@ function restoreStep(T, row) {
 }
 function persistTranscript() {
   try {
-    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
+    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), notice: T.nib.classList.contains('notice'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
     LS.set(transcriptKey(), { at: Date.now(), rows });
   } catch { /* quota */ }
 }
@@ -2105,22 +2249,33 @@ function restoreTranscript() {
       T.stepLine = r.steps || stepSummaryLine(T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s)));
       T.fold.querySelector('.l').innerHTML = escapeHtml(T.stepLine) + ' — <u>show</u>'; T.steps.classList.add('folded');
     } else if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
-    setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error');
+    setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error'); if (r.notice) T.nib.classList.add('notice');
     T.at = r.at; setMeta(T, { costUsd: r.cost, ...localReplyMetadata(r) }); T.el.removeAttribute('aria-busy');
   }
   S.stick = true; scrollFeed(true); body.classList.add('rest');
 }
 function reattachFixerActs() { for (const T of S.turns) { if (!T.fixerId || T.body.querySelector('.acts')) continue; const f = fixerById(T.fixerId); if (f && (f.status === 'staged' || ACTIVE.has(f.status))) addActs(T, fixerActs(f), { sticky: true }); } }
-function reportState() { persistTranscript(); clearTimeout(stateTimer); stateTimer = setTimeout(() => { try { fetch('/nibbi/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(snapshot()), keepalive: true }).catch(() => {}); } catch { /* offline */ } }, 400); }
-new MutationObserver(reportState).observe(feed, { childList: true, subtree: true, characterData: true });
+/* The transcript is written when a turn settles, not on every mutation. A live reply changes the
+   feed once a frame, and only finished turns are ever serialised, so a per-mutation
+   JSON.stringify + localStorage.setItem of the whole history bought nothing and stalled the frame. */
+let persistTimer = 0;
+function schedulePersist(delay = 1000) {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => { persistTimer = 0; if (S.busy) { schedulePersist(2000); return; } persistTranscript(); }, delay);
+}
+function reportState() { clearTimeout(stateTimer); stateTimer = setTimeout(() => { try { fetch('/nibbi/state', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(snapshot()), keepalive: true }).catch(() => {}); } catch { /* offline */ } }, 400); }
+new MutationObserver(() => { reportState(); schedulePersist(); }).observe(feed, { childList: true, subtree: true, characterData: true });
 new MutationObserver(reportState).observe(chipsEl, { childList: true });
-setInterval(reportState, 15000);
+setInterval(() => { reportState(); persistTranscript(); }, 15000);
 const clientLog = (level, msg, extra) => { try { fetch('/nibbi/client-log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ level, msg: String(msg).slice(0, 400), ...(extra || {}), url: location.href }), keepalive: true }).catch(() => {}); } catch { /* */ } };
 addEventListener('error', (e) => clientLog('error', e.message, { src: (e.filename || '').split('/').pop() + ':' + e.lineno }));
 addEventListener('unhandledrejection', (e) => clientLog('error', (e.reason && (e.reason.message || e.reason)) || 'unhandled rejection'));
 const _toast = toast; window.__toastLog = true;
 
-addEventListener('pagehide', () => LS.set('lastSeen', Date.now()));
-document.addEventListener('visibilitychange', () => { if (document.hidden) LS.set('lastSeen', Date.now()); });
+addEventListener('pagehide', () => { LS.set('lastSeen', Date.now()); flushCursor(); persistTranscript(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { LS.set('lastSeen', Date.now()); flushCursor(); persistTranscript(); return; }
+  S.liveTurn?.flush?.flushNow();   // a hidden tab gets no frames; make the reply current before the first one it does get
+});
 window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout, interactions, voice: { snapshot: () => ({ enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }) } };
 })();

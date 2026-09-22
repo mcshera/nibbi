@@ -40,6 +40,14 @@ import { mcpTokensView, mcpServerHealthSummary } from './mcp-server.js';
 const notify = (text: string): Promise<void> => notifyOwner(null, text);
 const aliases: Record<string, string> = { '/api/fix': 'run.dispatch', '/api/fix-queue': 'run.queue', '/api/fix-unqueue': 'run.stop', '/api/fix-requeue': 'run.retry', '/api/fixer-stop': 'run.stop', '/api/fixer-discard': 'run.discard', '/api/fixer-merge': 'run.merge', '/api/fixer-steer': 'run.steer', '/api/group-merge': 'group.merge', '/api/group-stop': 'group.stop', '/api/agents-stop-all': 'runs.stop', '/api/auto': 'auto.set', '/nibbi/goal': 'goal.set' };
 const ownerOnly = (req: IncomingMessage): void => { if (!loopback(req)) throw new HttpError(403, 'Manage host settings on the Mac'); };
+/** Event types a subscriber does not want. Opt-in: the app drops `text.delta`, which it receives on
+ *  its own turn stream and discards here, and which during a reply is most of the feed's volume. */
+const excludedTypes = (value: string | null): string[] => {
+  if (!value) return [];
+  const types = value.split(',').map(type => type.trim()).filter(Boolean);
+  if (types.length > 16 || types.some(type => !/^[a-z][a-z0-9.]*$/.test(type))) throw new HttpError(400, 'Invalid event filter');
+  return types;
+};
 const publicProposal = (proposal: import('./plan-proposals.js').Proposal): Record<string, unknown> => ({ id: proposal.id, project: proposal.project, state: proposal.state, summary: proposal.summary, rationale: (proposal as unknown as { rationale?: string }).rationale, review: proposal.review, fingerprint: proposal.fingerprint, createdAt: proposal.createdAt, expiresAt: proposal.expiresAt, executedAt: proposal.executedAt, results: proposal.results, error: proposal.error });
 export async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const path = url.pathname, q = url.searchParams, method = req.method;
@@ -77,7 +85,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
       const thread = requireThread(input.project, input.threadId);
       const cmd = await handleCommand(input.message, notify, { project: input.project, idempotencyKey: key + ':slash', threadId: thread });
       const toolFrame = (payload: Record<string, unknown>): void => { const { type, ...rest } = payload; send?.('tool', { ...rest, phase: type === 'tool.finished' ? 'finished' : 'started', at: Date.now() }); };
-      const turnOptions: TurnOptions = { threadId: thread, historySource: input.historySource, onStart: (runId: string) => send?.('start', { runId, threadId: thread }), onReady: (runId: string, info: { steerable: boolean }) => send?.('ready', { runId, threadId: thread, ...info }), onToolEvent: toolFrame };
+      const turnOptions: TurnOptions = { threadId: thread, historySource: input.historySource, onStart: (runId: string) => send?.('start', { runId, threadId: thread }), onReady: (runId: string, info: { steerable: boolean }) => send?.('ready', { runId, threadId: thread, ...info }), onToolEvent: toolFrame, onThinking: (text: string) => send?.('thinking', { t: text }) };
       // Local-fallback frames exist only where that feature is compiled in; assigning keeps this file identical across builds.
       Object.assign(turnOptions, { onFallback: (info: unknown) => send?.('fallback', info as Record<string, unknown>) });
       let result: Record<string, unknown>;
@@ -96,7 +104,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     } finally { if (ping) clearInterval(ping); }
     return true;
   }
-  if ((path === '/api/events' || path === '/nibbi/events') && method === 'GET') { streamEvents(req, res, Number(q.get('after') || 0)); return true; }
+  if ((path === '/api/events' || path === '/nibbi/events') && method === 'GET') { streamEvents(req, res, Number(q.get('after') || 0), excludedTypes(q.get('exclude'))); return true; }
   if (path === '/api/model') { if (method === 'POST') { const a = await jsonBody(req); await setMasterModel(a.model === 'default' ? null : z.string().parse(a.model)); } json(res, 200, { current: status().modelOverride ?? 'default', options: ['default', 'sonnet', 'opus', 'haiku'] }); return true; }
   if ((path === '/api/vault-write' || path === '/nibbi/vault-write') && method === 'POST') {
     const a = z.object({ path: z.string(), content: z.string().max(1_000_000) }).parse(await jsonBody(req)); const target = scopedPath(config.vaultDir, a.path);

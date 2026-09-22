@@ -84,6 +84,7 @@ export function startCodex(input: AgentInput): AgentHandle {
   const attempt = (name: string): void => { evidence.toolAttempted = true; input.onEvent('tool.attempted', { name }); };
   rpc.on('host.request', attempt); // Count declined approvals and unsupported host actions before replying.
   const observeItem = (item: NativeItem | undefined, started = false): void => {
+    if (item?.type === 'reasoning' && started) input.onEvent('thinking.delta', { text: '' });   // thinking began, whatever it says
     if (!item?.type || !nonActionItems.has(item.type)) {
       const name = item?.tool ?? item?.name ?? item?.type ?? 'unknown'; attempt(name);
       if (started) input.onEvent('tool.started', { name });
@@ -131,6 +132,10 @@ export function startCodex(input: AgentInput): AgentHandle {
           if (method === 'item/agentMessage/delta' && typeof params.delta === 'string' && params.delta) {
             evidence.ordinaryTextProduced = true; input.onEvent('text.delta', { text: params.delta });
           }
+          // Reasoning deltas say the turn is working during a silence. Matched by prefix because the
+          // suffix differs by build (summaryTextDelta, textDelta); an unknown one simply never fires,
+          // and reasoning stays a non-action item, so this is not evidence of output or of a tool.
+          if (method.startsWith('item/reasoning/') && typeof params.delta === 'string') input.onEvent('thinking.delta', { text: params.delta });
           const item = params.item as NativeItem | undefined;
           if (method === 'item/completed' || method === 'item/started') observeItem(item, method === 'item/started');
           if (method === 'item/completed' && item?.type === 'agentMessage') out.text += item.text ?? '';

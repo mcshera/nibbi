@@ -23,9 +23,10 @@ canvas#fx.grab { cursor: pointer; }
 
 /* ---------- feed (conversation under nibbi; newest first) ---------- */
 .feed {
-  position: fixed; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 48px));
+  position: fixed; left: 50%; transform: translateX(-50%); width: var(--measure-feed);
   top: var(--feed-top); bottom: var(--feed-bottom); z-index: var(--z-feed);
   overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 8px 6px 28px; scroll-padding-bottom: 20px;
+  overflow-anchor: none;   /* scrollFeed pins the bottom itself; browser anchoring only fights it while a reply grows */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 40px), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 40px), transparent 100%);
   opacity: 0; pointer-events: none; transition: opacity var(--t3) var(--ease), top var(--t3) var(--ease);
@@ -38,7 +39,9 @@ body[data-mode="talk"] .feed { opacity: 1; pointer-events: auto; }
 body[data-mode="talk"].rest .feed { opacity: .38; }
 body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus-within { opacity: 1; }
 
-.turn { display: flex; flex-direction: column; gap: 6px; margin: 0 0 26px; animation: arrive var(--t3) var(--ease) both; transition: opacity var(--t3) var(--ease), font-size var(--t3) var(--ease); }
+/* No font-size transition: the reply's size comes from the fluid --type-read and never steps, so the
+   transition only ever armed a layout-animating property on the element receiving live text. */
+.turn { display: flex; flex-direction: column; gap: 6px; margin: 0 0 26px; animation: arrive var(--t3) var(--ease) both; transition: opacity var(--t3) var(--ease); }
 
 @keyframes arrive { from { opacity: 0; transform: translateY(10px); } }
 .turn.leave { animation: leave var(--t2) var(--ease) both; }
@@ -48,12 +51,16 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .nib { align-self: stretch; color: var(--ink); font-size: var(--type-read); line-height: 1.55; display: flex; align-items: flex-start; }
 .nib .nibbody { flex: 1; min-width: 0; }
 /* the bubble carries the reply alone: no avatar, no tail. a 6px ink dot tucked in the top-left corner is nibbi's quiet signature */
-.bubble { position: relative; display: inline-block; max-width: 100%; padding: 12px 18px 13px 20px; border-radius: var(--r-surface); border-top-left-radius: 10px; background: rgba(255,255,255,.62); border: 1px solid var(--line); box-shadow: var(--e-highlight), var(--e-raised); }
+.bubble { position: relative; display: inline-block; max-width: 100%; padding: 12px 18px 13px 20px; border-radius: var(--r-surface); border-top-left-radius: 10px; background: var(--bubble-bg); border: 1px solid var(--line); box-shadow: var(--e-highlight), var(--e-raised); }
 .bubble::before { content: ""; position: absolute; left: 7px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
 .bubble:has(> .steps:not([hidden]))::before { display: none; }   /* a steps fold carries its own bullet in the same corner: one mark, not two */
 .bubble.live .said:empty::after { content: "•••"; display: inline-block; letter-spacing: .22em; color: var(--ink-2); animation: think 1.2s ease-in-out infinite; font-size: var(--type-body); line-height: 1; padding: 6px 0 2px; }
 .nib.error .bubble { border-color: var(--fail-edge); }
 .nib.error .bubble::before { background: var(--fail-mark); }
+/* Something was unreachable, not judged. --fail-* is reserved for a verdict, so an offline gateway
+   gets a warm bed and a quiet dot rather than the red a failed build wears. */
+.nib.notice .bubble { background: var(--notice-bed); border-color: var(--veil-strong); }
+.nib.notice .bubble::before { background: var(--ink-3); }
 .bubble .steps { margin: 0 0 8px; }
 .bubble .steps:not(.folded):not([hidden]) + .said:not(:empty) { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
 .bubble .said.plain { font-size: var(--type-control); }
@@ -61,6 +68,18 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .nib .said:empty { min-height: 0; }
 .nib .said.plain { white-space: pre-wrap; font-size: var(--type-body); line-height: 1.5; font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); }
 @keyframes think { 0%,100% { transform: scale(.7); opacity: .55; } 50% { transform: scale(1.05); opacity: 1; } }
+/* The block still being written. Everything above it is finished and is never rendered again, which
+   is what keeps a selection alive and a code block from restarting. It is unwrapped when the reply
+   settles, so a finished reply has no trace of it. */
+.nib .said-tail > :first-child { margin-top: 0; }
+/* A bar after the last word says the reply is still open, so a pause in the middle reads as waiting
+   rather than as finished. It beats with `think`, the same motion a running step uses. */
+.bubble.live .said-tail:empty::after,
+.bubble.live .said-tail > :is(p, h1, h2, h3):last-child::after,
+.bubble.live .said-tail :is(ul, ol):last-child > li:last-child:not(:has(p, ul, ol, pre))::after {
+  content: ""; display: inline-block; width: 2px; height: .95em; margin-left: 3px; vertical-align: -.1em;
+  border-radius: var(--r-bar); background: var(--ink); animation: think 1.1s ease-in-out infinite;
+}
 .nib.error .said { color: var(--fail-quiet); }
 .nib .said p { margin: 0 0 .7em; } .nib .said p:last-child { margin-bottom: 0; }
 .nib .said h1, .nib .said h2, .nib .said h3 { font-size: 1.05em; margin: .8em 0 .35em; font-weight: 600; }
@@ -94,6 +113,12 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .steps .fold .b { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; transform: scale(.75); }
 .steps.folded .fold { display: flex; }
 .steps .fold:hover { color: var(--ink-2); }
+/* thinking: the one step with no result. Its tail shows the end of what is being thought, so it
+   reads as something still running rather than as a truncated sentence, and it goes when it closes. */
+.step.think .l { flex: none; }
+.step.think .tailwrap { flex: 1; min-width: 0; display: flex; justify-content: flex-end; overflow: hidden; color: var(--ink-4); }
+.step.think .tail { flex: none; white-space: nowrap; }
+.step.think.done .tailwrap { display: none; }
 
 .meta { display: flex; gap: 10px; align-items: center; font-size: var(--type-fine); padding: 6px 0 0 6px; color: var(--ink-3); opacity: 0; transition: opacity var(--t2); font-variant-numeric: tabular-nums; }
 .turn:hover .meta, .turn:focus-within .meta { opacity: 1; }
@@ -103,6 +128,8 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
    button over a code block, which is worse than no button at all. */
 @media (hover: none) { .meta { opacity: .7; } .nib .said pre .copycode { opacity: 1; } }
 .meta button { font: inherit; color: var(--ink-3); background: none; border: 0; padding: 0; cursor: pointer; } .meta button:hover { color: var(--ink); }
+.meta .metaacts { display: inline-flex; align-items: baseline; gap: 10px; }   /* the row's own gap: a flex item drops the spaces inside it, so the separator cannot carry them */
+
 
 /* actions nibbi offers after a reply (contextual) */
 .acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0 2px; }
@@ -117,7 +144,7 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 /* ---------- pill: the ink dock. one "+", one field, one send; the modes live on the toggles inside the "+" panel ---------- */
 .pill {
   position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); z-index: var(--z-dock);
-  width: min(720px, calc(100vw - 56px)); min-height: var(--pill-h);
+  width: var(--measure-dock); min-height: var(--pill-h);
   display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 12px;
   background: var(--pill-bg); border: 1px solid var(--line); border-radius: var(--r-dock);
   box-shadow: var(--e-highlight), var(--e-docked);
@@ -139,10 +166,10 @@ body.busy .pill { border-color: var(--veil-hover); }
 .pill .dock[aria-expanded="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .pill .dock[aria-expanded="true"] svg { transform: rotate(45deg); }
 /* the panel hangs above the "+": three rows, each a real button; toggles carry their own small switch */
-.dock-menu { display: none; position: absolute; inset: auto; left: 4px; bottom: calc(100% + 10px); margin: 0; max-width: none; max-height: none; z-index: 2; width: min(248px, calc(100vw - 40px)); padding: 6px; color: var(--ink); border-radius: var(--r-surface); background: var(--paper-raised); border: 1px solid var(--line); box-shadow: var(--e-docked), var(--e-highlight); flex-direction: column; gap: 2px; animation: arrive var(--t2) var(--ease) both; }
+.dock-menu { display: none; position: absolute; inset: auto; left: 4px; bottom: calc(100% + 10px); margin: 0; max-width: none; max-height: none; z-index: 2; width: var(--measure-menu); padding: 6px; color: var(--ink); border-radius: var(--r-surface); background: var(--paper-raised); border: 1px solid var(--line); box-shadow: var(--e-docked), var(--e-highlight); flex-direction: column; gap: 2px; animation: arrive var(--t2) var(--ease) both; }
 .dock-menu[open] { display: flex; }
 .pill.dock-open { z-index: var(--z-overlay); }   /* an open panel paints over transient toasts (z 7) so every row stays clickable on narrow screens */
-.dock-menu .ico, .dock-menu .mitem { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; margin: 0; padding: 0 10px; border: 0; border-radius: var(--r-control); background: none; color: var(--ink-2); font: inherit; font-size: var(--type-control); font-weight: 500; line-height: 1; text-align: left; white-space: nowrap; cursor: pointer; opacity: 1; transform: none; transition: background var(--t1), color var(--t1); }
+.dock-menu .ico, .dock-menu .mitem { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--touch); margin: 0; padding: 0 10px; border: 0; border-radius: var(--r-control); background: none; color: var(--ink-2); font: inherit; font-size: var(--type-control); font-weight: 500; line-height: 1; text-align: left; white-space: nowrap; cursor: pointer; opacity: 1; transform: none; transition: background var(--t1), color var(--t1); }
 .dock-menu .ico:hover, .dock-menu .mitem:hover { background: var(--veil-hover); color: var(--ink); }
 .dock-menu .mi { flex: none; color: var(--ink-3); transition: color var(--t1); }
 .dock-menu .ico:hover .mi, .dock-menu .mitem:hover .mi, .dock-menu .ico[aria-pressed="true"] .mi { color: var(--ink); }
@@ -151,8 +178,10 @@ body.busy .pill { border-color: var(--veil-hover); }
 /* plan first carries no mark on the "+" by owner preference: the placeholder says it while the field is empty,
    #dock's title names it on hover, the field's aria-describedby states it, and #plan-first keeps aria-pressed in the panel. */
 /* send: an ink squircle */
-.pill .send { flex: none; width: 44px; height: 44px; border-radius: var(--r-panel); border: 0; background: var(--ink); display: grid; place-items: center; padding: 0; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
+.pill .send { flex: none; width: var(--touch); height: var(--touch); border-radius: var(--r-panel); border: 0; background: var(--ink); display: grid; place-items: center; padding: 0; cursor: pointer; transition: transform var(--t1) var(--ease), opacity var(--t2), background var(--t2); }
 .pill .send:hover { transform: scale(1.05); } .pill .send:active { transform: scale(.96); }
+/* The same press the send button takes, on the other controls that commit something. */
+.chip.armed:active, .planr .acts .chip:active { transform: scale(.96); }
 .pill.tall .dock, .pill.tall .send { align-self: flex-end; }   /* a multi-line field: the controls sit on its last line, not floating mid-height */
 .pill .send:disabled { opacity: .35; cursor: default; transform: none; }
 body.busy .pill .send { background: var(--ink-3); }
@@ -177,7 +206,7 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
   :root { --pill-h: 60px; }
   .pill { bottom: calc(18px + env(safe-area-inset-bottom)); border-radius: 30px; padding: 6px 6px 6px 8px; width: calc(100vw - 24px); gap: 6px; flex-wrap: wrap; }
   .pill textarea { padding: 8px 4px; }   /* size comes from the fluid --type-field */
-  .pill .dock { width: 44px; height: 44px; }
+  .pill .dock { width: var(--touch); height: var(--touch); }
   .pill .attach { flex: 1 0 100%; max-width: 100%; order: -1; overflow-x: auto; padding: 4px 8px 0; }   /* thumbnails take a row of their own above the field too */
   .pill.mic-on { padding-bottom: 34px; }
   .listen { left: 60px; right: 16px; bottom: 8px; font-size: var(--type-meta); }
@@ -216,7 +245,7 @@ body:has(.pill.dock-open) .agents { opacity: .25; pointer-events: none; }   /* t
 
 /* ---------- build-tool surfaces ---------- */
 .turn.event .nib { margin-top: 2px; }
-.turn.event .bubble { background: rgba(255,255,255,.45); }
+.turn.event .bubble { background: var(--bubble-bg-quiet); }
 .chip.armed { background: var(--fail-solid); color: var(--ink-inverse); border-color: transparent; }
 .palette { position: fixed; left: 50%; transform: translateX(-50%); z-index: var(--z-overlay); display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: var(--r-surface); background: var(--pill-bg); border: 1px solid var(--line); box-shadow: var(--e-docked), var(--e-highlight); backdrop-filter: var(--glass); animation: arrive var(--t2) var(--ease) both; }
 .palette .pi { display: flex; gap: 8px; align-items: baseline; text-align: left; font: inherit; font-size: var(--type-control); padding: 6px 12px; border: 0; border-radius: var(--r-card); background: none; color: var(--ink); cursor: pointer; white-space: nowrap; overflow: hidden; }
@@ -271,6 +300,7 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 
 
 /* ---------- jump to latest ---------- */
+.jump .jumpn { font-variant-numeric: tabular-nums; }
 .jump { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--feed-bottom) - 2px); z-index: var(--z-perch); display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 10px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--pill-bg); backdrop-filter: var(--glass-light); color: var(--ink-2); font: inherit; font-size: var(--type-fine); cursor: pointer; box-shadow: var(--e-raised); animation: arrive var(--t2) var(--ease) both; }
 .jump:hover { background: var(--ink); color: var(--ink-inverse); border-color: transparent; }
 .when { text-align: center; font-size: var(--type-meta); letter-spacing: .04em; color: var(--ink-3); margin: 6px 0 16px; }
@@ -310,10 +340,10 @@ details.step[open] > summary .l::after { transform: rotate(90deg); }
 .step.steer.live .b { background: var(--ink); }
 .sbody .diffv { font-size: var(--type-fine); max-width: 100%; min-width: 0; }
 .sbody .diffv .dh { margin-bottom: 4px; overflow-wrap: anywhere; }
-@media (pointer: coarse) { details.step > summary { min-height: 44px; } }
-/* phones: every control in the composer and under a reply is a 44px target */
+@media (pointer: coarse) { details.step > summary { min-height: var(--touch); } }
+/* phones: every control in the composer and under a reply is a --touch target */
 @media (max-width: 640px) {
-  details.step > summary, .steps .fold, .turn .acts .chip, .meta button, .planr .acts .chip { min-height: 44px; }
+  details.step > summary, .steps .fold, .turn .acts .chip, .meta button, .planr .acts .chip { min-height: var(--touch); }
   .turn .acts .chip { display: inline-flex; align-items: center; }
   .meta { flex-wrap: wrap; row-gap: 0; }
 }
@@ -357,10 +387,10 @@ body.busy.steer-ready .pill .send::after { display: none; }
 /* guide a live build from its agent card */
 .agent .card .guide { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); cursor: default; }
 .agent .card .guide .grow { display: flex; align-items: flex-end; gap: 6px; }
-.agent .card .guide textarea { flex: 1; min-width: 0; min-height: 44px; resize: none; font: inherit; font-size: var(--type-fine); line-height: 1.4; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-card); background: rgba(255,255,255,.7); color: var(--ink); user-select: text; -webkit-user-select: text; }
+.agent .card .guide textarea { flex: 1; min-width: 0; min-height: var(--touch); resize: none; font: inherit; font-size: var(--type-fine); line-height: 1.4; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--wash-hover); color: var(--ink); user-select: text; -webkit-user-select: text; }
 .agent .card .guide textarea::placeholder { color: var(--ink-4); }
 .agent .card .guide textarea:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
-.agent .card .guide .chip { min-height: 44px; padding: 6px 12px; }
+.agent .card .guide .chip { min-height: var(--touch); padding: 6px 12px; }
 .agent .card .guide .chip:disabled { opacity: .45; cursor: default; }
 .agent .card .guide .gres { font-size: var(--type-meta); color: var(--ink-3); white-space: pre-wrap; word-break: break-word; }
 .agent .card .guide .gres.fail { color: var(--fail-text); }

@@ -29,6 +29,7 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
     const errors = []; page.on('pageerror', err => errors.push(err.message));
     await page.setContent('<style>:root{--ease:ease-out;--ink:#151413;--ink-2:#3a3835;--ink-3:#6f6b65}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav><button id="outside" style="position:fixed;bottom:10px;left:50%">Outside</button><div id="already-inert" inert>Previously unavailable</div>');
+    await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
     await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
     const moduleURL = 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/margin-ui.js', import.meta.url))).toString('base64');
     await page.evaluate(async url => {
@@ -71,7 +72,8 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.deepEqual(await page.evaluate(() => calls), [], 'progress rendering dispatches nothing');
     const card = page.locator('.margin-card:not([hidden])');
     const switcher = page.locator('.margin-switch-trigger');
-    const openMenu = async () => { if (!await page.locator('.margin-switch-menu').isVisible()) await switcher.click(); };
+    const settled = () => page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))));
+    const openMenu = async () => { await settled(); if (!await page.locator('.margin-switch-menu').isVisible()) await switcher.click(); await settled(); };   // a panel mid-fade still reads as visible
     // The gear lives in the switcher's list now, so reaching it means opening the list.
     const gear = async id => { await openMenu(); return options(id); };
     const row = id => page.locator(`.margin-switch-menu .margin-project[data-project-id="${id}"]`);
@@ -81,12 +83,13 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await switcher.getAttribute('data-current-project'), 'alpha', 'the switcher names the project the model says is active');
     assert.deepEqual(await page.locator('.project-section[data-project-section]').evaluateAll(els => els.map(el => el.dataset.projectSection)), ['builds','issues','plans']);
     assert.deepEqual(await page.locator('.project-section[data-section-project]').evaluateAll(els => [...new Set(els.map(el => el.dataset.sectionProject))]), ['alpha'], 'only the current project has a strip');
-    assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'the list starts closed');
+    assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'the list starts closed');   // never opened, so nothing to settle
     await openMenu();
     assert.equal(await page.locator('.margin-switch-menu').isVisible(), true);
     assert.deepEqual(await page.evaluate(() => calls), [], 'opening the list dispatches nothing');
     assert.equal(await card.count(), 0, 'opening the list does not open settings');
     await row('beta').click();
+    await settled();
     assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'choosing a project closes the list');
     assert.deepEqual(await page.evaluate(() => calls), [{action:'selectProject',id:'beta',value:undefined}]);
     assert.equal(await switcher.getAttribute('data-current-project'), 'alpha', 'project selection remains owned by the supplied model');
@@ -113,6 +116,24 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     await page.locator('.margin-tab[data-margin-tab="chat"]').click();
     assert.equal(await page.evaluate(() => calls.length), beforeChat + 1, 'the Chat tab dispatches even when its conversation is already the open one');
     assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action:'thread',id:'alpha',value:'home'});
+    // A thread's name is one clipped line in a 256px bar, and the first thing that will truncate.
+    await page.evaluate(() => {const long='Rework the turn lock so an abort clears it before the stream closes';model.view=null;model.projects[0].threads=[{id:'home',title:'Home',active:true},{id:'long',title:long,lastAt:new Date().toISOString()}];ui.update(model);window.longTitle=long;});
+    const longRow = page.locator('[data-thread-id="long"]');
+    assert.equal(await longRow.getAttribute('title'), await page.evaluate(() => window.longTitle), 'the whole name is reachable even though the row shows one line of it');
+    assert.ok(await longRow.locator('.project-section-copy').evaluate(el => el.scrollWidth > el.clientWidth), 'and it really is clipped, so the title is not decoration');
+
+    // Escape belongs to whatever you are actually in. Docked, the bar is open all day; swallowing
+    // every Escape meant the composer and the palette never saw one.
+    await page.locator('#outside').focus();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false', 'Escape from the page leaves the docked bar alone');
+    await page.locator('.sidebar-collapse').focus();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true', 'Escape from inside the bar closes it');
+    assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-label'), 'Open sidebar', 'the toggle names what pressing it does');
+    await page.locator('#sidebar-toggle').click();
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false');
+
     await page.evaluate(() => {model.view=null;ui.update(model);});
     await openMenu();
     assert.equal(await (await gear('alpha')).getAttribute('aria-label'), 'Project settings for Alpha <img src=x onerror=alert(1)>');
@@ -226,6 +247,16 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('[data-project-section]').count(), 3);
     assert.equal(await page.locator('.project-thread-new').count(), 1);
     assert.equal(await page.locator('.margin-switch-trigger').getAttribute('data-current-project'), 'p-0');
+    // A card is a dialog with a form and a dozen bound controls in it. Sixty projects are sixty rows,
+    // not sixty dialogs: the one that exists is Settings, and a project's is built when it is opened.
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 1, 'no project card is built until one is asked for');
+    await openMenu();
+    await page.locator('.margin-switch-menu [data-project-id="p-3"]').locator('xpath=following-sibling::button').click();
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 2, 'opening a project builds its card');
+    assert.match(await page.locator('.margin-card:not([hidden]) h2').innerText(), /3$/, 'and it opens showing that project, not an empty one');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => ui.update(model));
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 2, 'a refresh does not build the other fifty-nine');
     await openMenu();
     const settingsBefore = await page.locator('#status').boundingBox();
     const menuList = page.locator('.margin-switch-menu .margin-project-list');
@@ -235,6 +266,59 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.deepEqual(await page.locator('#status').boundingBox(), settingsBefore, 'settings stays pinned while the list scrolls');
     assert.ok(settingsBefore.y >= 0 && settingsBefore.y + settingsBefore.height <= 760);
     await page.keyboard.press('Escape');
+    // A panel that appears and vanishes with no motion, next to a bar that slides and a menu that
+    // arrives, is an inconsistent system rather than a quiet one. `hidden` stays the only state.
+    await page.evaluate(() => ui.setSidebar(true));
+    await page.locator('#status').click();
+    const opening = await page.evaluate(() => document.querySelector('.margin-card:not([hidden])').getAnimations().map(a => a.transitionProperty));
+    assert.ok(opening.includes('opacity'), 'the card arrives rather than appearing: ' + JSON.stringify(opening));
+    await page.keyboard.press('Escape');
+    const leaving = await page.evaluate(() => { const card = document.querySelector('.margin-card[hidden]'); const style = getComputedStyle(card); return {display: style.display, events: style.pointerEvents}; });
+    assert.notEqual(leaving.display, 'none', 'it stays in the box long enough to leave');
+    assert.equal(leaving.events, 'none', 'and cannot swallow the click that dismissed it');
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.margin-card')).display), 'none', 'then it is gone');
+
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.locator('#status').click();
+    assert.deepEqual(await page.evaluate(() => document.querySelector('.margin-card:not([hidden])').getAnimations()), [], 'with reduced motion it simply appears');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.margin-card')).display), 'none', 'and simply goes');
+    await page.emulateMedia({reducedMotion: 'no-preference'});
+
+    // The foot sits under the conversations and against the bottom of the bar. Left in the flow it
+    // ended up stranded mid-bar with four hundred pixels of empty paper below it.
+    await page.evaluate(() => ui.setSidebar(true));
+    await page.setViewportSize({width: 1180, height: 820});
+    await page.evaluate(() => {model.projects=[model.projects[0]];model.activeProject='p-0';model.projects[0].threads=[{id:'home',title:'Home',active:true}];model.view=null;ui.update(model);});
+    const gap = await page.evaluate(() => {
+      const bar = document.querySelector('#workspace-sidebar').getBoundingClientRect();
+      const foot = document.querySelector('.margin-foot').getBoundingClientRect();
+      const settings = document.querySelector('#settings-rail').getBoundingClientRect();
+      const body = document.querySelector('.margin-body').getBoundingClientRect();
+      return {belowFoot: settings.top - foot.bottom, barBottom: bar.bottom, footBottom: foot.bottom, bodyHeight: body.height};
+    });
+    assert.ok(gap.belowFoot <= 24, 'the foot is contiguous with Settings, not floating above a void: ' + gap.belowFoot);
+    assert.ok(gap.bodyHeight > 200, 'and the conversations take the room that leaves: ' + gap.bodyHeight);
+
+    // A backend that has not answered, and a first run, say so rather than describing a project
+    // that does not exist.
+    await page.evaluate(() => {model.projects=[];model.activeProject=null;model.projectsLoaded=false;ui.update(model);});
+    assert.match(await page.locator('.margin-switch-trigger').innerText(), /Loading projects/);
+    await page.evaluate(() => {model.projectsLoaded=true;ui.update(model);});
+    const firstRun = await page.locator('.margin-switch-trigger').innerText();
+    assert.match(firstRun, /No projects yet/);
+    assert.doesNotMatch(firstRun, /quiet|no branch/, 'nothing is invented about a project that is not there');
+    assert.equal(await page.locator('.margin-body .margin-empty-new').count(), 1, 'and there is one way to start');
+    await page.locator('.margin-body .margin-empty-new').click();
+    assert.equal(await page.evaluate(() => calls.at(-1).action), 'newProject');
+
+    // data-link was set on the body and styled by nothing. It has a home now.
+    await page.evaluate(() => {model.link='offline';ui.update(model);});
+    assert.match(await page.locator('.margin-link').innerText(), /Offline/);
+    await page.evaluate(() => {model.link='live';ui.update(model);});
+    assert.equal(await page.locator('.margin-link').isVisible(), false);
+
     await page.evaluate(() => {model.projects=[];model.activeProject=null;ui.update(model);});
     assert.equal(await page.locator('#project-rail [data-project-id]').count(), 0);
     assert.equal(await page.locator('.project-section').count(), 0);

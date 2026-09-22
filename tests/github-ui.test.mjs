@@ -16,7 +16,7 @@ async function harness(browser, { build = true, viewport = { width: 1180, height
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.route('https://github-ui.test/**', route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><link rel="stylesheet" href="/project-workspace.css"><style>:root{--ink:#151413;--ink-2:#484139;--ink-3:#6a645b;--paper:#f8f5ef;--line:#ddd7ce}body{margin:0;padding:24px;background:var(--paper);color:var(--ink);font:14px Georgia}*{box-sizing:border-box}[hidden]{display:none!important}main{max-width:760px;margin:auto}.project-action{font:inherit}</style></head><body><main></main></body></html>' });
+    if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/project-workspace.css"><style>:root{--ink:#151413;--ink-2:#484139;--ink-3:#6a645b;--paper:#f8f5ef;--line:#ddd7ce}body{margin:0;padding:24px;background:var(--paper);color:var(--ink);font:14px Georgia}*{box-sizing:border-box}[hidden]{display:none!important}main{max-width:760px;margin:auto}.project-action{font:inherit}</style></head><body><main></main></body></html>' });
     try { return route.fulfill({ contentType: extname(path) === '.css' ? 'text/css' : 'text/javascript', body: readFileSync(resolve('public', '.' + path)) }); } catch { return route.fulfill({ status: 404 }); }
   });
   await page.goto('https://github-ui.test/');

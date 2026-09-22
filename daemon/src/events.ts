@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { runtime } from './store.js';
 import { sse } from './http.js';
-export function streamEvents(req: IncomingMessage, res: ServerResponse, after: number): void {
+export function streamEvents(req: IncomingMessage, res: ServerResponse, after: number, exclude: string[] = []): void {
   const store = runtime(), send = sse(res);
   // Large archives must drain progressively, not overflow the socket before its
   // headers have even reached the browser. Reconnect headers supersede the URL.
@@ -18,7 +18,7 @@ export function streamEvents(req: IncomingMessage, res: ServerResponse, after: n
     pumping = true;
     try {
       while (!closed) {
-        const page = store.replay(cursor, 250); if (!page.length) break;
+        const page = store.replay(cursor, 250, exclude); if (!page.length) break;
         for (const event of page) {
           if (closed || res.destroyed) return;
           send('event', event, event.id); cursor = event.id;

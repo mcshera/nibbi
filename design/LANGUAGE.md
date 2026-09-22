@@ -110,6 +110,23 @@ The veil is ink *over* a surface. On a control that already sits on a raised car
 
 **Rule.** Reach for a veil first. Use a bed only when the control sits on `--paper-raised` or on filled ink, where a veil would compound.
 
+### 2.2c The paper wash
+
+The veil is ink over paper. The other direction — translucent *paper* over paper — is how the bar lifts a control off its darker ground without a shadow, and it had seven alphas and no name for any of them (`.30`, `.38`, `.42`, `.55`, `.72`, `.78`, plus `.24`/`.46` in `platform.css`). Four steps, mirroring the veil:
+
+| token | alpha | role |
+|---|---|---|
+| `--wash-faint` | `.28` | under glass, where the surface is already translucent |
+| `--wash-rest` | `.42` | a control at rest on the bar |
+| `--wash-field` | `.56` | an input on a card |
+| `--wash-hover` | `.74` | either of those, hovered |
+
+Three of the merges move more than the `.02` the veil merges stayed inside (`.38`, `.55`, `.78`), so they are worth a look by eye; none is more than `.04`.
+
+**Rule.** White over *ink* is a different family and keeps its own values: the copy button on a code block, the toast's inner button, the lit-from-above vignette. Those are not washes and must not be tokenised as though they were.
+
+The reply's own surface is a surface, not a wash, and is declared with the translucent paper: `--bubble-bg` (`.62`) and `--bubble-bg-quiet` (`.45`, an event that was not said to you). Both are now measured — see §2.5.
+
 ### 2.3 Semantic colour — the biggest drift in the system
 
 Colour means *machine verdict*. There are exactly two verdicts, and they currently have **four reds and two greens** depending on which file you were editing:
@@ -156,6 +173,8 @@ The ramp is **computed, not picked**. `tools/contrast-verify.mjs` recomputes it 
 | `--ink-2` | 75 / 65 glass | 90 | 93 | 95 | 84 | 70 | 73 |
 | `--ink-3` | 65 / 55 glass | 75 | 79 | 80 | 69 | 56 | 58 |
 | `--ink-4` | 45 / 35 glass | 57 | 60 | 61 | 51 | 37 | 40 |
+
+`tools/contrast-verify.mjs` measures ten surfaces: the four opaque papers, the three glass composites, and — added when the wash family was named — the reply bubble on paper, the reply bubble under glass, and the notice bed. The bubble was the one text-bearing surface nobody had measured, and it turns out to be the most legible in the app (Lc 102 on paper, Lc 94 under glass), which is right for the thing you are there to read.
 
 The glass column runs **one band below** the opaque budget. That is the deal a deliberately translucent surface makes, and stating it is better than quietly failing the opaque budget, which is what was happening.
 
@@ -261,7 +280,8 @@ Every other step stays fixed on purpose: they are small UI text, and shrinking t
 | `--measure-dock` | `min(720px, 100vw - 56px)` | composer and chips |
 | `--measure-panel` | `min(760px, 100vw - 28px)` | platform dialogs |
 | `--measure-card` | `304px` | margin cards |
-| `--measure-menu` | `248px` / `320px` | dock panel / project menu |
+| `--measure-menu` | `248px` | the dock panel |
+| `--sidebar-width` | `256px` | the docked bar; `--sidebar-width-narrow` is the drawer below 900px |
 | `--pill-h` | `72px` → `60px` ≤640px | composer height |
 | `--feed-top` | `40vh` | where the conversation starts under the character |
 | `--feed-bottom` | `140px` | where it stops above the composer |
@@ -431,7 +451,8 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 | **toast** | pill, solid ink | `--type-control` | `--e-floating` ⚠️ currently black | z below an open dock panel |
 | **diff** | `--r-card` wells, mono | `--type-fine` | none | `--pass-*` added, `--fail-*` removed, per-file `<details>` |
 | **plan review** | `--r-panel`, `--veil-edge` border | `--type-body` | none | state badge is `--type-micro` uppercase in a pill |
-| **margin card** | `--r-panel`, `304px` | `--type-fine` | `--e-lifted` | forks `--ink-3` to `#5f5b55` for its bar |
+| **margin card** | `--r-panel`, `--measure-card` | `--type-fine` | `--e-lifted` | no ink fork: the derived ramp serves the bar (§2.5) |
+| **notice bubble** | the bubble on `--notice-bed`, `--veil-strong` border, `--ink-3` dot | `--type-read` | `--e-raised` | something was unreachable, not judged |
 | **platform panel** | `--r-surface`, `760px` | `--type-body` | `--e-dialog` | `::backdrop` is `--veil-edge` + `--blur-scrim` |
 | **jump to latest** | pill | `--type-fine` | `--e-floating` | tracks `--feed-bottom` |
 | **day divider** | rule + label | `--type-meta` | none | 40px hairlines either side |
@@ -442,7 +463,7 @@ Checked against the running app rather than inferred from the CSS, which correct
 
 1. ~~No empty states.~~ **Wrong — the rail has them**, and they are well written: `No projects yet`, `Nothing is open`, `Nothing is queued`, `Nothing merged yet today`, `No plan written yet`. What is missing is only that they are ad-hoc strings rather than a shared part, so a new surface has nothing to reach for.
 2. ~~No pending state.~~ **Wrong — loading states exist**, as text (`.project-loading`, `aria-busy`, `Loading…`). They are not skeletons, which is a stylistic choice rather than a gap.
-3. **An inline error that is not a failure.** Still real. `--fail-*` is for machine verdicts; "gateway unreachable" is a different thing and currently borrows the same red.
+3. ~~An inline error that is not a failure.~~ **Built.** `errorKind()` in `public/lib/text.js` separates a machine verdict from a machine being unreachable, and the notice bubble in §9 is what the second one wears. `--fail-*` is once again only ever a verdict.
 
 ---
 
@@ -453,7 +474,7 @@ Nibbi drives most of its UI from `body` attributes and classes. The full set, be
 | hook | set by | effect |
 |---|---|---|
 | `data-mode="talk"` | app | reveals the feed |
-| `data-link="busy\|demo\|offline\|booting"` | gateway | set, but nothing styles it since the pre-rail status dot was removed — either give it a home in the rail or stop setting it |
+| `data-link="busy\|demo\|offline\|booting"` | gateway | it has a home again: the bar's foot says `Offline — nothing is reaching the gateway` while the link is down, and nothing while it is up |
 | `.rest` | idle timer | feed drops to `.38` opacity, restores on hover |
 | `.busy` | a turn running | composer border softens, send becomes a stop square |
 | `.busy.steer-ready` | steerable turn + text in field | send returns as steer |

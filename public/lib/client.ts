@@ -41,8 +41,9 @@ export async function* parseSse(response: Response): AsyncGenerator<Record<strin
     if (!terminal) throw new Error('Connection ended before the result. Check Activity; the request was not retried.');
   } finally { reader.releaseLock(); }
 }
-export function subscribeEvents(options: { after: number; onEvent: (event: RunEvent) => void; onReady?: () => void; onOffline?: () => void; onCursor: (id: number) => void }): () => void {
-  const source = new EventSource('/api/events?after=' + options.after); let cursor = options.after;
+export function subscribeEvents(options: { after: number; exclude?: string[]; onEvent: (event: RunEvent) => void; onReady?: () => void; onOffline?: () => void; onCursor: (id: number) => void }): () => void {
+  const filter = options.exclude?.length ? '&exclude=' + encodeURIComponent(options.exclude.join(',')) : '';
+  const source = new EventSource('/api/events?after=' + options.after + filter); let cursor = options.after;
   source.addEventListener('event', message => {
     const event = JSON.parse((message as MessageEvent).data) as RunEvent;
     if (!Number.isSafeInteger(event.id) || event.id <= cursor) return;

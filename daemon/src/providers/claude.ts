@@ -75,6 +75,10 @@ export function startClaude(input: AgentInput, queryFactory: typeof query = quer
             // Partial events have no error tag. Once visible, never replace this text with local output.
             evidence.ordinaryTextProduced = true; input.onEvent('text.delta', { text: event.delta.text });
           }
+          // Thinking is reported so a long silence reads as work rather than as a hang. It is never
+          // evidence of ordinary output: a turn that only thought still produced nothing to show.
+          if (event.type === 'content_block_start' && (event.content_block.type === 'thinking' || event.content_block.type === 'redacted_thinking') && !message.parent_tool_use_id) input.onEvent('thinking.delta', { text: '' });
+          if (event.type === 'content_block_delta' && event.delta.type === 'thinking_delta' && !message.parent_tool_use_id) input.onEvent('thinking.delta', { text: event.delta.thinking ?? '' });
           if (event.type === 'content_block_start' && (event.content_block.type === 'tool_use' || event.content_block.type === 'server_tool_use' || event.content_block.type === 'mcp_tool_use')) {
             attempt(event.content_block.name);
             if (!message.parent_tool_use_id) input.onEvent('tool.started', { name: event.content_block.name });
