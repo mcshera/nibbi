@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.0 — 2026-09-22 — how it streams, and the left bar
+
+**Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which
+threw away whatever the reader had hold of. Text now lands as it arrives but costs at most one
+render per frame, and only the block still being written is rebuilt — so a selection survives the
+reply, a code block stops restarting, and a fence renders as code the moment it opens rather than as
+escaped prose. A caret says the reply is still open. Measured: no long tasks, a 17ms median frame.
+
+**Thinking.** Both providers were dropping their reasoning on the floor, so a turn that thought for
+twenty seconds showed three dots. It is a step now: it says what it is thinking, counts, and closes
+into "thought for 8s" when the first word arrives. The words are never written down; the trail keeps
+one line saying it happened.
+
+**The hot path.** The transcript is no longer rewritten on every feed mutation, durable text rows are
+coalesced instead of one per token, the database no longer fsyncs per token, and a subscriber can
+ask `/api/events` not to send it types it has no use for.
+
+**The left bar.** Escape belongs to whatever you are in again — it was captured at the document, so
+it never reached the composer, and when it did it cleared the whole conversation without asking. A
+project's settings card is built when it is opened rather than sixty at a time. The foot is anchored,
+so the progress line sits above Settings instead of stranded mid-bar above four hundred pixels of
+nothing. A bar with no projects says so instead of describing one that does not exist. Offline is a
+sentence. Cards, menus, the backdrop and the project sections arrive and leave instead of cutting.
+
+**Also.** A project section has a close control and leaves on Escape. The jump button counts what
+arrived while you were reading. An unreachable gateway is a notice, not a failure verdict. Eight
+declared-but-unused layout tokens are adopted and the bar's seven anonymous white alphas are a named
+family; the reply bubble is now under the contrast contract, on paper and under glass.
+
 ## Unreleased — reliability
 
 - Suggestion-only automation stays in suggest mode when recording notes or updating focus, capacity, model or spend limits.

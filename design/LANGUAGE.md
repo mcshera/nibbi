@@ -474,7 +474,7 @@ Nibbi drives most of its UI from `body` attributes and classes. The full set, be
 | hook | set by | effect |
 |---|---|---|
 | `data-mode="talk"` | app | reveals the feed |
-| `data-link="busy\|demo\|offline\|booting"` | gateway | set, but nothing styles it since the pre-rail status dot was removed — either give it a home in the rail or stop setting it |
+| `data-link="busy\|demo\|offline\|booting"` | gateway | it has a home again: the bar's foot says `Offline — nothing is reaching the gateway` while the link is down, and nothing while it is up |
 | `.rest` | idle timer | feed drops to `.38` opacity, restores on hover |
 | `.busy` | a turn running | composer border softens, send becomes a stop square |
 | `.busy.steer-ready` | steerable turn + text in field | send returns as steer |

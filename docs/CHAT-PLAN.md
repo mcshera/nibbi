@@ -33,6 +33,20 @@ messaging. It makes the chat history hard to read."*
 - Long replies: code blocks capped with expand; tables scroll horizontally.
 - Keyboard: `PageUp/PageDown` scroll the feed while typing; `End` jumps to latest.
 
+**P2 — how it streams — ✅ 2026-09-22**
+- Instant, not paced: text lands as it arrives, but at most one render per frame however many tokens
+  landed in it. No typewriter, no reveal buffer — the owner's call, and the reference implementations
+  that do pace (Vercel's `smoothStream`, the Claude Code TUI request) are the thing we did not do.
+- Block-stable: the reply is split into finished blocks and one live tail. Finished blocks are
+  rendered once and never touched, so a selection survives the reply, a code block stops restarting,
+  and half-typed markdown stops flickering. A fence renders as a code block the moment it opens.
+- A caret on the tail says the reply is still open, so a pause mid-reply does not read as a hang.
+- Thinking is a step: it opens on the first reasoning token, shows the end of what is being thought,
+  counts, and closes into "thought" with an elapsed time when the first real word arrives.
+- Nothing writes storage while a reply grows; the transcript is written when the turn settles.
+- Pinned by `tools/stream-verify.mjs`, and measured by `tools/stream-perf.mjs`: no long tasks, a
+  median frame of 17ms across a full reply.
+
 **P2 — conversations**
 - Oracle has one continuous session, so "chats" are days: a `journal` entry per day with `/journal` as the list view.
 - Search-as-you-type over history (`/history <q>` already exists) with jump-to-message.

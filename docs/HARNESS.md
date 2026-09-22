@@ -64,9 +64,14 @@ Tool and steer events sit under the run id (`GET /api/fixer-log?id=`); `plan.*` 
 | `tool.attempted` | `name`; every request, denied tools included |
 | `tool.started` | `name, source, input`; `attemptId` on Builds |
 | `tool.finished` | `name, source, ok, summary, error?, bytes, elapsedMs, diff?` |
+| `thinking.summary` | `ms, chars`; one row per turn that thought, written before the first word it said. The reasoning text itself is forwarded live and never recorded |
 | `turn.steered` | `text` (first 400 chars) |
 | `plan.proposed` | `id, steps:[{n, title, taskId}]` |
 | `plan.executed` | `id, runIds` |
 | `plan.cancelled` / `plan.failed` | `id`; on failure `error` and any `runIds` already queued |
+
+`text.delta` rows are coalesced — one row per sentence, newline, two kilobytes or eighty
+milliseconds rather than one per token — so a long reply is a handful of rows saying exactly what
+was said. Readers already join consecutive rows, so nothing about the recorded text changed.
 
 Each steer also writes a chat-history row as you, `[STEER] <guidance>`, tagged with the run id, so continuity and `search_chat` see the redirect beside the message it altered. `web.*` and `mcp.called` events are unchanged (`WEB-TOOLS.md`, `MCP.md`).
