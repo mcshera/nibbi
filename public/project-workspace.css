@@ -1,6 +1,10 @@
 /* Project records share the conversation's paper, ink and comfortable reading measure. */
 body.project-view .feed, body.project-view .chips, body.project-view .jump { display: none; }
 .project-workspace { position: fixed; z-index: var(--z-perch); top: var(--feed-top); bottom: 0; left: calc(50% + var(--workspace-left) / 2); transform: translateX(-50%); width: min(800px, calc(100vw - var(--workspace-left) - 64px)); display: flex; flex-direction: column; min-height: 0; color: var(--ink); }
+/* The section arrives; it does not leave. The conversation is revealed in the same instant, and two
+   motions for one change would be two statements about it. */
+.project-workspace { transition: opacity var(--t2) var(--ease), translate var(--t2) var(--ease); }
+@starting-style { .project-workspace:not([hidden]) { opacity: 0; translate: 0 10px; } }
 .project-workspace-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 0 12px; }
 .project-workspace h1 { margin: 0; font-size: var(--type-display); line-height: 1.25; letter-spacing: -.025em; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .project-workspace h1:focus { outline: none; }

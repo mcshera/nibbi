@@ -14,6 +14,9 @@ export async function chooseProject(page, name, { settle = 140 } = {}) {
   }
   if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
   await page.locator(`.margin-switch-menu [data-project-id="${name}"]`).click();
+  // The list fades out rather than vanishing, so wait for it to finish: a fixed delay shorter than
+  // the transition would leave the next click landing on a panel that is still there.
+  await page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))));
   await page.waitForTimeout(settle);
 }
 export async function closeSwitcher(page) {

@@ -72,7 +72,8 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.deepEqual(await page.evaluate(() => calls), [], 'progress rendering dispatches nothing');
     const card = page.locator('.margin-card:not([hidden])');
     const switcher = page.locator('.margin-switch-trigger');
-    const openMenu = async () => { if (!await page.locator('.margin-switch-menu').isVisible()) await switcher.click(); };
+    const settled = () => page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))));
+    const openMenu = async () => { await settled(); if (!await page.locator('.margin-switch-menu').isVisible()) await switcher.click(); await settled(); };   // a panel mid-fade still reads as visible
     // The gear lives in the switcher's list now, so reaching it means opening the list.
     const gear = async id => { await openMenu(); return options(id); };
     const row = id => page.locator(`.margin-switch-menu .margin-project[data-project-id="${id}"]`);
@@ -82,12 +83,13 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await switcher.getAttribute('data-current-project'), 'alpha', 'the switcher names the project the model says is active');
     assert.deepEqual(await page.locator('.project-section[data-project-section]').evaluateAll(els => els.map(el => el.dataset.projectSection)), ['builds','issues','plans']);
     assert.deepEqual(await page.locator('.project-section[data-section-project]').evaluateAll(els => [...new Set(els.map(el => el.dataset.sectionProject))]), ['alpha'], 'only the current project has a strip');
-    assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'the list starts closed');
+    assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'the list starts closed');   // never opened, so nothing to settle
     await openMenu();
     assert.equal(await page.locator('.margin-switch-menu').isVisible(), true);
     assert.deepEqual(await page.evaluate(() => calls), [], 'opening the list dispatches nothing');
     assert.equal(await card.count(), 0, 'opening the list does not open settings');
     await row('beta').click();
+    await settled();
     assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'choosing a project closes the list');
     assert.deepEqual(await page.evaluate(() => calls), [{action:'selectProject',id:'beta',value:undefined}]);
     assert.equal(await switcher.getAttribute('data-current-project'), 'alpha', 'project selection remains owned by the supplied model');
@@ -264,6 +266,26 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.deepEqual(await page.locator('#status').boundingBox(), settingsBefore, 'settings stays pinned while the list scrolls');
     assert.ok(settingsBefore.y >= 0 && settingsBefore.y + settingsBefore.height <= 760);
     await page.keyboard.press('Escape');
+    // A panel that appears and vanishes with no motion, next to a bar that slides and a menu that
+    // arrives, is an inconsistent system rather than a quiet one. `hidden` stays the only state.
+    await page.evaluate(() => ui.setSidebar(true));
+    await page.locator('#status').click();
+    const opening = await page.evaluate(() => document.querySelector('.margin-card:not([hidden])').getAnimations().map(a => a.transitionProperty));
+    assert.ok(opening.includes('opacity'), 'the card arrives rather than appearing: ' + JSON.stringify(opening));
+    await page.keyboard.press('Escape');
+    const leaving = await page.evaluate(() => { const card = document.querySelector('.margin-card[hidden]'); const style = getComputedStyle(card); return {display: style.display, events: style.pointerEvents}; });
+    assert.notEqual(leaving.display, 'none', 'it stays in the box long enough to leave');
+    assert.equal(leaving.events, 'none', 'and cannot swallow the click that dismissed it');
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.margin-card')).display), 'none', 'then it is gone');
+
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.locator('#status').click();
+    assert.deepEqual(await page.evaluate(() => document.querySelector('.margin-card:not([hidden])').getAnimations()), [], 'with reduced motion it simply appears');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.margin-card')).display), 'none', 'and simply goes');
+    await page.emulateMedia({reducedMotion: 'no-preference'});
+
     // The foot sits under the conversations and against the bottom of the bar. Left in the flow it
     // ended up stranded mid-bar with four hundred pixels of empty paper below it.
     await page.evaluate(() => ui.setSidebar(true));

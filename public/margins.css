@@ -125,7 +125,28 @@ body.native-mac .margin-card-right { top: auto; }
   .sidebar-head { padding-top: 8px; padding-bottom: 4px; }
   .margin-card { top: 12px; max-height: calc(100dvh - 24px); }
 }
-@media (prefers-reduced-motion: reduce) { .workspace-sidebar, .sidebar-toggle, .workspace-sidebar * { transition: none !important; animation: none !important; } }
+/* Arrive and leave, as transitions rather than keyframes, so `hidden` stays the one thing that says
+   whether a panel is open — six tools and the app's own keyboard routing select on it.
+   `translate` rather than `transform`: the surfaces this shape is shared with centre themselves with
+   a transform, and a keyframe on that property would throw them sideways.
+   Entrance is not the hover feedback docs/MARGIN-SURFACE-POLISH.md asked to leave alone; it is the
+   `arrive` the rest of the system already uses to say a thing is new.
+   @starting-style gives the in; transition-behavior gives the box long enough to play the out.
+   Where neither is supported both are instant, which is exactly where this started. */
+.margin-card, .margin-switch-menu { transition: opacity var(--t2) var(--ease), translate var(--t2) var(--ease); }
+.sidebar-backdrop { transition: opacity var(--t2) var(--ease); }
+@starting-style {
+  .margin-card:not([hidden]), .margin-switch-menu:not([hidden]) { opacity: 0; translate: 0 10px; }
+  .sidebar-backdrop:not([hidden]) { opacity: 0; }
+}
+@supports (transition-behavior: allow-discrete) {
+  .margin-card, .margin-switch-menu, .sidebar-backdrop { transition-property: opacity, translate, display; transition-behavior: allow-discrete; }
+  /* Leaving is faster than arriving, and a fading panel must not eat the click that dismissed it. */
+  .margin-card[hidden], .margin-switch-menu[hidden] { opacity: 0; translate: 0 8px; pointer-events: none; transition-duration: var(--t2); }
+  .sidebar-backdrop[hidden] { opacity: 0; pointer-events: none; }
+}
+
+@media (prefers-reduced-motion: reduce) { .workspace-sidebar, .sidebar-toggle, .sidebar-backdrop, .workspace-sidebar * { transition: none !important; animation: none !important; } }
 
 /* A project's work lives directly beneath its name. */
 .project-heading-row { display: flex; align-items: center; gap: 0; }
