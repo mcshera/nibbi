@@ -64,6 +64,18 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .nib .said:empty { min-height: 0; }
 .nib .said.plain { white-space: pre-wrap; font-size: var(--type-body); line-height: 1.5; font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2); }
 @keyframes think { 0%,100% { transform: scale(.7); opacity: .55; } 50% { transform: scale(1.05); opacity: 1; } }
+/* The block still being written. Everything above it is finished and is never rendered again, which
+   is what keeps a selection alive and a code block from restarting. It is unwrapped when the reply
+   settles, so a finished reply has no trace of it. */
+.nib .said-tail > :first-child { margin-top: 0; }
+/* A bar after the last word says the reply is still open, so a pause in the middle reads as waiting
+   rather than as finished. It beats with `think`, the same motion a running step uses. */
+.bubble.live .said-tail:empty::after,
+.bubble.live .said-tail > :is(p, h1, h2, h3):last-child::after,
+.bubble.live .said-tail :is(ul, ol):last-child > li:last-child:not(:has(p, ul, ol, pre))::after {
+  content: ""; display: inline-block; width: 2px; height: .95em; margin-left: 3px; vertical-align: -.1em;
+  border-radius: var(--r-bar); background: var(--ink); animation: think 1.1s ease-in-out infinite;
+}
 .nib.error .said { color: var(--fail-quiet); }
 .nib .said p { margin: 0 0 .7em; } .nib .said p:last-child { margin-bottom: 0; }
 .nib .said h1, .nib .said h2, .nib .said h3 { font-size: 1.05em; margin: .8em 0 .35em; font-weight: 600; }

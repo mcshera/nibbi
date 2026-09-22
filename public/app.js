@@ -16,6 +16,8 @@ import { installPocketInteractions } from './lib/pocket-interactions.js';
 import { createClient, parseSse, subscribeEvents, requestId } from './lib/client.ts';
 import { platformPanel } from './lib/platform.ts';
 import { escapeHtml, md, parseActs, firstSentences, stripMd, TOOL_LABEL, toolLabel, humanError, questionActs, relTime, parseDiff } from './lib/text.js';
+import { createFrameFlush } from './lib/frame-flush.js';
+import { cleanReply, splitBlocks } from './lib/stream-md.js';
 import { describeToolEvent, stepSummaryLine, elapsedLabel, inputLine } from './lib/transcript.js';
 import { narrate, deliveryTransition, deliveryContext, streakIncrease, runStatusChange } from './lib/narration.js';
 /* app.js — Nibbi: the surface. One character, one pill, and UI that only shows up when it's needed. */
@@ -241,10 +243,11 @@ new MutationObserver(() => scrollFeed(false)).observe(feed, { childList: true, s
 new ResizeObserver(() => scrollFeed(false)).observe(feed);
 
 /* ------------------------------------------------------------------ markdown */
-function renderMd(src) {
+function mdFragment(src) {
   let html = '';
-  // raw HTML from the brain is shown, not run — but leave code spans/fences alone (marked escapes those itself); lone ~ (as in ~$4.75) is not strikethrough
-  const safe = String(src || '').split(/(```[\s\S]*?```|`[^`\n]*`)/g).map((seg, i) => i % 2 ? seg : seg.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/(^|[^~\\])~(?!~)/g, '$1\\~')).join('');
+  // raw HTML from the brain is shown, not run — but leave code spans/fences alone (marked escapes those itself); lone ~ (as in ~$4.75) is not strikethrough.
+  // A fence that is still open counts as code: without the `|$` arm its body fell through as prose, was escaped here and escaped again by marked, so streaming code read "&lt;" until the closing fence arrived.
+  const safe = String(src || '').split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g).map((seg, i) => i % 2 ? seg : seg.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/(^|[^~\\])~(?!~)/g, '$1\\~')).join('');
   try { html = marked.parse(safe, { gfm: true, breaks: true }); } catch { html = escapeHtml(src); }
   const tpl = document.createElement('template'); tpl.innerHTML = html;
   for (const el of tpl.content.querySelectorAll('script,style,iframe,object,embed,link,meta')) el.remove();
@@ -253,10 +256,24 @@ function renderMd(src) {
     if (el.tagName === 'A') { el.target = '_blank'; el.rel = 'noopener'; }
     if (el.tagName === 'IMG' && /^\//.test(el.getAttribute('src') || '')) el.src = '/api/file?p=' + encodeURIComponent(el.getAttribute('src'));
   }
-  for (const pre of tpl.content.querySelectorAll('pre')) { const b = document.createElement('button'); b.type = 'button'; b.className = 'copycode'; b.textContent = 'copy'; b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/copy$/, '').replace(/show all \(\d+ lines\)$/, '')); toast('copied'); }; pre.appendChild(b); const n = (pre.textContent.match(/\n/g) || []).length; if (n > 16) { pre.classList.add('capped'); const x = document.createElement('button'); x.type = 'button'; x.className = 'expand'; x.textContent = 'show all (' + n + ' lines)'; x.onclick = () => { pre.classList.remove('capped'); x.remove(); }; pre.appendChild(x); } }
   for (const tb of tpl.content.querySelectorAll('table')) { const w = document.createElement('div'); w.className = 'tblwrap'; tb.replaceWith(w); w.appendChild(tb); }
   return tpl.content;
 }
+/* The controls on a code block are attached once the reply has settled. While it streams the fence
+   is still growing, so a cap that appears at sixteen lines and a copy button for half a program are
+   both wrong, and rebuilding them every frame is what made the block flicker. */
+function decoratePre(root) {
+  for (const pre of root.querySelectorAll('pre')) {
+    if (pre.querySelector('.copycode')) continue;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'copycode'; b.textContent = 'copy';
+    b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/copy$/, '').replace(/show all \(\d+ lines\)$/, '')); toast('copied'); };
+    pre.appendChild(b);
+    const n = (pre.textContent.match(/\n/g) || []).length;
+    if (n > 16) { pre.classList.add('capped'); const x = document.createElement('button'); x.type = 'button'; x.className = 'expand'; x.textContent = 'show all (' + n + ' lines)'; x.onclick = () => { pre.classList.remove('capped'); x.remove(); }; pre.appendChild(x); }
+  }
+  return root;
+}
+function renderMd(src) { const frag = mdFragment(src); decoratePre(frag); return frag; }
 
 /* ------------------------------------------------------------------ feed */
 
@@ -284,7 +301,7 @@ function newTurn(text, images, at) {
   nib.append(nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
   feed.appendChild(turn); S.stick = true; scrollFeed(true);
-  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null };
+  const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null, flush: null, tail: null, stable: 0 };
   S.turns.push(T);
   return T;
 }
@@ -362,12 +379,67 @@ function finishSteps(T, ok) {
   T.fold.querySelector('.l').innerHTML = escapeHtml(line) + ' — <u>show</u>';
   T.steps.classList.add('folded');   // the screen reader hears T.stepLine once, composed into the reply's announcement by the caller; individual tool frames are never announced
 }
-function setSaid(T, text, live) {
+/* A command's output is text with links in it, never markdown. */
+function renderPlain(T, clean) {
+  T.said.classList.add('plain'); T.said.replaceChildren();
+  for (const part of clean.split(/(https?:\/\/[^\s)]+)/g)) {
+    if (/^https?:\/\//.test(part)) { const a = document.createElement('a'); a.href = part; a.textContent = part; a.target = '_blank'; a.rel = 'noopener'; T.said.appendChild(a); }
+    else T.said.appendChild(document.createTextNode(part));
+  }
+}
+/* Keep the leading children that are already right and replace from the first difference. A tail
+   that grows a word keeps its paragraph, its images and any selection inside the part that stood. */
+function patchChildren(parent, frag) {
+  const next = [...frag.childNodes], current = [...parent.childNodes];
+  let i = 0;
+  while (i < next.length && i < current.length && current[i].isEqualNode(next[i])) i++;
+  for (let j = current.length - 1; j >= i; j--) current[j].remove();
+  for (let j = i; j < next.length; j++) parent.appendChild(next[j]);
+}
+/* One render of the live reply. Finished blocks are rendered once and never touched again; only the
+   tail — the block still being written — is rebuilt, into its own element so the caret has somewhere
+   to live and so the rest of the reply is out of reach. */
+function renderLive(T) {
+  const clean = cleanReply(T.acc, { partial: true });
+  if (T.plain) { renderPlain(T, clean); return; }
+  const blocks = splitBlocks(clean), settled = blocks.length - 1;
+  if (!T.tail) { T.tail = document.createElement('div'); T.tail.className = 'said-tail'; T.said.appendChild(T.tail); T.stable = 0; }
+  if (settled > T.stable) { T.said.insertBefore(mdFragment(blocks.slice(T.stable, settled).join('\n\n')), T.tail); T.stable = settled; }
+  else if (settled < T.stable) { T.said.replaceChildren(mdFragment(blocks.slice(0, settled).join('\n\n')), T.tail); T.stable = settled; }   // a boundary cannot retreat while text only grows; rebuild rather than trust it
+  patchChildren(T.tail, mdFragment(blocks[settled]));
+}
+function scheduleLive(T) {
+  (T.flush ||= createFrameFlush({ onFlush: () => renderLive(T), hidden: () => document.hidden })).mark();
+  return T.flush;
+}
+/* Tokens go in here. The text is the turn's own; this only asks for a frame. */
+function appendSaid(T, chunk) { T.acc += chunk; scheduleLive(T); }
+function endLive(T) {
+  if (T.flush) { T.flush.cancel(); T.flush = null; }
+  if (T.tail) { T.tail.remove(); T.tail = null; }
+  T.stable = 0;
+}
+/* The end of a streamed reply, when the result is the text that was streamed. The tail's children
+   move up and the whole reply is compared against how it would have rendered had it arrived at once;
+   only a difference is worth replacing, so in the ordinary case nothing on screen moves. */
+function settleSaid(T, text) {
+  T.flush?.finish();
+  if (T.tail) { while (T.tail.firstChild) T.said.insertBefore(T.tail.firstChild, T.tail); T.tail.remove(); }
+  T.flush = null; T.tail = null; T.stable = 0;
+  const full = mdFragment(cleanReply(text));
+  const probe = document.createElement('div'); probe.appendChild(full.cloneNode(true));
+  if (probe.innerHTML !== T.said.innerHTML) T.said.replaceChildren(full);
+  decoratePre(T.said);
   T.acc = text;
-  const clean = parseActs(text.replace(/»voice:\s*(?:(?!»voice:)[^\n])*\n?/g, '')).clean;
-  if (T.plain) { T.said.classList.add('plain'); T.said.replaceChildren(); const parts = clean.split(/(https?:\/\/[^\s)]+)/g); for (const part of parts) { if (/^https?:\/\//.test(part)) { const a = document.createElement('a'); a.href = part; a.textContent = part; a.target = '_blank'; a.rel = 'noopener'; T.said.appendChild(a); } else T.said.appendChild(document.createTextNode(part)); } return; }
-  if (live) { if (!T.raf) T.raf = setTimeout(() => { T.raf = 0; T.said.replaceChildren(renderMd(parseActs(T.acc.replace(/»voice:\s*(?:(?!»voice:)[^\n])*\n?/g, '')).clean)); }, 60); }
-  else { if (T.raf) { clearTimeout(T.raf); T.raf = 0; } T.said.replaceChildren(renderMd(clean)); }
+}
+/* The whole reply at once: restored history, a command's output, an error, a rewritten fallback. */
+function setSaid(T, text, live) {
+  if (live) { T.acc = text; scheduleLive(T); return; }
+  endLive(T);
+  T.acc = text;
+  const clean = cleanReply(text);
+  if (T.plain) { renderPlain(T, clean); return; }
+  T.said.replaceChildren(renderMd(clean));
 }
 function setMeta(T, r) {
   updateLocalReply(T, r);
@@ -1263,7 +1335,7 @@ async function send(text, images, opts) {
         if (ev.phase === 'finished') finishToolStep(T, ev);
         else {
           toolCount++;
-          if (spoke && T.acc && !/\n\s*$/.test(T.acc)) { T.acc += '\n\n'; }
+          if (spoke && T.acc && !/\n\s*$/.test(T.acc)) appendSaid(T, '\n\n');   // through the same door, or the DOM and T.acc part company
           addStep(T, ev.label, null, ev);
           if (nibbi.mood() !== 'working') nibbi.setMood('working');
           if (toolCount % 3 === 1) nibbi.spatter(1, 0.9);
@@ -1271,7 +1343,7 @@ async function send(text, images, opts) {
         }
       } else if (e.ev === 'delta' && e.t) {
         if (!spoke) { spoke = true; nibbi.setMood('speaking'); if (T.liveStep) { markStep(T.liveStep, 'done'); T.liveStep = null; } }
-        setSaid(T, T.acc + e.t, true);
+        appendSaid(T, e.t);
         nibbi.pulse(Math.min(1, 0.35 + e.t.length * 0.03)); if (!T.local) streamSpeech(T);
       } else if (e.ev === 'done') { updateLocalReply(T, e); result = e; }
     }
@@ -1283,11 +1355,15 @@ async function send(text, images, opts) {
   result = settleLocalReply(result, T);
   if (T.local && (result.isError || result.aborted)) { stopSpeaking(); S.spokeStream = false; }
   const squash = (s) => String(s || '').replace(/»(voice|acts):[^\n]*\n?/g, '').replace(/\s+/g, '');
-  if (T.acc && result.text && squash(T.acc) === squash(result.text)) result.text = T.acc.replace(/»voice:[^\n]*\n?/g, '');
+  const streamedEqual = !!(T.acc && result.text && squash(T.acc) === squash(result.text));
+  if (streamedEqual) result.text = T.acc.replace(/»voice:[^\n]*\n?/g, '');
   const ok = !result.isError;
   if (!ok) { result.raw = result.text; if (!T.local) result.text = humanError(result.text); }
   finishSteps(T, ok);
-  setSaid(T, result.text || '', false);
+  // The reply that was read is the reply that stays. Anything else — an error, a rewritten local
+  // answer, a command's output — is a different text and is rendered whole.
+  if (T.flush && streamedEqual && ok && !T.plain) settleSaid(T, result.text || '');
+  else setSaid(T, result.text || '', false);
   setMeta(T, result);
   if (result.costUsd) S.sessionCost += result.costUsd; S.sessionTurns++;
   T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
@@ -2140,6 +2216,9 @@ addEventListener('unhandledrejection', (e) => clientLog('error', (e.reason && (e
 const _toast = toast; window.__toastLog = true;
 
 addEventListener('pagehide', () => { LS.set('lastSeen', Date.now()); flushCursor(); persistTranscript(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { LS.set('lastSeen', Date.now()); flushCursor(); persistTranscript(); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { LS.set('lastSeen', Date.now()); flushCursor(); persistTranscript(); return; }
+  S.liveTurn?.flush?.flushNow();   // a hidden tab gets no frames; make the reply current before the first one it does get
+});
 window.nibbi = nibbi; window.nibbiApp = { send, tidy, state: () => S, layout, interactions, voice: { snapshot: () => ({ enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }) } };
 })();
