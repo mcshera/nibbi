@@ -145,6 +145,33 @@ try {
     } finally { await context.close(); }
   });
 
+  // A control on ink (a code block's copy, a toast's action) cannot show the ink ring: it takes the
+  // same ring in the inverse ink, and the page's own ground is never what it rings against.
+  await scenario('a focus ring on ink is the inverse ring', async () => {
+    const { context, page: tab, errors } = await page({ width: 1180, height: 820 }, {}, { query: '?nosw=1', reply: fence });
+    try {
+      await tab.waitForFunction(() => document.body.dataset.link === 'live');
+      await tab.evaluate(() => window.nibbiApp.send('show me'));
+      await tab.waitForFunction(() => !window.nibbiApp.state().busy && document.querySelector('.turn:last-child pre .copycode'), null, { timeout: 20_000 });
+      const ring = selector => tab.evaluate(sel => {
+        const el = document.querySelector(sel), style = getComputedStyle(el), probe = document.createElement('i');
+        probe.style.color = 'var(--ink-inverse)'; document.body.append(probe); const inverse = getComputedStyle(probe).color; probe.remove();
+        return { visible: el.matches(':focus-visible'), ring: `${style.outlineStyle} ${style.outlineWidth} ${style.outlineColor}`, inverse };
+      }, selector);
+      await tab.keyboard.press('Shift');   // keyboard modality, so a scripted focus is a visible one
+      await tab.locator('.turn:last-child pre .copycode').evaluate(el => el.focus());
+      const copy = await ring('.turn:last-child pre .copycode');
+      assert.deepEqual(copy, { visible: true, ring: `solid 2px ${copy.inverse}`, inverse: copy.inverse }, 'the code block copy button rings in the inverse ink');
+      await tab.evaluate(() => window.nibbiApp.tidy());
+      await tab.locator('#toast button').waitFor();
+      await tab.locator('#toast button').evaluate(el => el.focus());
+      const undo = await ring('#toast button');
+      assert.deepEqual(undo, { visible: true, ring: `solid 2px ${undo.inverse}`, inverse: undo.inverse }, 'and so does the toast action');
+      await tab.screenshot({ path: `${out}ring-on-ink-1180x820.png` });
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+
   // A transcript saved before the step rows were kept holds the summary line alone. There is nothing
   // under it to open, so it must not be announced as a collapsed toggle that never expands.
   await scenario("an older transcript's step summary is a line, not a toggle", async () => {
@@ -179,4 +206,4 @@ try {
   await fixture.close();
 }
 if (failed) process.exitCode = 1;
-else console.log('Surface checks passed: a section is a room, the repository toolbar keeps its row, an agent card closes when unpinned, the copy button is a 44px target, and an old step summary is a line.');
+else console.log('Surface checks passed: a section is a room, the repository toolbar keeps its row, an agent card closes when unpinned, the copy button is a 44px target, a ring on ink is the inverse ring, and an old step summary is a line.');

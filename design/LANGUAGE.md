@@ -2,7 +2,7 @@
 
 Read 2026-09-21 out of the shipped surface, not invented over it. Every rule below is either **observed** (the code already does this consistently — the rule just names it) or **proposed** (the code is inconsistent here — the rule picks the winner and says what it costs to adopt). Nothing is aspirational. Where a rule came from outside, the source is linked.
 
-Companion file: **`public/tokens.css`** — the same system as custom properties, 126 of them, linked ahead of `styles.css` in `public/index.html` and therefore live. The drift register in §15 has been applied: every literal in `public/*.css` that the register named now reads a token.
+Companion file: **`public/tokens.css`** — the same system as custom properties, 127 of them, linked ahead of `styles.css` in `public/index.html` and therefore live. The drift register in §15 has been applied: every literal in `public/*.css` that the register named now reads a token.
 
 **A caution this document earned.** Several claims in the first draft were read out of the CSS without checking what the running app actually renders, and three of them were wrong: the "missing" empty states exist, the "missing" pending states exist, and the touch-reachability gap was one control rather than several. Worse, a whole section of CSS — `.status`, `.project`, `.pmenu`, `.plabel`, 45 lines — described a shell that the workspace rail replaced and that nothing constructs any more; this document had been documenting it as live. Those entries are corrected below and the dead CSS is deleted. **Check a claim against the DOM before writing it down here.**
 
@@ -28,7 +28,7 @@ Measured before and after applying §15:
 | ink-veil alphas | 25 distinct | **1** (a zero-size shadow that draws nothing) | tokens only |
 | z-index literals | 12 anonymous | **2** (both in a local stacking context, deliberately) | named rungs only |
 | backdrop blur literals | 6 distinct | **0** | tokens only |
-| custom properties declared | 16 | **126** | — |
+| custom properties declared | 16 | **127** | — |
 | dead pre-rail CSS | 45 lines | **0** | — |
 
 The five surviving hexes are all legitimate: `#151413`, `#383633` and `#5f5c57` as `var(--ink, …)` fallbacks (kept in step with the ramp), `#000` inside a `mask-image` gradient — a mask channel, not a colour — and `#fff` once on the QR code, which must be true white to scan.
@@ -512,7 +512,7 @@ Already met, and worth stating so it stays met:
 
 | requirement | implementation |
 |---|---|
-| focus visible | `outline: var(--focus-ring)` (`2px solid var(--ink)`), `offset: 3px` (2px inside dense panels), on every interactive element; `tools/style-verify.mjs` fails any other ring |
+| focus visible | `outline: var(--focus-ring)` (`2px solid var(--ink)`), `offset: 3px` (2px inside dense panels), on every interactive element; on ink (a toast's action, a code block's copy) `var(--focus-ring-inverse)`, the same ring in `--ink-inverse`, since the ink ring cannot be seen there; `tools/style-verify.mjs` fails any other ring |
 | disabled | `opacity: var(--dim-disabled)` (`.45`), everywhere; a control that must not dim says `opacity: 1` and shows it another way (the outlined Settings badge) |
 | touch targets | 44px minimum at `≤640px` and `pointer: coarse` |
 | reduced motion | global 1ms override + per-surface + character-level static poses |
@@ -579,7 +579,7 @@ Two families were found while applying the register and are now documented rathe
 
 Round 2 (0.8.1) closed two more of the same kind. Builds showed `To push 0` and `Pull requests 0` on every project, GitHub or not: those two now hide as a group when no run delivers through GitHub (`github.mode` or `workflowMode` is `github`) and neither counts anything (a local merge on a GitHub-connected project is mode `local` and still to push), while `Needs attention` stays, because that is where a local project's failed builds are.
 
-Two tokens joined the file, `--dim-disabled` and `--focus-ring`, replacing six disabled opacities (`.35`, `.4`, `.42`, `.45`, `.45`, `.5`) and every hand-drawn ring (`--ink-2` in the workspace and `--margin-muted` on the card's scroller among them). `--track-micro` is adopted at its two exact sites. 28 `!important` flags are retired — 16 in `margins.css` and 11 in `project-workspace.css`, where the button resets sat at (0,1,1) and outranked every control's own class (they are under `:where()` now), and the palette's one, which a `max-width` does without. What remains is `[hidden]` and the reduced-motion kill switch (7 in `styles.css`, 3 in `margins.css`), and `tools/style-verify.mjs`, first in `npm run verify`, holds each file to that budget. Two things came back once the resets stopped winning: the section's `×` renders at its declared `--type-title` (21px, as the card's close does; it was 16), and a disabled Settings preference keeps full opacity with its outlined badge, as §12's shape-not-colour rule always asked.
+Three tokens joined the file, `--dim-disabled`, `--focus-ring` and `--focus-ring-inverse` (the same ring on ink, where the ink one cannot be seen), replacing six disabled opacities (`.35`, `.4`, `.42`, `.45`, `.45`, `.5`) and every hand-drawn ring (`--ink-2` in the workspace and `--margin-muted` on the card's scroller among them). `--track-micro` is adopted at its two exact sites. 28 `!important` flags are retired — 16 in `margins.css` and 11 in `project-workspace.css`, where the button resets sat at (0,1,1) and outranked every control's own class (they are under `:where()` now), and the palette's one, which a `max-width` does without. What remains is `[hidden]` and the reduced-motion kill switch (7 in `styles.css`, 3 in `margins.css`), and `tools/style-verify.mjs`, first in `npm run verify`, holds each file to that budget. Two things came back once the resets stopped winning: the section's `×` renders at its declared `--type-title` (21px, as the card's close does; it was 16), and a disabled Settings preference keeps full opacity with its outlined badge, as §12's shape-not-colour rule always asked.
 
 ## 16. References
 

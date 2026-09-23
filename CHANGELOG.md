@@ -38,7 +38,8 @@ line — the row's label already says whose numbers they are.
 **One rule, one check.** Two resets at (0,1,1) outranked every control's own class in the bar and
 the workspace, and twenty-seven `!important` flags were holding the line; the resets are under
 `:where()` and the flags are gone. Six disabled opacities are one `--dim-disabled`, every focus ring is one
-`--focus-ring`, and `tools/style-verify.mjs`, first in `npm run verify`, fails a new flag, a new dimming,
+`--focus-ring` (or its inverse on ink, where an ink ring cannot be seen), and `tools/style-verify.mjs`,
+first in `npm run verify`, fails a new flag, a new dimming,
 a hand-drawn ring or verdict colour on something that is not a verdict. Measured across 260 visible
 controls at 1180 and 390, two things changed: the section's × is the 21px it always declared, and a
 disabled pill dims to .45 instead of .42.

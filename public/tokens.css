@@ -214,6 +214,7 @@
    * 3px, or 2px inside a dense panel (LANGUAGE.md 12). */
   --dim-disabled: .45;
   --focus-ring: 2px solid var(--ink);
+  --focus-ring-inverse: 2px solid var(--ink-inverse);   /* the same ring for a control that sits on ink: a toast, a code block */
 }
 
 /* phones: the composer shortens and the dock radius follows it. everything else

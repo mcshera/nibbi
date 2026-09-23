@@ -243,7 +243,9 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 body.calm *, body.calm *::before, body.calm *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 
 /* ---------- focus + screen readers ---------- */
-:where(.chip, .steps .fold, .meta button, .jump, .toast button, .copycode, .agent):focus-visible { outline: var(--focus-ring); outline-offset: 3px; border-radius: var(--r-pill); }
+:where(.chip, .steps .fold, .meta button, .jump, .agent):focus-visible { outline: var(--focus-ring); outline-offset: 3px; border-radius: var(--r-pill); }
+/* On ink the ink ring cannot be seen: the toast's pill and a code block take the inverse ring, 3px out, inside their own ground. */
+.toast button:focus-visible, .nib .said pre .copycode:focus-visible { outline: var(--focus-ring-inverse); outline-offset: 3px; }
 .pill .send:focus-visible, .pill .dock:focus-visible { outline: var(--focus-ring); outline-offset: 3px; }
 .pill textarea:focus-visible { outline: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
