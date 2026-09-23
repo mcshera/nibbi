@@ -25,6 +25,8 @@ async function open(page,project,section){
  await chooseProject(page,project);await closeSwitcher(page);
  await page.locator(`[data-section-project="${project}"][data-project-section="${section}"]`).click();await ready(page,section);
 }
+// A draft belongs to its conversation (per-thread drafts): after browsing another project, go back to the one it was typed in.
+async function backToDraft(page,project){if(await page.locator('#sidebar-toggle').isVisible()&&await page.locator('#workspace-sidebar').getAttribute('aria-hidden')==='true'){await page.locator('#sidebar-toggle').click();await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);}await chooseProject(page,project);await closeSwitcher(page);}
 async function tab(page,section){const project=await page.evaluate(()=>nibbiApp.state().projectView.project);await open(page,project,section);}
 async function shot(page,name){await page.waitForFunction(()=>{const s=nibbi.state();return Math.abs(s.y-s.ty)<2&&Math.abs(s.x-s.tx)<2&&Math.abs(s.r-s.tr)<1;});await page.screenshot({path:join(out,name+'.png')});}
 async function createPage(width=1180,height=712){const context=await browser.newContext({viewport:{width,height},serviceWorkers:'block'});await context.addInitScript(silentMicrophone);const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>report.errors.push(e.message));await context.route('**/*',route=>new URL(route.request().url()).origin===fixture.base?route.continue():route.abort());await page.goto(fixture.base+'/?nosw=1'+(width===1180?'&app=1':''));await page.waitForFunction(()=>window.nibbiApp?.state().projects?.length>=3);return{context,page};}
@@ -33,7 +35,7 @@ const record=(page,title)=>page.locator('.project-record').filter({has:page.loca
 try{
  browser=await chromium.launch({channel:'chrome'});
  if(report.scope!=='responsive'){
- const {page,context}=await createPage();
+ const {page,context}=await createPage();let draftProject;
  try{
   await check('the section close preserves the active conversation and work while Nibbi is busy',async()=>{
    const release=fixture.holdChat();
@@ -42,7 +44,8 @@ try{
     await page.waitForFunction(()=>nibbiApp.state().busy&&nibbiApp.state().activeRunId);
     await page.locator('#ask').fill('An unsent follow-up');await attachFixture(page);
     const before=await page.evaluate(()=>({thread:nibbiApp.state().thread,run:nibbiApp.state().activeRunId,turns:nibbiApp.state().turns.map(t=>t.text)}));
-    for(const section of ['builds','issues','plans'])await open(page,'observatory',section);
+    const current=await page.evaluate(()=>nibbiApp.state().project);for(const section of ['builds','issues','plans'])await open(page,current,section);// Another project is refused while nibbi answers: the reply, its chips and its errors belong to the one it started in.
+    {const other=(await page.evaluate(()=>nibbiApp.state().projects.map(p=>p.id||p.name))).find(id=>id&&id!==current&&id!=='vault');if(other){if(await page.locator('#sidebar-toggle').isVisible()){await page.locator('#sidebar-toggle').click();await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);}await chooseProject(page,other);await closeSwitcher(page);assert.equal(await page.evaluate(()=>nibbiApp.state().project),current,'a project switch waits for the reply');await page.locator('.margin-error').filter({hasText:/answering in/}).waitFor();}};
     const writes=fixture.calls.filter(c=>c.method==='POST').length;
     await page.getByRole('button',{name:'Close and return to the conversation',exact:true}).click();
     assert.deepEqual(await page.evaluate(()=>({thread:nibbiApp.state().thread,run:nibbiApp.state().activeRunId,turns:nibbiApp.state().turns.map(t=>t.text)})),before);
@@ -56,7 +59,7 @@ try{
    await page.locator('#attach button').click();
   });
   await check('informative navigation agrees with actual canonical records',async()=>{
-   await page.locator('#ask').fill('Preserve this conversation draft');await attachFixture(page);await open(page,'paper-garden','issues');
+   draftProject=await page.evaluate(()=>nibbiApp.state().project);await page.locator('#ask').fill('Preserve this conversation draft');await attachFixture(page);await open(page,'paper-garden','issues');
    await page.waitForFunction(()=>document.querySelector('[data-section-project="paper-garden"][data-project-section="issues"] .project-section-badge').textContent==='2 open');
    assert.equal(await page.locator('[data-section-project="paper-garden"][data-project-section="issues"] .project-section-badge').innerText(),'2 open');assert.equal(await page.locator('.project-issue').count(),3);
    await tab(page,'plans');assert.equal(await page.locator('[data-section-project="paper-garden"][data-project-section="plans"] .project-section-badge').innerText(),'1/3 tasks');assert.equal(await page.locator('.project-summary').innerText(),'1 of 3 tasks complete');await shot(page,'plans-desktop');
@@ -102,7 +105,7 @@ try{
   await check('project and filter navigation retains reading state and drafts',async()=>{
    await tab(page,'issues');await page.locator('[data-filter="all"]').click();await page.getByRole('searchbox',{name:'Search issues'}).fill('seedlings');await tab(page,'plans');await tab(page,'issues');assert.equal(await page.getByRole('searchbox',{name:'Search issues'}).inputValue(),'seedlings');assert.equal(await page.locator('[data-filter="all"]').getAttribute('aria-pressed'),'true');
    await open(page,'observatory','plans');assert.match(await page.locator('.project-content').innerText(),/written plan/i);assert(!/seedlings/.test(await page.locator('.project-content').innerText()));await open(page,'weekend-notes','issues');assert.match(await page.locator('.project-content').innerText(),/No issues yet/);
-   await page.getByRole('button',{name:'Close and return to the conversation',exact:true}).click();assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);assert.equal(await page.locator('#project-workspace').isVisible(),false);
+   await page.getByRole('button',{name:'Close and return to the conversation',exact:true}).click();await backToDraft(page,draftProject);assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);assert.equal(await page.locator('#project-workspace').isVisible(),false);
   });
   await check('empty plan supports inline milestone and task creation and editing',async()=>{
    await open(page,'weekend-notes','plans');await page.getByRole('button',{name:'Create milestone',exact:true}).click();await saveForm(page,'A useful weekend','Keep room for small ideas.');
@@ -111,7 +114,7 @@ try{
    data=await fixture.section('weekend-notes','plans');const taskId=data.items[0].id;assert.equal(data.items[0].milestoneId,milestoneId);
    milestone=page.locator(`[data-record-id="${milestoneId}"]`);await milestone.getByRole('button',{name:'Edit milestone',exact:true}).click();await saveForm(page,'A quiet weekend','Preserve this direction.');
    const task=page.locator(`[data-record-id="${taskId}"]`);if(!await task.evaluate(el=>el.open))await task.locator('summary').click();await task.getByRole('button',{name:'Edit task',exact:true}).click();const form=page.locator('.project-inline-form');await form.getByLabel('Milestone',{exact:true}).selectOption('');await saveForm(page,'Collect two ideas','Keep the canonical task identity.');
-   data=await fixture.section('weekend-notes','plans');assert.equal(data.milestones[0].id,milestoneId);assert.equal(data.milestones[0].name,'A quiet weekend');assert.equal(data.items[0].id,taskId);assert.equal(data.items[0].milestoneId,undefined);assert.equal(data.items[0].text,'Collect two ideas');assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);
+   data=await fixture.section('weekend-notes','plans');assert.equal(data.milestones[0].id,milestoneId);assert.equal(data.milestones[0].name,'A quiet weekend');assert.equal(data.items[0].id,taskId);assert.equal(data.items[0].milestoneId,undefined);assert.equal(data.items[0].text,'Collect two ideas');await backToDraft(page,draftProject);assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);
   });
  }catch(error){await shot(page,'failure');writeFileSync(join(out,'failure.html'),await page.content());throw error;}finally{await context.close();}
  }
