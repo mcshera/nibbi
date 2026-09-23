@@ -16,7 +16,7 @@ export const toolLabel = (n) => { const governed = governedToolName(n); if (gove
 export function errorKind(raw) {
   const m = String(raw || '').replace(/^\s*error:\s*/i, '');
   // The second half is what humanError itself says, so a row the daemon stored already humanised reads the same way.
-  return /oauth|authenticate|token|gateway offline|failed to fetch|networkerror|ECONNREFUSED|isn't reachable|HTTP 5\d\d|rate.?limit|429|queued|busy|isn't answering|ink pot|rate-limited|choked/i.test(m) ? 'notice' : 'failure';
+  return /oauth|authenticate|token|gateway offline|failed to fetch|networkerror|ECONNREFUSED|isn't reachable|HTTP 5\d\d|rate.?limit|429|queued|busy|isn't answering|ink pot|rate-limited|choked|sign in to claude code|claude sign-in unavailable|isn't signed in/i.test(m) ? 'notice' : 'failure';
 }
 export function humanError(raw) {
   const m = String(raw || '').replace(/^\s*error:\s*/i, '');
