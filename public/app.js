@@ -2281,7 +2281,8 @@ function addImage(file) {
   if (!file) return;
   if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { toast('images only — png, jpeg, webp or gif', 2600); return; }
   if (pendingImages.length + reading >= 4) { toast('4 images is the most per message', 2600); return; }
-  if (file.size > 6_000_000) { toast((file.size / 1e6).toFixed(1) + ' MB — 6 MB is the most one image can be', 3200); return; }
+  // Rounded up: 6,040,000 bytes read "6.0 MB — 6 MB is the most", which is the limit, not over it.
+  if (file.size > 6_000_000) { toast((Math.ceil(file.size / 1e5) / 10).toFixed(1) + ' MB — 6 MB is the most one image can be', 3200); return; }
   const into = pendingImages; reading++;
   const rd = new FileReader();
   rd.onloadend = () => { reading--; if (rd.error || into !== pendingImages) return; const data = String(rd.result).split(',')[1]; pendingImages.push({ media_type: file.type, data }); renderAttach(); interactions.event('attach'); };

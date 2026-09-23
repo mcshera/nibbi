@@ -324,6 +324,8 @@ async function attachmentsSayWhy() {
   assert.equal(await toast(), 'images only — png, jpeg, webp or gif');
   await paste([{ name: 'huge.png', type: 'image/png', size: 7_000_000 }]);
   assert.equal(await toast(), '7.0 MB — 6 MB is the most one image can be');
+  await paste([{ name: 'just-over.png', type: 'image/png', size: 6_040_000 }]);
+  assert.equal(await toast(), '6.1 MB — 6 MB is the most one image can be', 'just over the limit does not read as the limit');
   await paste(png(5));
   assert.equal(await toast(), '4 images is the most per message', 'five at once: the fifth is refused before the first four have loaded');
   await page.waitForFunction(() => document.querySelectorAll('#attach img').length === 4);
