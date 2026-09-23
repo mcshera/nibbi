@@ -57,7 +57,7 @@ motion scroll the feed without smoothing.
 
 **Also.** The toast is a live region and sits above the fixers instead of on them. An agent's card
 stays open while you type in it. On a phone the jump button and a toast's action are 44px, the code
-block's copy button has a hit area larger than the pill it paints, and all four take the focus ring.
+block's copy button has a 44px hit area around the smaller pill it paints, and all four take the focus ring.
 
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 

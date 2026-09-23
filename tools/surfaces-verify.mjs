@@ -14,16 +14,19 @@ async function scenario(name, fn) {
   try { await fn(); console.log('PASS', name); }
   catch (error) { failed = true; console.error('FAIL', name, '\n', error); }
 }
-async function page(viewport, options = {}) {
+async function page(viewport, options = {}, { query = '?demo=1&nosw=1', reply } = {}) {
   const context = await browser.newContext({ viewport, ...options });
   const tab = await context.newPage();
   const errors = [];
   tab.on('pageerror', error => errors.push(error.message));
   tab.on('console', message => { if (message.type() === 'error') errors.push(message.text() + ' @ ' + message.location().url); });
-  await tab.goto(fixture.base + '/?demo=1&nosw=1');
+  // A scripted brain answers once with exactly this text, for replies no demo script writes.
+  if (reply) await tab.route('**/api/send', route => route.fulfill({ json: { text: reply, costUsd: 0, isError: false } }));
+  await tab.goto(fixture.base + '/' + query);
   await tab.waitForFunction(() => window.nibbiApp && window.nibbi && document.querySelector('.margin-tab[data-margin-tab="builds"]'));
   return { context, page: tab, errors };
 }
+const settled = tab => tab.waitForFunction(() => document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity));
 
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
@@ -65,9 +68,54 @@ try {
       } finally { await context.close(); }
     });
   }
+
+  // A fixer's card opens for the pointer, for the pin, and for keyboard focus. A click focuses the
+  // agent as well, and that focus must not hold the card open once the click has unpinned it.
+  await scenario('an agent card closes when it is unpinned', async () => {
+    const { context, page: tab, errors } = await page({ width: 1180, height: 820 });
+    try {
+      await tab.waitForFunction(() => document.querySelectorAll('#agents .agent').length > 0, null, { timeout: 15_000 });
+      await settled(tab);
+      const agent = tab.locator('#agents .agent').first();
+      const card = () => agent.evaluate(el => ({ pinned: el.classList.contains('pinned'), opacity: getComputedStyle(el.querySelector('.card')).opacity, focus: document.activeElement === el ? 'agent' : el.querySelector('.card').contains(document.activeElement) ? 'card' : document.activeElement?.tagName }));
+      await agent.click(); await tab.mouse.move(200, 200); await settled(tab);
+      assert.deepEqual(await card(), { pinned: true, opacity: '1', focus: 'agent' }, 'a click pins the card open');
+      await agent.click(); await tab.mouse.move(200, 200); await settled(tab);
+      assert.deepEqual(await card(), { pinned: false, opacity: '0', focus: 'agent' }, 'a second click unpins it, and it closes although the agent keeps focus');
+      await tab.locator('#ask').focus();
+      await tab.keyboard.press('Shift');   // keyboard modality, so the next focus is a visible one
+      await agent.evaluate(el => el.focus()); await settled(tab);
+      assert.deepEqual(await card(), { pinned: false, opacity: '1', focus: 'agent' }, 'keyboard focus on the agent opens it');
+      assert.ok(await agent.locator('.card').evaluate(el => !!el.querySelector('button, textarea')), 'the click filled the card with its actions');
+      await tab.keyboard.press('Tab'); await settled(tab);
+      assert.deepEqual(await card(), { pinned: false, opacity: '1', focus: 'card' }, 'and it stays open while focus is inside it');
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+
+  // The code block's copy button paints a small pill so it does not sit on the code, and reaches a
+  // 44px target through a hit area that stays inside the block.
+  const fence = 'Here it is.\n\n```js\n' + Array.from({ length: 4 }, (_, i) => `const line${i} = ${i};`).join('\n') + '\n```\n';
+  await scenario('the code block copy button is a 44px target on a phone', async () => {
+    const { context, page: tab, errors } = await page({ width: 390, height: 844 }, { isMobile: true, hasTouch: true }, { query: '?nosw=1', reply: fence });
+    try {
+      await tab.waitForFunction(() => document.body.dataset.link === 'live');
+      await tab.evaluate(() => window.nibbiApp.send('show me'));
+      await tab.waitForFunction(() => !window.nibbiApp.state().busy && document.querySelector('.turn:last-child pre .copycode'), null, { timeout: 20_000 });
+      const hit = await tab.evaluate(() => {
+        const b = document.querySelector('.turn:last-child pre .copycode'), r = b.getBoundingClientRect();
+        let top = Infinity, bottom = -Infinity, left = Infinity, right = -Infinity;
+        for (let y = Math.floor(r.top) - 30; y < r.bottom + 30; y++) for (let x = Math.floor(r.left) - 30; x < r.right + 30; x++) if (document.elementFromPoint(x, y) === b) { top = Math.min(top, y); bottom = Math.max(bottom, y); left = Math.min(left, x); right = Math.max(right, x); }
+        return { pill: [Math.round(r.width), Math.round(r.height)], hit: [right - left + 1, bottom - top + 1] };
+      });
+      assert.ok(hit.pill[1] < 44, 'the pill it paints stays small, ' + JSON.stringify(hit));
+      assert.ok(hit.hit[0] >= 44 && hit.hit[1] >= 44, 'and the target it answers is 44px each way, ' + JSON.stringify(hit));
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
 } finally {
   await browser?.close();
   await fixture.close();
 }
 if (failed) process.exitCode = 1;
-else console.log('Surface checks passed: a section is a room.');
+else console.log('Surface checks passed: a section is a room, an agent card closes when unpinned, and the copy button is a 44px target.');

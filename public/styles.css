@@ -99,9 +99,11 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .nib .said pre { position: relative; margin: .6em 0 .9em; padding: 12px 14px; border-radius: var(--r-card); background: var(--ink-terminal); color: var(--ink-terminal-fg); overflow: auto; font-size: var(--type-control); line-height: 1.5; }
 .nib .said pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
 .nib .said pre .copycode { position: absolute; top: 8px; right: 8px; font: inherit; font-size: var(--type-meta); color: var(--ink-terminal-fg); background: rgba(255,255,255,.12); border: 0; border-radius: var(--r-pill); padding: 3px 9px; cursor: pointer; opacity: 0; transition: opacity var(--t2); }
-/* a larger hit area than the pill it paints: a 44px button would sit on the code it copies. -8px is as far as it
-   can reach, since the pre's overflow clips anything past its own padding edge. */
+/* a larger hit area than the pill it paints: a 44px button would sit on the code it copies. Up and right, -8px is
+   as far as it can reach, since the pre's overflow clips anything past its own padding edge; down and left it is
+   inside the pre, so at a coarse pointer it reaches down to 45px. */
 .nib .said pre .copycode::before { content: ""; position: absolute; inset: -8px; }
+@media (max-width: 640px), (pointer: coarse) { .nib .said pre .copycode::before { bottom: -14px; } }
 .nib .said pre:hover .copycode, .nib .said pre .copycode:focus-visible { opacity: 1; }
 .nib .said a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink-4); text-underline-offset: 3px; }
 .nib .said blockquote { margin: .4em 0; padding: 0 0 0 12px; border-left: 2px solid var(--line); color: var(--ink-2); }
@@ -251,11 +253,13 @@ body:has(.pill.dock-open) .agents { opacity: .25; pointer-events: none; }   /* t
 .agent { position: relative; border: 0; background: none; padding: 0 3px; cursor: pointer; animation: arrive var(--t3) var(--ease) both; transition: opacity var(--t2), transform var(--t2) var(--ease); }
 .agent.out { opacity: 0; transform: translateY(6px); }
 .agent .ava { display: block; width: 58px; height: 46px; }
-.agent:hover .ava, .agent:focus-within .ava, .agent.pinned .ava { transform: translateY(-2px); }
+.agent:hover .ava, .agent:focus-visible .ava, .agent:has(.card :focus-visible) .ava, .agent.pinned .ava { transform: translateY(-2px); }
 .agent[data-status="queued"] .ava, .agent[data-status="superseded"] .ava, .agent[data-status="duty"] .ava { opacity: .72; }
 .agent[data-kind="auto"] { margin-right: 6px; }
 .agent .card { position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%) translateY(4px); width: 260px; text-align: left; padding: 10px 12px; border-radius: var(--r-panel); background: var(--pill-bg); border: 1px solid var(--line); box-shadow: var(--e-floating), var(--e-highlight); backdrop-filter: var(--glass); opacity: 0; pointer-events: none; transition: opacity var(--t2) var(--ease), transform var(--t2) var(--ease); font-size: var(--type-fine); color: var(--ink-2); }
-.agent:hover .card, .agent:focus-within .card, .agent.pinned .card { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+/* Keyboard focus opens the card, on the agent or inside the card (its guide box, its chips). A click focuses
+   the agent too, but that is the pin's to answer: :focus-within kept an unpinned card open over the hero. */
+.agent:hover .card, .agent:focus-visible .card, .agent:has(.card :focus-visible) .card, .agent.pinned .card { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
 .agent .card .t { font-size: var(--type-control); color: var(--ink); font-weight: 500; margin-bottom: 2px; }
 .agent .card .m { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .agent .card .tail { margin: 8px 0; padding: 6px 8px; border-radius: var(--r-well); background: var(--veil-well); font: var(--type-meta)/1.45 var(--font-mono); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; max-height: 6em; overflow: hidden; }

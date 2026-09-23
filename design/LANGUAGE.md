@@ -517,7 +517,7 @@ Already met, and worth stating so it stays met:
 | touch targets | 44px minimum at `≤640px` and `pointer: coarse` |
 | reduced motion | global 1ms override + per-surface + character-level static poses |
 | screen reader | `.sr` clip pattern, `aria-expanded` on the `+`, `aria-pressed` on toggles, `aria-describedby` on the field |
-| hover-only content | every hover reveal also fires on `:focus-within` — the agent card too, which holds a textarea, so `:focus-visible` on the agent dropped the card the moment focus went inside it |
+| hover-only content | every hover reveal also fires on keyboard focus. The agent card opens on `:focus-visible` on the agent or inside the card (`:has(.card :focus-visible)`), so focus in its guide box keeps it open; not on `:focus-within`, which a click also satisfies, and which held an unpinned card open over the hero |
 | colour alone | no state is carried by colour alone — dots also change size, borders also change weight |
 | contrast | §2.5 |
 
