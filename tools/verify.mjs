@@ -17,14 +17,19 @@ try {
   await page.waitForFunction(() => window.nibbiApp && document.body.dataset.link === 'live');
   assert.equal((await (await fetch(fixture.base + '/api/fixers')).json()).length, 15, 'No twelve-run truncation');
   await page.screenshot({ path: out + 'desktop.png' });
+  // Exercise the controls without invoking a real login or querying user accounts. The tab checks
+  // sign-in as it opens, so the stand-in answers before it is opened.
+  let providerChecks = 0;
+  await page.route('**/api/providers', route => { providerChecks++; return route.fulfill({ json: { claude: { connected: true, mode: 'signin', subscription: 'max' }, codex: { connected: false } } }); });
+  await page.route('**/api/providers/claude/login', route => { assert.equal(route.request().method(), 'POST'); return route.fulfill({ json: { message: 'Fixture sign-in handoff. Complete it, then Check again.' } }); });
   await page.evaluate(() => { document.querySelector('#st-platform').click(); });
   await page.getByRole('dialog').waitFor();
   await page.getByText('No API key is required.', { exact: false }).waitFor();
-  // Exercise the controls without invoking a real login or querying user accounts.
-  await page.route('**/api/providers', route => route.fulfill({ json: { claude: { connected: true, mode: 'signin', subscription: 'max' }, codex: { connected: false } } }));
-  await page.route('**/api/providers/claude/login', route => { assert.equal(route.request().method(), 'POST'); return route.fulfill({ json: { message: 'Fixture sign-in handoff. Complete it, then Check connections.' } }); });
-  await page.getByRole('button', { name: 'Check connections', exact: true }).click();
   await page.getByText('Claude: signed in · max', { exact: false }).waitFor();
+  assert.equal(providerChecks, 1, 'the Providers tab says whether you are signed in without being asked');
+  await page.getByRole('button', { name: 'Check again', exact: true }).click();
+  for (let i = 0; i < 40 && providerChecks < 2; i++) await page.waitForTimeout(50);
+  assert.equal(providerChecks, 2, 'and Check again asks again');
   await page.getByRole('button', { name: 'Sign in with Claude', exact: true }).click();
   await page.getByText('Fixture sign-in handoff.', { exact: false }).waitFor();
   await page.screenshot({ path: out + 'providers.png' });

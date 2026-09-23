@@ -48,7 +48,7 @@ test('off gate, ambient ignores, wake greets once, following command sends and r
   assert.equal(f.voice.snapshot().phase, 'armed');
   assert.equal(f.greetings.length, 0);
   await f.voice.submit('hey nibbi');
-  assert.deepEqual(f.greetings, ["What's up, Matty?"]);
+  assert.deepEqual(f.greetings, ["What's up?"]);
   assert.equal(f.voice.snapshot().phase, 'listening');
   assert.equal([...f.timers.values()][0].ms, 12000);
   await f.voice.submit('Hey Nibbi, show my tasks');

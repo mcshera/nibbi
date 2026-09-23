@@ -1,5 +1,6 @@
+import { emptyLine } from './empty.js';
 /** Live, modeless margin controls. Authority stays with the caller.
-    update(model) reads {projects, projectsLoaded, activeProject, view, busy, settings, progress?}; progress is
+    update(model) reads {projects, projectsLoaded, projectsError?, activeProject, view, busy, settings, progress?}; progress is
     {today:{deliveries}, week:{deliveries}, streak, available} from verified merges, or undefined when not available. */
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const glyphs = {
@@ -16,6 +17,7 @@ const glyphs = {
   settings: ['M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M9.5 3h5l.5 2.4 1.8 1 2.3-.7 2.5 4.3-1.8 1.6v.8l1.8 1.6-2.5 4.3-2.3-.7-1.8 1-.5 2.4h-5L9 18.6l-1.8-1-2.3.7L2.4 14l1.8-1.6v-.8L2.4 10l2.5-4.3 2.3.7 1.8-1L9.5 3Z'],
 };
 const text = (value, fallback = '—') => value == null || value === '' ? fallback : String(value);
+const PROJECTS_UNREACHABLE = 'couldn’t reach the projects list';
 const relative = at => {
   if (!Number.isFinite(at)) return '';
   const seconds = Math.max(0, (Date.now() - at) / 1000);
@@ -139,7 +141,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   sidebar.append(head, left, right); document.body.append(backdrop, sidebar, toggle);
   right.setAttribute('aria-label', 'Settings');
   const list = node('div', 'margin-project-list');
-  const empty = node('p', 'margin-empty', 'Loading projects…');
+  const empty = emptyLine('Loading projects…');
   const globalError = node('p', 'margin-error margin-global-error');
   globalError.setAttribute('role', 'status'); globalError.hidden = true;
   const keyFor = (action, id) => JSON.stringify([action, id ?? null]);
@@ -422,13 +424,14 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   function renderSwitcher() {
     const entry = activeEntry();
-    const loading = model.projectsLoaded === false;
+    const loading = model.projectsLoaded === false, unreachable = loading && !!model.projectsError;
     if (!entry) {
       // Nothing to name yet. "No project · no branch · quiet" described a project that does not exist.
+      // And a list that never arrived is not still loading: it says so, and Retry is in the body below.
       trigger.dataset.currentProject = '';
-      triggerName.textContent = loading ? 'Loading projects…' : 'No projects yet';
-      triggerSummary.textContent = loading ? '' : 'Create one to get started';
-      trigger.setAttribute('aria-label', loading ? 'Loading projects' : 'No projects yet. Create one to get started');
+      triggerName.textContent = unreachable ? 'Projects' : loading ? 'Loading projects…' : 'No projects yet';
+      triggerSummary.textContent = loading ? '' : 'Create one to get started';   // unreachable: the body below says it once
+      trigger.setAttribute('aria-label', unreachable ? 'Projects: ' + PROJECTS_UNREACHABLE : loading ? 'Loading projects' : 'No projects yet. Create one to get started');
       trigger.title = '';
       rollup.hidden = true;
       return;
@@ -494,9 +497,14 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     const entry = activeEntry();
     if (!entry) {
       bodyKey = '';
-      if (model.projectsLoaded === false) { body.replaceChildren(node('p', 'margin-empty', 'Loading projects…')); return; }
+      if (model.projectsLoaded === false && model.projectsError) {
+        const retry = button('Retry', 'margin-pill margin-empty-retry', () => void dispatch('refreshProjects'));
+        body.replaceChildren(emptyLine(PROJECTS_UNREACHABLE), retry);
+        return;
+      }
+      if (model.projectsLoaded === false) { body.replaceChildren(emptyLine('Loading projects…')); return; }
       const start = button('New project', 'margin-pill margin-empty-new', () => { close(); void dispatch('newProject'); });
-      body.replaceChildren(node('p', 'margin-empty', 'No projects yet. A project is a repository nibbi can build in.'), start);
+      body.replaceChildren(emptyLine('No projects yet. A project is a repository nibbi can build in.'), start);
       return;
     }
     const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
@@ -694,7 +702,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       for (const b of bindings) if (entry.card.el.contains(b.el)) bindings.delete(b);
     }
     empty.hidden = seen.size > 0 || !menuOpen;
-    empty.textContent = next.projectsLoaded === false ? 'Loading projects…' : 'No projects yet. Create one to get started.';
+    empty.textContent = next.projectsLoaded === false ? (next.projectsError ? PROJECTS_UNREACHABLE : 'Loading projects…') : 'No projects yet. Create one to get started.';
     // One project is in the bar at a time, so the switcher, the strip and the body are rendered once.
     const focusKey = document.activeElement?.dataset?.marginTab;
     renderSwitcher(); renderTabs(); renderBody(); renderMenu();

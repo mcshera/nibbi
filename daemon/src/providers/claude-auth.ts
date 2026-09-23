@@ -37,7 +37,7 @@ export async function claudeStatus(run: Runner = execute): Promise<ClaudeStatus>
     const connected = value.loggedIn === true && value.authMethod === 'claude.ai' && value.apiProvider === 'firstParty';
     return { connected, mode, subscription: connected && typeof value.subscriptionType === 'string' ? value.subscriptionType : undefined,
       error: connected ? undefined : 'Sign in to Claude Code with your Claude account. Nibbi will not fall back to API billing.' };
-  } catch (error) { return { connected: false, mode, error: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'Install Claude Code on this Mac first' : 'Claude sign-in unavailable. Use Sign in with Claude, then Check connections.' }; }
+  } catch (error) { return { connected: false, mode, error: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'Install Claude Code on this Mac first' : 'Claude sign-in unavailable. Use Sign in with Claude, then Check again.' }; }
 }
 async function apiKey(run: Runner): Promise<string> {
   if (process.env.NIBBI_CLAUDE_API_KEY) return process.env.NIBBI_CLAUDE_API_KEY;
@@ -61,5 +61,5 @@ export async function loginClaude(run: Runner = execute): Promise<{ message: str
   const script = '#!/bin/bash\nset -e\ncd /private/tmp\nfor name in $(compgen -e); do\n  case "$name" in ANTHROPIC_*|CLAUDE_CODE_USE_*|CLAUDE_CODE_OAUTH*|CLAUDE_CODE_API_KEY*|CLAUDE_CONFIG_DIR|CLAUDECODE|NODE_OPTIONS|BASH_ENV|ENV) unset "$name";; esac\ndone\nexec ' + quote(executable) + ' --setting-sources \'\' --settings \'{"forceLoginMethod":"claudeai"}\' auth login --claudeai\n';
   writeFileSync(file, script, { mode: 0o700, flag: 'wx' });
   await run(tmpdir(), '/usr/bin/open', ['-a', 'Terminal', file], { env: claudeEnvironment(), timeoutMs: 5000 });
-  return { message: 'Claude Code opened in Terminal. Complete its browser sign-in, then click Check connections. Nibbi never receives your password or login tokens.' };
+  return { message: 'Claude Code opened in Terminal. Complete its browser sign-in, then click Check again. Nibbi never receives your password or login tokens.' };
 }

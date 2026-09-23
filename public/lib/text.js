@@ -19,7 +19,7 @@ export function errorKind(raw) {
 }
 export function humanError(raw) {
   const m = String(raw || '').replace(/^\s*error:\s*/i, '');
-  if (/oauth|authenticate|token/i.test(m)) return 'I spilled the ink pot — the gateway\'s login has expired. Run `claude setup-token`, then I\'ll try again.';
+  if (/oauth|authenticate|token/i.test(m)) return 'I spilled the ink pot — Claude\'s sign-in has lapsed. Sign in again under Settings → Providers and I\'ll pick this back up.';
   if (/gateway offline|failed to fetch|networkerror|ECONNREFUSED|isn\'t reachable/i.test(m)) return 'The gateway isn\'t answering, so there\'s no brain behind me right now. Start it — or switch me to the demo brain to see how this feels.';
   if (/HTTP 5\d\d/.test(m)) return 'The gateway choked on that one (' + m + '). Try again?';
   if (/rate.?limit|429/i.test(m)) return 'I\'m rate-limited for a bit. Give me a few minutes and ask again.';

@@ -22,6 +22,10 @@ test('questionActs: yes/no only for yes/no questions', () => {
 
 test('humanError maps gateway failures to nibbi lines and keeps the rest', () => {
   assert.match(humanError('error: Failed to authenticate: OAuth session expired'), /spilled the ink pot/);
+  // The login line points where signing in actually happens. It used to say `claude setup-token`, a
+  // command Settings never mentions; Settings says Sign in with Claude.
+  assert.equal(humanError('error: Failed to authenticate: OAuth session expired'), 'I spilled the ink pot — Claude\'s sign-in has lapsed. Sign in again under Settings → Providers and I\'ll pick this back up.');
+  assert.doesNotMatch(humanError('token expired'), /setup-token/);
   assert.match(humanError('gateway offline'), /gateway isn.t answering/);
   assert.match(humanError('HTTP 502'), /choked/);
   assert.match(humanError('rate limit exceeded'), /rate-limited/);

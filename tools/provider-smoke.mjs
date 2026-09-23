@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testBackend } from './test-backend.mjs';
 const provider = process.argv[2];
 if (!['claude', 'codex'].includes(provider)) throw new Error('Usage: node tools/provider-smoke.mjs claude|codex (uses your signed-in provider account)');
-const fixture = await testBackend();
+const fixture = await testBackend({ realProviders: true });
 const request = async (path, value) => {
   const response = await fetch(fixture.base + path, {
     method: value === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },

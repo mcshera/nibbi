@@ -33,6 +33,16 @@ longer conversation is now a "load earlier" divider, and pressing it puts the ol
 you were reading without moving it. Quick clicks between threads used to be dropped while the first
 one loaded; the read now happens behind the switch, and one that lands late is thrown away.
 
+**A first run that makes sense.** The chips offered a playtest of "shipless" to anyone, and "what's
+new?" to someone with no past; with no projects they are now "new project" and "what can you do?",
+and New project offers both ways in — a fresh repository, or `/register` for one you already have,
+which the daemon has always supported and nothing could ask for. The bar no longer says "Loading
+projects…" forever when the daemon is away: it says it couldn't reach the list, retries every ten
+seconds, and has a Retry. A thread with nothing in it says so. The lapsed-sign-in reply pointed at
+`claude setup-token`, which Settings never mentions; it points at Settings → Providers, its chip opens
+it, the tab checks your sign-in as it opens and puts it first, and a Codex sign-in finishing elsewhere
+says "signed in". The wake greeting stops using a name nothing in the app knows.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which

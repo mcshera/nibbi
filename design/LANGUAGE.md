@@ -462,7 +462,7 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 
 Checked against the running app rather than inferred from the CSS, which corrected two earlier entries here:
 
-1. ~~No empty states.~~ **Wrong — the rail has them**, and they are well written: `No projects yet`, `Nothing is open`, `Nothing is queued`, `Nothing merged yet today`, `No plan written yet`. What is missing is only that they are ad-hoc strings rather than a shared part, so a new surface has nothing to reach for.
+1. ~~No empty states.~~ **Wrong — the rail has them**, and they are well written: `No projects yet`, `Nothing is open`, `Nothing is queued`, `Nothing merged yet today`, `No plan written yet`. What is missing is only that they are ad-hoc strings rather than a shared part, so a new surface has nothing to reach for. **Closed:** `emptyLine(text)` in `public/lib/empty.js` is the part — one sentence in muted type, with at most one action placed after it. The bar's empty and error states and an empty thread (`#feed .feed-empty`) use it; an empty home is the character, not a line.
 2. ~~No pending state.~~ **Wrong — loading states exist**, as text (`.project-loading`, `aria-busy`, `Loading…`). They are not skeletons, which is a stylistic choice rather than a gap.
 3. ~~An inline error that is not a failure.~~ **Built.** `errorKind()` in `public/lib/text.js` separates a machine verdict from a machine being unreachable, and the notice bubble in §9 is what the second one wears. `--fail-*` is once again only ever a verdict.
 

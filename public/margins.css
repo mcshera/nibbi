@@ -260,6 +260,7 @@ body.glass .margin-new { background: var(--wash-faint); }
 .margin-rollup:hover { color: var(--ink-2); }
 .margin-link { font-size: var(--type-meta); }
 .margin-empty-new { align-self: flex-start; margin-top: 4px; }
+.margin-empty-retry { align-self: flex-start; margin: 0 12px; }
 @media (max-width: 899px) { .margin-rollup { min-height: var(--touch); } }
 .margin-foot > .sidebar-progress { font-size: var(--type-meta); }
 @media (max-width: 899px) {

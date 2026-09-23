@@ -1,5 +1,5 @@
 /** Local wake gate. Transcripts are classified here, never stored in state. */
-export const WAKE_GREETING = "What's up, Matty?";
+export const WAKE_GREETING = "What's up?";   // no owner-name source exists, so none is invented
 
 export function parseWakePhrase(text) {
   if (typeof text !== 'string') return null;

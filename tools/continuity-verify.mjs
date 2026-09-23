@@ -4,6 +4,8 @@
 // is written through its own history writer so every event is the real one.
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { testBackend } from './test-backend.mjs';
 
@@ -13,10 +15,11 @@ mkdirSync(out, { recursive: true });
 const errors = [];
 let browser;
 
-async function open(context, path = '/?nosw=1') {
+async function open(context, path = '/?nosw=1', { before, expectFailed } = {}) {
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text() + ' @ ' + message.location().url); });
+  page.on('console', message => { if (message.type() === 'error' && !(expectFailed && expectFailed.test(message.location().url))) errors.push(message.text() + ' @ ' + message.location().url); });
+  await before?.(page);
   await page.goto(fixture.base + path);
   await ready(page);
   return page;
@@ -79,10 +82,16 @@ async function newThreadTakesItsName() {
   await page.waitForFunction(() => window.nibbiApp.state().thread.id !== 'home', null, { timeout: 10_000 });
   const id = await page.evaluate(() => window.nibbiApp.state().thread.id);
   assert.equal(await page.locator(`[data-thread-id="${id}"]`).getAttribute('title'), 'New thread');
+  // A thread with nothing in it says so; an empty home is the character instead.
+  const empty = page.locator('#feed .feed-empty');
+  await empty.waitFor({ timeout: 10_000 });
+  assert.equal(await empty.innerText(), 'nothing here yet — say what you want built');
+  await page.screenshot({ path: out + 'empty-thread-1180x820.png' });
   await page.evaluate(() => window.nibbiApp.send('Rebalance the salvage dice'));
   await page.waitForFunction(id => document.querySelector(`[data-thread-id="${id}"]`)?.title === 'Rebalance the salvage dice', id, { timeout: 10_000 });
   assert.equal(await page.locator('#ask').getAttribute('placeholder'), placeholderFor('Rebalance the salvage dice'), 'the composer names it too');
   assert.match(await page.locator(`[data-thread-id="${id}"]`).getAttribute('aria-label'), /^Rebalance the salvage dice thread in fixture/);
+  assert.equal(await empty.isVisible(), false, 'and stops saying so once it has something in it');
   await page.unroute('**/api/send');
   await context.close();
 }
@@ -265,6 +274,63 @@ async function aReadThatLandsLateIsDropped() {
   await context.close();
 }
 
+/* The bar said "Loading projects…" for as long as the daemon was away. It says what happened, retries,
+   and has a Retry that asks at once. */
+async function projectsThatNeverArriveSaySo() {
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context, '/?nosw=1', { before: page => page.route('**/api/projects', route => route.abort()), expectFailed: /\/api\/projects$/ });
+  const body = page.locator('.margin-body');
+  await body.getByText('couldn’t reach the projects list', { exact: true }).waitFor({ timeout: 10_000 });
+  assert.doesNotMatch(await page.locator('#project-rail').innerText(), /Loading projects/);
+  await page.screenshot({ path: out + 'projects-unreachable-1180x820.png' });
+  await page.unroute('**/api/projects');
+  await body.getByRole('button', { name: 'Retry', exact: true }).click();
+  await page.locator('.margin-switch-trigger[data-current-project="fixture"]').waitFor({ timeout: 10_000 });
+  await page.locator('[data-thread-id="home"][aria-current="true"]').waitFor({ timeout: 10_000 });   // and the conversation it was waiting for follows
+  await context.close();
+}
+
+/* A first run offered a playtest of "shipless", a project nobody had. With no projects, the chips are
+   the two things that make sense, and New project offers both ways in. */
+async function firstRunOffersAWayIn() {
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const vaultOnly = page => page.route('**/api/projects', async route => { const list = await (await route.fetch()).json(); await route.fulfill({ json: list.filter(p => p.kind === 'brain') }); });
+  const page = await open(context, '/?nosw=1', { before: vaultOnly });
+  await page.locator('.margin-switch-trigger').getByText('No projects yet').waitFor({ timeout: 10_000 });
+  await page.locator('#ask').focus();
+  await page.waitForFunction(() => document.querySelectorAll('#chips .chip.in').length > 0);
+  assert.deepEqual(await page.locator('#chips .chip').allInnerTexts(), ['new project', 'what can you do?'], 'no playtest of a project that is not there');
+  await page.screenshot({ path: out + 'first-run-1180x820.png' });
+  await page.locator('#chips .chip', { hasText: 'new project' }).click();
+  const offer = page.locator('.turn.event').last();
+  await offer.locator('.acts .chip', { hasText: 'register a folder I have' }).waitFor({ timeout: 10_000 });
+  assert.deepEqual(await offer.locator('.acts .chip').allInnerTexts(), ['create a new repo', 'register a folder I have']);
+  await offer.locator('.acts .chip', { hasText: 'register a folder I have' }).click();
+  assert.equal(await page.locator('#ask').inputValue(), '/register ');
+  await context.close();
+}
+
+/* The daemon could always register an existing repository (mode: 'existing'); nothing in the app
+   could ask it to. */
+async function registerAFolderYouHave() {
+  const repo = join(fixture.directory, 'lantern-repo');
+  mkdirSync(repo); execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  await page.locator('.margin-switch-trigger[data-current-project="fixture"]').waitFor({ timeout: 10_000 });
+  assert.equal(await page.locator('#project-rail [data-project-id]').count(), 1);
+  await page.evaluate(repo => window.nibbiApp.send('/register ' + repo + ' Lantern'), repo);
+  await page.waitForFunction(() => !window.nibbiApp.state().busy, null, { timeout: 15_000 });
+  const said = await page.locator('.turn').last().locator('.said').innerText();
+  assert.match(said, /^lantern is a project now/, 'was ' + JSON.stringify(said));
+  await page.waitForFunction(() => document.querySelectorAll('#project-rail [data-project-id]').length === 2, null, { timeout: 10_000 });
+  assert.deepEqual((await (await fetch(fixture.base + '/api/projects')).json()).filter(p => p.kind !== 'brain').map(p => p.name).sort(), ['fixture', 'lantern']);
+  await page.evaluate(() => window.nibbiApp.send('/register ~/games/lantern'));
+  await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  assert.match(await page.locator('.turn').last().locator('.said').innerText(), /whole path/, 'a ~ path is refused with the reason, before the daemon sees it');
+  await context.close();
+}
+
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
   await homeHistoryOnFirstBoot();
@@ -276,6 +342,9 @@ try {
   await renameAndArchiveFromTheRow();
   await loadEarlierKeepsYourPlace();
   await aReadThatLandsLateIsDropped();
+  await projectsThatNeverArriveSaySo();
+  await firstRunOffersAWayIn();
+  await registerAFolderYouHave();
   assert.deepEqual(errors, [], 'No unexpected browser errors');
-  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, the Chat tab returns to a reply in progress, drafts belong to their thread, attachments say why they were refused, a thread is renamed and archived from its row, earlier history loads without moving the reader, and a late read is dropped.');
+  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, the Chat tab returns to a reply in progress, drafts belong to their thread, attachments say why they were refused, a thread is renamed and archived from its row, earlier history loads without moving the reader, a late read is dropped, an unreachable project list says so and retries, a first run offers a way in, and an existing folder can be registered.');
 } finally { await browser?.close(); await fixture.close(); }

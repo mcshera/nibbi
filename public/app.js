@@ -3,10 +3,11 @@ import './margins.css';
 import './voice.css';
 import './project-workspace.css';
 import './project-composer.css';
-import { createWakeVoice } from './lib/wake-voice.js';
+import { createWakeVoice, WAKE_GREETING } from './lib/wake-voice.js';
 import { createMicCapture } from './lib/mic-capture.js';
 import { createVoicePlayer } from './lib/voice-player.js';
 import { installMarginUI } from './lib/margin-ui.js';
+import { emptyLine } from './lib/empty.js';
 import { installProjectWorkspace } from './lib/project-workspace.js';
 import { projectCommand, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { createProjectSummaryStore, describeProjectSection } from './lib/project-summary.js';
@@ -676,7 +677,7 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   if (project && project !== 'vault' && activeProject() !== project) selectMarginProject(project);
   const next = threadState(target);
   S.turns = next.turns; feed.replaceChildren(...next.nodes);
-  setMode(S.turns.length ? 'talk' : 'idle');
+  setMode(S.turns.length || id !== 'home' ? 'talk' : 'idle');   // a thread is a conversation even before it has anything in it; only home rests as the character
   ask.placeholder = placeholderText(); syncSendButton(); syncMargins();
   if (focus) focusComposer();
   void settleThread(project, id);
@@ -687,7 +688,11 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
 async function settleThread(project, id) {
   const target = threadKey(project, id);
   await hydrateThread(project, id);
-  if (activeThreadKey() === target) setMode(S.turns.length ? 'talk' : 'idle');
+  if (activeThreadKey() !== target) return;
+  // A thread with nothing in it says so. An empty home is the character, which is its own empty state.
+  // The line hides itself (CSS) the moment the conversation has anything else in it.
+  if (id !== 'home' && !S.turns.length && threadState(target).hydrated && !feed.querySelector('.feed-empty')) feed.append(emptyLine('nothing here yet — say what you want built', 'feed-empty'));
+  setMode(S.turns.length || feed.querySelector('.feed-empty') ? 'talk' : 'idle');
 }
 async function newThread(project) {
   const created = await api.command('thread.create', {}, project);
@@ -871,6 +876,7 @@ const COMMANDS = [
   { cmd: '/play', args: '<project> [stop|status]', desc: 'launch the project\'s dev server and open it', local: true },
   { cmd: '/project', args: '[name]', desc: 'show or switch the active project', local: true },
   { cmd: '/new', args: '<name> [web|game]', desc: 'start a new project (git repo in ~/NibbiProjects; web = vite scaffold, game = rules/design + plan)', local: true },
+  { cmd: '/register', args: '<path> [name]', desc: 'register a git repository you already have as a project (the full path to its root)', local: true },
   { cmd: '/issue', args: '<text>', desc: 'file an issue to the vault for the active project (nibbi triages it)', local: true },
   { cmd: '/playtest', args: '[project]', desc: 'playtest mode: every report gets logged and triaged', local: false },
   { cmd: '/endtest', args: '', desc: 'end playtest mode with a session summary', local: false },
@@ -955,6 +961,18 @@ async function runLocalCommand(name, arg, opts) {
       const ok = code === 0;
       return { ok, text: ok ? '**' + md.esc(name) + '** is a ' + (template === 'web' ? 'web app' : 'game') + ' now — `' + r.repo + '`' + (files.length ? ' (' + files.map((f) => '`' + f + '`').join(', ') + ')' : '') + '.' + (template === 'web' ? ' `npm run dev` is wired, so `/play ' + r.slug + '` works.' : ' The plan is in the vault; tell me the pitch and I\'ll fill it in.') : 'The template landed but `npm install` exited with ' + code + ' — check the log above.', acts: template === 'web' ? [{ label: 'play it', run: () => send('/play ' + r.slug) }, { label: 'first fix', run: () => { ask.value = '/fix '; focusComposer(); autosize(); } }] : [{ label: 'plan', run: () => send('/plan ' + r.slug) }, { label: 'write the pitch', run: () => { ask.value = 'The pitch for ' + name + ': '; focusComposer(); autosize(); } }] };
     }); }
+    case 'register': return localTurn('/register ' + arg, async (T) => {
+      const m = String(arg || '').trim().match(/^(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+([\s\S]+))?$/);
+      if (!m) return { ok: false, text: 'Point me at the folder: `/register /path/to/repo [name]`. It has to be the root of a git repository. Quote a path with spaces in it.' };
+      const path = (m[1] || m[2] || m[3]).replace(/(.)\/+$/, '$1');
+      if (path.startsWith('~')) return { ok: false, text: 'I need the whole path — `~` isn\'t expanded here. Something like `/Users/you/' + md.esc(path.replace(/^~\/?/, '') || 'repo') + '`.' };
+      const name = (m[4] || path.split('/').filter(Boolean).pop() || '').trim();
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      const st = addStep(T, 'registering ' + path);
+      const r = await api.post('/api/project-create', { mode: 'existing', name, path });   // owner-only: the daemon checks it is a repository root
+      markStep(st, 'done'); await refreshProjects(); S.project = slug; LS.set('project', slug); renderProject();
+      return { text: '**' + md.esc(slug) + '** is a project now — `' + (r.repo || path) + '`. Nothing in the folder changed. It\'s the active project.', acts: [{ label: 'what\'s in it?', run: () => send('/project ' + slug) }, { label: 'plan it', run: () => { ask.value = 'Plan ' + slug + ': '; focusComposer(); autosize(); } }] };
+    });
     case 'issue': return localTurn('/issue' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = activeProject(); const f = await issuesFile(proj);
       if (!arg) { const open = f ? (f.content.match(/^\s*[-*]\s*\[ \][^\n]*/gm) || []).slice(0, 12) : []; return { text: open.length ? '**' + proj + '** — ' + open.length + ' open issue' + (open.length > 1 ? 's' : '') + ' (`' + f.path + '`)\n\n' + open.map((l) => l.trim()).join('\n') : 'No open issues for **' + proj + '**' + (f ? ' in `' + f.path + '`' : '') + '. File one with `/issue <text>`.', acts: [{ label: 'triage them', run: () => send('triage the open issues in ' + (f ? f.path : 'the issues file') + ' for ' + proj + ': bug / balance / idea, severity, and which one to fix first') }] }; }
@@ -1181,6 +1199,7 @@ function connectEvents() {
       } else if (event.type === 'auto.updated') {
         S.auto = { ...(S.auto || {}), [event.projectId]: event.payload.config }; renderProject();
       } else if (event.type === 'thread.updated') mergeThread(event.payload?.thread);
+      else if (event.type === 'provider.auth') { void refreshStatus(); if (evReady && event.payload?.success !== false) toast('signed in'); }   // a replayed sign-in is old news
     }
   });
   evSource = { close };
@@ -1635,7 +1654,7 @@ function renderProposalCard(T, p, prompt) {
 const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart the brain — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
 function errorActs(text) {
   const acts = [{ label: 'try again', run: () => { const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }];
-  if (/oauth|authenticate|token/i.test(text)) acts.push({ label: 'how to re-login', warn: true, run: () => { toast('open Settings → Providers to configure the API key or Codex login', 5000); } });
+  if (/oauth|authenticate|token|sign-in has lapsed/i.test(text)) acts.push({ label: 'sign in', run: () => openPlatform('Providers') });   // the chip goes where signing in happens, instead of describing it
   if (/gateway (offline|isn)|failed to fetch|networkerror|not reachable/i.test(text)) { acts.push(restartAct()); acts.push({ label: 'use the demo brain', run: () => { S.demo = true; refreshStatus(); const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }); }
   return acts;
 }
@@ -1813,7 +1832,7 @@ function syncMargins() {
   });
   const metadata = marginMetadata({ status, project: selected, busy: S.busy, link: S.link, demo: S.demo, sessionCost: S.sessionCost, sessionTurns: S.sessionTurns });
   projectWorkspace.setBusy(S.busy);
-  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), activeProject: active, view: S.projectView, busy: S.busy, progress: S.progress, settings: {
+  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), projectsError: !!S.projectsError, activeProject: active, view: S.projectView, busy: S.busy, progress: S.progress, settings: {
     microphone: S.micEnabled, microphonePhase: S.micPhase,
     voice: S.voiceOn, sounds: LS.get('sounds', false) === true,
     notifications: LS.get('notifications', true) === true && notificationPermission === 'granted',
@@ -1863,7 +1882,15 @@ async function handleMarginAction(action, id, value) {
       if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
     case 'projectSection': openProjectSection(id, value); return;
     case 'repository': openProjectSection(id, 'repository'); margins.close(); return;
-    case 'newProject': margins.close(); ask.value = '/new '; focusComposer(); autosize(); return;
+    case 'newProject': {
+      // Two ways in, and the daemon has had both: a fresh repository, or one you already have. The field
+      // used to be prefilled with "/new ", so registering an existing folder had no door at all.
+      margins.close();
+      const start = (command) => () => { ask.value = command; focusComposer(); autosize(); };
+      await localTurn(undefined, async () => ({ text: 'A project is a git repository I can build in. Start a fresh one, or point me at one you already have.', acts: [{ label: 'create a new repo', run: start('/new ') }, { label: 'register a folder I have', run: start('/register ') }] }), { keepInput: true });
+      return;
+    }
+    case 'refreshProjects': clearTimeout(projectsRetry); projectsRetry = 0; await refreshProjects(); return;
     case 'fix': selectMarginProject(id); margins.close(); ask.value = '/fix '; focusComposer(); autosize(); return;
     case 'plan': case 'play': case 'review':
       selectMarginProject(id); margins.close(); await send('/' + action + ' ' + id); return;
@@ -2049,23 +2076,32 @@ function mostActiveProject(list) {
   for (const f of S.fixers || []) { const t = Date.parse(f.endedAt || f.startedAt || 0) || 0; const n = f.game || f.project; if (names.has(n) && t > at) { at = t; best = n; } }
   return best || autoOn[0] || null;
 }
-let projectsRead = 0;
+let projectsRead = 0, projectsRetry = 0;
+/* A first read that never arrives is said, not waited on: the bar read "Loading projects…" for as long
+   as the daemon was away. It retries every 10s until the list first arrives, and Retry asks at once.
+   Once a list is on screen, a later failed refresh keeps it. */
+function projectsUnreachable(read) {
+  if (read !== projectsRead || Array.isArray(S.projects)) return;
+  S.projectsError = true; syncMargins();
+  if (!projectsRetry) projectsRetry = setTimeout(() => { projectsRetry = 0; void refreshProjects(); }, 10000);
+}
 async function refreshProjects() {
   const read = ++projectsRead;
   try {
-    const r = await fetch('/api/projects'); if (!r.ok) return;
+    const r = await fetch('/api/projects'); if (!r.ok) { projectsUnreachable(read); return; }
     const list = await r.json(); if (read !== projectsRead || !Array.isArray(list)) return;
-    S.projects = list;
+    S.projects = list; S.projectsError = false; clearTimeout(projectsRetry); projectsRetry = 0;
     const saved = LS.get('project', null), recent = mostActiveProject(list);
     // Read current selection after the await, so a refresh cannot undo a user's choice.
     const selected = list.find(p => p.name === S.project) || list.find(p => p.name === saved) || list.find(p => p.name === recent) || list.find(p => p.kind === 'game') || list[0];
     S.project = selected?.name || null; renderProject();
+    if (!threadBooted) void bootThread().catch((e) => clientLog('error', 'threads: ' + e.message));
     const playable = await Promise.all(list.filter(p => p.kind === 'game').map(async p => {
       try { const r = await fetch('/api/play?project=' + encodeURIComponent(p.name)); if (!r.ok) return null; const ps = await r.json(); return ps.playable ? { name: p.name, running: ps.running, url: ps.url } : null; } catch { return null; }
     }));
     if (read !== projectsRead) return;
     S.playable = playable.filter(Boolean); renderProject();
-  } catch { /* offline */ }
+  } catch { projectsUnreachable(read); }
 }
 /* One sequence, once the projects are known: the conversation belongs to the active project, the
    thread you were in comes back, and a home with no saved copy is read from the daemon rather than
@@ -2095,7 +2131,7 @@ async function bootThread() {
   else if (!S.turns.length) await settleThread(project, 'home');
   ask.placeholder = placeholderText(); syncMargins();
 }
-(async () => { await refreshProjects(); await bootThread(); })().catch((e) => clientLog('error', 'threads: ' + e.message));
+void refreshProjects();   // and bootThread, the first time the list arrives
 setInterval(() => { if (!document.hidden) refreshProjects(); }, 120000);
 (async () => { try { const items = await api.get('/api/history?n=12'); const recent = (Array.isArray(items) ? items : []).filter((m) => m.channel === 'app'); S.recent = recent.length > 0 && Date.now() - Date.parse(recent[recent.length - 1].ts) < 12 * 3600000; } catch { S.recent = false; } })();
 if (S.demo) { renderAgents([], {}); renderProject(); }
@@ -2107,20 +2143,22 @@ function chipSet(when) {
   const fx = S.fixers || [];
   const staged = fx.filter((f) => f.status === 'staged' && (f.game || f.project) === activeProject() && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length;
   const running = fx.filter((f) => /running|queued/i.test(f.status) && (f.game || f.project) === activeProject()).length;
-  const proj = S.project || 'shipless';
+  // Chips name things that exist. A playtest needs a project to play, and "what's new?" needs a past.
+  const proj = registeredProject(), firstRun = Array.isArray(S.projects) && !S.projects.some((p) => p.kind !== 'brain');
   if (staged) out.push(autoOf(activeProject()).mode === 'ship' ? { label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' in the merge queue', text: '/artifacts ' + activeProject() } : { label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' waiting for review', text: '/review ' + activeProject() });
   for (const f of fx.filter((x) => x.status === 'running').slice(0, 1)) out.push({ label: 'steer ' + fixerTitle(f).slice(0, 22), text: '__steer:' + f.id });
   if (running) out.push({ label: running + ' fixer' + (running > 1 ? 's' : '') + ' working', text: 'how are the fixers doing?' });
   const h = new Date().getHours();
   if (S.link === 'offline' && !S.demo && when !== 'after') { out.unshift({ label: 'wake the gateway', text: '__wake' }, { label: 'use the demo brain', text: '__demo' }); }
   if (S.playtest && when !== 'after') { return [{ label: 'bug', text: '__prefix:[bug] ' }, { label: 'balance', text: '__prefix:[balance] ' }, { label: 'idea', text: '__prefix:[idea] ' }, { label: 'rules question', text: '__prefix:[rules] ' }, { label: 'end playtest', text: '/endtest' }]; }
-  if (when === 'idle' || when === 'focus') {
+  if ((when === 'idle' || when === 'focus') && firstRun) out.push({ label: 'new project', text: '__newProject' }, { label: 'what can you do?', text: '/help' });
+  else if (when === 'idle' || when === 'focus') {
     if (S.recent && !S.turns.length) out.push({ label: 'pick up where we left off', text: '/recent' });
     if (h < 11) out.push({ label: 'morning brief', text: 'give me my morning brief' });
-    out.push({ label: 'what\'s new?', text: 'what\'s new since we last talked?' });
+    if (S.recent) out.push({ label: 'what\'s new?', text: 'what\'s new since we last talked?' });
     for (const p of (S.playable || []).slice(0, 2)) out.push(p.running && p.url ? { label: p.name + ' is running — open', text: '/play ' + p.name + ' status' } : { label: 'play ' + p.name, text: '/play ' + p.name });
-    out.push({ label: 'start a playtest', text: '/playtest ' + proj });
-    out.push({ label: 'what were we doing?', text: 'remind me what we were working on and what\'s next' });
+    if (proj) out.push({ label: 'start a playtest', text: '/playtest ' + proj });
+    if (S.recent) out.push({ label: 'what were we doing?', text: 'remind me what we were working on and what\'s next' });
   } else if (when === 'after') {
     out.push({ label: 'go on', text: 'go on' });
     out.push({ label: 'show me', text: 'show me — give me a preview or the diff' });
@@ -2135,7 +2173,7 @@ function showChips(when) {
   chipsShown = true;
   clearTimeout(S.chipTimer); S.chipTimer = setTimeout(hideChips, when === 'after' ? 14000 : 30000);
 }
-function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; focusComposer(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); focusComposer(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
+function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; focusComposer(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); focusComposer(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } if (text === '__newProject') { void handleMarginAction('newProject').catch((e) => toast(e.message)); return; } send(text); }
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
@@ -2285,7 +2323,7 @@ function renderVoice() {
   micBtn.title = (listening ? 'Hey Nibbi is on — turn microphone off' : 'Hey Nibbi is off — turn microphone on') + ' (⌥ Space)';
   body.dataset.mic = phase; pill.classList.toggle('mic-on', listening); pill.classList.toggle('listening', phase === 'listening');
   listenEl.hidden = !listening;
-  const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: "What's up, Matty?", listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
+  const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: WAKE_GREETING, listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
   $('.heard', listenEl).textContent = labels[phase] || '';
   syncDockTitle();   // the listen strip already carries the live phase; the “+” title only has to name the mode
   S.voiceFinishing = phase === 'listening' && S.micCapturing;

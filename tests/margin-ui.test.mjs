@@ -31,7 +31,9 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     await page.setContent('<style>:root{--ease:ease-out;--ink:#151413;--ink-2:#3a3835;--ink-3:#6f6b65}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav><button id="outside" style="position:fixed;bottom:10px;left:50%">Outside</button><div id="already-inert" inert>Previously unavailable</div>');
     await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
     await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
-    const moduleURL = 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/margin-ui.js', import.meta.url))).toString('base64');
+    // A data: module cannot resolve a relative import, so the one the bar has is inlined the same way.
+    const inline = async name => 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/' + name, import.meta.url))).toString('base64');
+    const moduleURL = 'data:text/javascript;base64,' + Buffer.from((await readFile(new URL('../public/lib/margin-ui.js', import.meta.url), 'utf8')).replace("'./empty.js'", `'${await inline('empty.js')}'`)).toString('base64');
     await page.evaluate(async url => {
       const {installMarginUI} = await import(url);
       window.calls = [];
@@ -335,6 +337,15 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     // that does not exist.
     await page.evaluate(() => {model.projects=[];model.activeProject=null;model.projectsLoaded=false;ui.update(model);});
     assert.match(await page.locator('.margin-switch-trigger').innerText(), /Loading projects/);
+    // A list that never arrived is not still loading. It says so once, and Retry asks again.
+    await page.evaluate(() => {model.projectsError=true;ui.update(model);});
+    assert.equal(await page.locator('.margin-switch-trigger').getAttribute('aria-label'), 'Projects: couldn’t reach the projects list');
+    assert.doesNotMatch(await page.locator('.margin-switch-trigger').innerText(), /couldn’t/, 'said once, in the body, not truncated in the switcher too');
+    assert.equal(await page.locator('.margin-body .margin-empty').innerText(), 'couldn’t reach the projects list');
+    assert.doesNotMatch(await page.locator('#project-rail').innerText(), /Loading projects/, 'and nothing claims it is still loading');
+    await page.locator('.margin-body').getByRole('button', {name: 'Retry', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'refreshProjects', id: undefined, value: undefined});
+    await page.evaluate(() => {delete model.projectsError;ui.update(model);});
     await page.evaluate(() => {model.projectsLoaded=true;ui.update(model);});
     const firstRun = await page.locator('.margin-switch-trigger').innerText();
     assert.match(firstRun, /No projects yet/);
