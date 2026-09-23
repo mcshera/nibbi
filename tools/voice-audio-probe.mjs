@@ -84,7 +84,7 @@ try {
   result.wakeStartedAt = Date.now();
   result.wakeInput = await page.evaluate(() => window.audioProbe.inject('/audio-probe-wake.wav'));
   await phase('listening'); result.listeningAt = Date.now();
-  assert.deepEqual(result.spoken.map(s => s.text), ["What's up, Matty?"]);
+  assert.deepEqual(result.spoken.map(s => s.text), ["What's up?"]);
   assert.equal(result.sends.length, 0);
   result.eventsAfterWake = await page.evaluate(() => window.audioProbe.events);
   assert.ok(result.eventsAfterWake.some(e => e.kind === 'output' && e.event === 'ended'));

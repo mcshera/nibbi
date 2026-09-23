@@ -152,6 +152,7 @@ Proposed ramp — one per verdict, three roles each:
 `#873f35`, `#743b2f`, `#65432c`, `#365342` retire into these. The three that survive in `styles.css` are the ones with measured contrast behind them; the workspace variants were picked independently and are the ones to drop.
 
 **Rule.** There is no warning colour and no info colour. A warning is a `--fail-edge` border with ink text (`.chip.warn`, `.planr .prwarn` already do this). Info is ink. Adding an amber or a blue would break principle 1.
+The bar's `.margin-error` follows it: a refusal that means "not now" — switching away while nibbi is answering — carries `data-kind="notice"` and is `--ink-2`; only an action that failed is `--fail-text`.
 
 **Default.** A workspace notice with no kind is ink — `--ink-2` on `--notice-bed` — because "Confirm this build action below." is information, not a verdict; only `data-kind="error"` wears `--fail-text`. (`data-kind="success"` keeps `--pass-text` for now: "Saved." is not a verdict either, and that one is the owner's call.) A verdict wears one colour everywhere it is shown: Failed is `--fail-text` in the desktop queue and in the phone list alike.
 
@@ -459,13 +460,13 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 | **notice bubble** | the bubble on `--notice-bed`, `--veil-strong` border, `--ink-3` dot | `--type-read` | `--e-raised` | something was unreachable, not judged |
 | **platform panel** | `--r-surface`, `760px` | `--type-body` | `--e-dialog` | `::backdrop` is `--veil-edge` + `--blur-scrim` |
 | **jump to latest** | pill | `--type-fine` | `--e-floating` | tracks `--feed-bottom` |
-| **day divider** | rule + label | `--type-meta` | none | 40px hairlines either side |
+| **day divider** | rule + label | `--type-meta` | none | 40px hairlines either side; at the top of a conversation with more above it, the label is a `load earlier` chip |
 
 ### Missing parts
 
 Checked against the running app rather than inferred from the CSS, which corrected two earlier entries here:
 
-1. ~~No empty states.~~ **Wrong — the rail has them**, and they are well written: `No projects yet`, `Nothing is open`, `Nothing is queued`, `Nothing merged yet today`, `No plan written yet`. What is missing is only that they are ad-hoc strings rather than a shared part, so a new surface has nothing to reach for.
+1. ~~No empty states.~~ **Wrong — the rail has them**, and they are well written: `No projects yet`, `Nothing is open`, `Nothing is queued`, `Nothing merged yet today`, `No plan written yet`. What is missing is only that they are ad-hoc strings rather than a shared part, so a new surface has nothing to reach for. **Closed:** `emptyLine(text)` in `public/lib/empty.js` is the part — one sentence in muted type, with at most one action placed after it. The bar's empty and error states and an empty thread (`#feed .feed-empty`) use it; an empty home is the character, not a line.
 2. ~~No pending state.~~ **Wrong — loading states exist**, as text (`.project-loading`, `aria-busy`, `Loading…`). They are not skeletons, which is a stylistic choice rather than a gap.
 3. ~~An inline error that is not a failure.~~ **Built.** `errorKind()` in `public/lib/text.js` separates a machine verdict from a machine being unreachable, and the notice bubble in §9 is what the second one wears. `--fail-*` is once again only ever a verdict.
 
@@ -503,6 +504,7 @@ Governed by `docs/PERSONALITY.md`, which is more thorough than most product voic
 - **Numbers, not adjectives.** `4 files · +82 −14`, not "several changes".
 - **A state line says one fact once.** A section tab's headline is its badge; the lines under it add only what the badge lacks, as lowercase fragments with no period (`2 in flight · 1 staged`, `nothing queued`), and nothing at all when it has nothing to add. A status shown on its own names its subject: `Notifications are blocked in system or browser settings`, not `Blocked in system or browser settings`.
 - **A truncated string always carries a `title`.** Taken from the sidebar lab's reading of Cursor's live complaint about untitled truncated repo names.
+- **Drafts are per conversation.** A half-written message stays with the thread it was written in, survives a reload, and a quote is added under it, never over it. A file that cannot be attached says why, with the number (`4 images is the most per message`).
 
 ---
 

@@ -1,6 +1,6 @@
 # Hey Nibbi control follow-up
 
-The side-rail microphone now controls wake listening, just like the composer microphone and Settings → **Hey Nibbi microphone**. All three show the same on/off state. Say **Hey Nibbi** to trigger **What's up, Matty?**, then speak your message.
+The side-rail microphone now controls wake listening, just like the composer microphone and Settings → **Hey Nibbi microphone**. All three show the same on/off state. Say **Hey Nibbi** to trigger **What's up?**, then speak your message.
 
 The speaker icon is now **Spoken replies**. It only controls answer audio. **Sound effects** remains available in Settings. The microphone stays off until explicitly enabled; no startup permission or hidden capture was added.
 

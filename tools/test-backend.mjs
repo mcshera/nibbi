@@ -3,8 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 
-export async function testBackend() {
+export async function testBackend({ realProviders = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'nibbi-browser-'));
+  // A fixture never reaches the owner's provider accounts unless it asks to. The Providers tab checks
+  // sign-in as it opens, and that check starts the claude CLI and a Codex RPC; here both point nowhere
+  // and answer "not signed in" at once. tools/provider-smoke.mjs is the one check that wants the real ones.
+  if (!realProviders) for (const name of ['NIBBI_CLAUDE_BIN', 'NIBBI_CODEX_BIN']) process.env[name] = join(directory, 'no-provider-here');
   const probe = createServer(); await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, '127.0.0.1', resolve); });
   const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
   process.env.NIBBI_PORT = String(port); process.env.NIBBI_LEGACY_API = '0'; process.env.NIBBI_REMOTE = '0'; process.env.NIBBI_SCHEDULER = '0';
@@ -27,6 +31,13 @@ server.listen(0, '127.0.0.1', () => console.log('http://127.0.0.1:' + server.add
     }
     runtime().put('fixers', run.id, run);
   }
-  return { directory, base: 'http://127.0.0.1:' + port, close: async () => { await backend.close(); rmSync(directory, { recursive: true, force: true }); } };
+  // Conversation seeds go through the daemon's own writers, so a thread is renamed and announced
+  // exactly as a real message would do it. Rows default to the fixture's home thread in the app.
+  const history = await import('../daemon/dist/history.js'), threads = await import('../daemon/dist/threads.js');
+  let clock = Date.now() - 3600000;
+  const seedChat = rows => rows.map(row => history.logChat({ ts: row.ts ?? new Date(clock += 1000).toISOString(), channel: 'app', project: 'fixture', ...row, role: row.role === 'user' ? 'user' : 'oracle' }));
+  const createThread = (title, projectId = 'fixture') => threads.createThread(projectId, title);
+  const emit = event => runtime().emit(event);   // something the daemon says on /api/events, e.g. a brief while the window is away
+  return { directory, base: 'http://127.0.0.1:' + port, seedChat, createThread, emit, close: async () => { await backend.close(); rmSync(directory, { recursive: true, force: true }); } };
 }
 if (process.argv[1] === new URL(import.meta.url).pathname) { const fixture = await testBackend(); console.log('Fixture URL:', fixture.base); }

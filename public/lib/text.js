@@ -16,11 +16,13 @@ export const toolLabel = (n) => { const governed = governedToolName(n); if (gove
 export function errorKind(raw) {
   const m = String(raw || '').replace(/^\s*error:\s*/i, '');
   // The second half is what humanError itself says, so a row the daemon stored already humanised reads the same way.
-  return /oauth|authenticate|token|gateway offline|failed to fetch|networkerror|ECONNREFUSED|isn't reachable|HTTP 5\d\d|rate.?limit|429|queued|busy|isn't answering|ink pot|rate-limited|choked/i.test(m) ? 'notice' : 'failure';
+  return /oauth|authenticate|token|gateway offline|failed to fetch|networkerror|ECONNREFUSED|isn't reachable|HTTP 5\d\d|rate.?limit|429|queued|busy|isn't answering|ink pot|rate-limited|choked|sign in to claude code|claude sign-in unavailable|isn't signed in/i.test(m) ? 'notice' : 'failure';
 }
 export function humanError(raw) {
   const m = String(raw || '').replace(/^\s*error:\s*/i, '');
-  if (/oauth|authenticate|token/i.test(m)) return 'I spilled the ink pot — the gateway\'s login has expired. Run `claude setup-token`, then I\'ll try again.';
+  if (/oauth|authenticate|token/i.test(m)) return 'I spilled the ink pot — Claude\'s sign-in has lapsed. Sign in again under Settings → Providers and I\'ll pick this back up.';
+  // The daemon's own words for "not signed in" (claude-auth.ts), which fell through to "I lost the thread".
+  if (/sign in to claude code|claude sign-in unavailable/i.test(m)) return 'Claude isn\'t signed in on this Mac. Sign in under Settings → Providers and I\'ll pick this back up.';
   if (/gateway offline|failed to fetch|networkerror|ECONNREFUSED|isn\'t reachable/i.test(m)) return 'The gateway isn\'t answering, so there\'s no brain behind me right now. Start it — or switch me to the demo brain to see how this feels.';
   if (/HTTP 5\d\d/.test(m)) return 'The gateway choked on that one (' + m + '). Try again?';
   if (/rate.?limit|429/i.test(m)) return 'I\'m rate-limited for a bit. Give me a few minutes and ask again.';

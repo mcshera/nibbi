@@ -3,7 +3,7 @@
 The tested UI is active in the existing Nibbi app. The native shell was refreshed, not replaced. Window geometry remains 50,29,1180,712. The mic is visibly available and off by default.
 
 - Click the mic (or press ⌥ Space) to turn wake listening on/off.
-- Say “Hey Nibbi”. Nibbi plays “What's up, Matty?”, then listens for one message.
+- Say “Hey Nibbi”. Nibbi plays “What's up?”, then listens for one message.
 - No hold-to-talk. After the reply, wake listening resumes while enabled. Hiding/reloading or changing projects turns capture off.
 - Spoken reply settings remain separate; the wake greeting still plays.
 

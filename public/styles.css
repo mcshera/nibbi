@@ -48,6 +48,7 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 @keyframes leave { to { opacity: 0; transform: translateY(8px); } }
 .you { align-self: flex-end; margin-right: 2px; max-width: 78%; padding: 8px 14px; border-radius: var(--r-surface) var(--r-surface) var(--r-inline) var(--r-surface); background: var(--veil-hover); color: var(--ink-2); font-size: var(--type-body); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .you .imgs { display: flex; gap: 6px; margin: 4px 0 6px; } .you .imgs img { height: 64px; border-radius: var(--r-well); }
+.you:empty { display: none; }   /* belt and braces: a turn nibbi began has no "you", and an empty one is a grey pill saying nothing */
 .nib { align-self: stretch; color: var(--ink); font-size: var(--type-read); line-height: 1.55; display: flex; align-items: flex-start; }
 .nib .nibbody { flex: 1; min-width: 0; }
 /* the bubble carries the reply alone: no avatar, no tail. a 6px ink dot tucked in the top-left corner is nibbi's quiet signature.
@@ -329,6 +330,11 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 .jump:hover { background: var(--ink); color: var(--ink-inverse); border-color: transparent; }
 .when { text-align: center; font-size: var(--type-meta); letter-spacing: .04em; color: var(--ink-3); margin: 6px 0 16px; }
 .when::before, .when::after { content: ''; display: inline-block; width: 40px; height: 1px; background: var(--line); vertical-align: middle; margin: 0 10px; }
+.when .earlier { font-size: var(--type-meta); padding: 4px 12px; vertical-align: middle; }   /* the top of a conversation that has more above it: a divider you can press */
+.when .earlier:disabled { cursor: default; }
+.feed-empty { margin: 28px 0 0; text-align: center; color: var(--ink-3); font-size: var(--type-body); }
+.feed-empty:not(:only-child) { display: none; }
+@media (max-width: 640px), (pointer: coarse) { .when .earlier { min-height: var(--touch); } }
 
 /* review mode */
 .turn.review .bubble { border-color: var(--veil-strong); }

@@ -1,5 +1,6 @@
+import { emptyLine } from './empty.js';
 /** Live, modeless margin controls. Authority stays with the caller.
-    update(model) reads {projects, projectsLoaded, activeProject, view, busy, settings, progress?}; progress is
+    update(model) reads {projects, projectsLoaded, projectsError?, activeProject, view, busy, settings, progress?}; progress is
     {today:{deliveries}, week:{deliveries}, streak, available} from verified merges, or undefined when not available. */
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const glyphs = {
@@ -16,6 +17,7 @@ const glyphs = {
   settings: ['M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M9.5 3h5l.5 2.4 1.8 1 2.3-.7 2.5 4.3-1.8 1.6v.8l1.8 1.6-2.5 4.3-2.3-.7-1.8 1-.5 2.4h-5L9 18.6l-1.8-1-2.3.7L2.4 14l1.8-1.6v-.8L2.4 10l2.5-4.3 2.3.7 1.8-1L9.5 3Z'],
 };
 const text = (value, fallback = '—') => value == null || value === '' ? fallback : String(value);
+const PROJECTS_UNREACHABLE = 'couldn’t reach the projects list';
 const relative = at => {
   if (!Number.isFinite(at)) return '';
   const seconds = Math.max(0, (Date.now() - at) / 1000);
@@ -139,7 +141,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   sidebar.append(head, left, right); document.body.append(backdrop, sidebar, toggle);
   right.setAttribute('aria-label', 'Settings');
   const list = node('div', 'margin-project-list');
-  const empty = node('p', 'margin-empty', 'Loading projects…');
+  const empty = emptyLine('Loading projects…');
   const globalError = node('p', 'margin-error margin-global-error');
   globalError.setAttribute('role', 'status'); globalError.hidden = true;
   const keyFor = (action, id) => JSON.stringify([action, id ?? null]);
@@ -161,7 +163,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       if (typeof onAction === 'function') await onAction(action, id, value);
       return true;
     } catch (cause) {
-      if (!destroyed) { error.textContent = text(cause?.message || cause, 'Could not complete this action.'); error.hidden = false; }
+      if (!destroyed) { error.textContent = text(cause?.message || cause, 'Could not complete this action.'); error.dataset.kind = cause?.kind === 'notice' ? 'notice' : 'error'; error.hidden = false; }
       return false;
     } finally { pending.delete(key); if (!destroyed) refreshDisabled(); }
   }
@@ -422,13 +424,14 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   function renderSwitcher() {
     const entry = activeEntry();
-    const loading = model.projectsLoaded === false;
+    const loading = model.projectsLoaded === false, unreachable = loading && !!model.projectsError;
     if (!entry) {
       // Nothing to name yet. "No project · no branch · quiet" described a project that does not exist.
+      // And a list that never arrived is not still loading: it says so, and Retry is in the body below.
       trigger.dataset.currentProject = '';
-      triggerName.textContent = loading ? 'Loading projects…' : 'No projects yet';
-      triggerSummary.textContent = loading ? '' : 'Create one to get started';
-      trigger.setAttribute('aria-label', loading ? 'Loading projects' : 'No projects yet. Create one to get started');
+      triggerName.textContent = unreachable ? 'Projects' : loading ? 'Loading projects…' : 'No projects yet';
+      triggerSummary.textContent = loading ? '' : 'Create one to get started';   // unreachable: the body below says it once
+      trigger.setAttribute('aria-label', unreachable ? 'Projects: ' + PROJECTS_UNREACHABLE : loading ? 'Loading projects' : 'No projects yet. Create one to get started');
       trigger.title = '';
       rollup.hidden = true;
       return;
@@ -494,9 +497,14 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     const entry = activeEntry();
     if (!entry) {
       bodyKey = '';
-      if (model.projectsLoaded === false) { body.replaceChildren(node('p', 'margin-empty', 'Loading projects…')); return; }
+      if (model.projectsLoaded === false && model.projectsError) {
+        const retry = button('Retry', 'margin-pill margin-empty-retry', () => void dispatch('refreshProjects'));
+        body.replaceChildren(emptyLine(PROJECTS_UNREACHABLE), retry);
+        return;
+      }
+      if (model.projectsLoaded === false) { body.replaceChildren(emptyLine('Loading projects…')); return; }
       const start = button('New project', 'margin-pill margin-empty-new', () => { close(); void dispatch('newProject'); });
-      body.replaceChildren(node('p', 'margin-empty', 'No projects yet. A project is a repository nibbi can build in.'), start);
+      body.replaceChildren(emptyLine('No projects yet. A project is a repository nibbi can build in.'), start);
       return;
     }
     const data = entry.data, view = model.view?.project === data.id ? model.view.section : null;
@@ -509,7 +517,24 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
         data.inFlight, data.staged, data.pending, data.done, data.total, data.goal, data.planAvailable] : null]);
     if (key === bodyKey) return;
     bodyKey = key;
+    const refocus = heldRow();
     body.replaceChildren(...(summarised ? sectionBody(data, summarised) : chatBody(data, entry)));
+    refocus?.();
+  }
+  /* The list is rebuilt whenever a thread in the project is written to, from this window or another
+     device. A keyboard on a row, its gear or New thread stays on the same one instead of dropping to
+     the page; a row that went away hands focus to Home. */
+  function heldRow() {
+    const el = document.activeElement;
+    if (!el || el === body || !body.contains(el)) return null;
+    const fresh = el.classList.contains('project-thread-new'), gear = el.classList.contains('project-options');
+    const id = el.dataset.threadId ?? el.closest('.project-thread-row')?.querySelector('[data-thread-id]')?.dataset.threadId;
+    if (!fresh && id === undefined) return null;
+    return () => {
+      const row = fresh ? null : [...body.querySelectorAll('[data-thread-id]')].find(n => n.dataset.threadId === id);
+      const target = fresh ? body.querySelector('.project-thread-new') : gear ? row?.parentElement?.querySelector('.project-options') : row;
+      (target || body.querySelector('[data-thread-id="home"]'))?.focus({preventScroll: true});
+    };
   }
   function chatBody(data, entry) {
     const parts = [];
@@ -517,22 +542,95 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     fresh.disabled = !!model.busy;   // rebuilt each time it changes, so it is not bound: bindings are for lasting elements
     fresh.append(icon('newThread'), node('span', 'project-section-copy', 'New thread'));
     fresh.title = model.busy ? 'Not while nibbi is answering' : 'Start a new conversation';
+    pruneThreadCards();
     const threads = node('div', 'project-threads');
     threads.append(...(Array.isArray(data.threads) ? data.threads : []).map(thread => {
       const el = button('', 'project-section project-thread', () => void dispatch('thread', data.id, thread.id));
       el.dataset.threadId = thread.id; el.dataset.threadProject = data.id;
-      const when = thread.lastAt ? relative(Date.parse(thread.lastAt)) : '';
+      el.dataset.lastAt = thread.lastAt || ''; el.dataset.projectName = text(data.name);
       el.append(icon('thread'), node('span', 'project-section-copy', text(thread.title, 'Thread')),
-        node('span', 'project-thread-when', when));
+        node('span', 'project-thread-when'));
       el.title = text(thread.title, 'Thread');   // the copy is one clipped line; the whole name has to be reachable
-      el.setAttribute('aria-label', `${text(thread.title, 'Thread')} thread in ${text(data.name)}${when ? ', last message ' + when : ''}`);
+      paintWhen(el);
       if (thread.active) el.setAttribute('aria-current', 'true');
-      return el;
+      if (thread.id === 'home') return el;   // home is every message with no thread: it has no name to change and cannot be put away
+      // The same gear a project row has, beside the row rather than inside it: a button inside a button is not a button.
+      const row = node('div', 'project-thread-row');
+      const gear = button('', 'project-options', () => { const card = threadCardFor(data.id, thread); paintThreadCard(card, thread); disclose(gear, card); open(card, gear); });
+      gear.append(icon('settings'));
+      gear.setAttribute('aria-haspopup', 'dialog'); gear.setAttribute('aria-expanded', 'false');
+      gear.setAttribute('aria-label', `Thread settings for ${text(thread.title, 'Thread')}`); gear.title = 'Rename or archive';
+      const known = threadCards.get(threadCardKey(data.id, thread.id));
+      if (known) {
+        disclose(gear, known); paintThreadCard(known, thread);
+        if (opened === known) { gear.setAttribute('aria-expanded', 'true'); cardTrigger = gear; }   // the list re-rendered under an open card
+      }
+      row.append(el, gear);
+      return row;
     }));
     // New thread leads the conversations: it is the thing you reach for, not the thing you scroll past.
     parts.push(fresh, threads);
     return parts;
   }
+  /* A thread's card: its name, and a way to put it away. Built the first time its gear is used, like
+     a project's, and dropped when the thread leaves the model. There is no delete: an archived
+     conversation stays in the log, where history search still finds it. */
+  const threadCards = new Map();
+  const threadCardKey = (project, id) => JSON.stringify([project, id]);
+  function threadCardFor(project, thread) {
+    const key = threadCardKey(project, thread.id);
+    if (threadCards.has(key)) return threadCards.get(key);
+    const card = makeCard(text(thread.title, 'Thread'));
+    card.el.classList.add('margin-thread-card');
+    const form = node('form', 'margin-cap margin-rename');
+    const label = node('label', '', 'Name'), field = node('input');
+    field.type = 'text'; field.maxLength = 60; field.autocomplete = 'off'; field.spellcheck = false;
+    field.id = `margin-thread-${++serial}`; label.htmlFor = field.id;
+    field.addEventListener('input', () => { card.dirty = true; });
+    const save = button('Save', 'margin-pill'); save.type = 'submit';
+    form.append(label, field, save);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const title = field.value.trim(); if (!title) { field.focus(); return; }
+      void dispatch('renameThread', card.thread.id, {project, title}, card.error).then(ok => { if (ok) card.dirty = false; });
+    });
+    const archive = button('Archive', 'margin-pill', () => { confirm.hidden = false; confirmArchive.focus(); });
+    const confirm = node('div', 'margin-confirm'); confirm.hidden = true;
+    confirm.append(node('p', '', 'Archive this conversation? It stays in the log.'));
+    const confirmArchive = button('Archive', 'margin-pill margin-primary', () => void dispatch('archiveThread', card.thread.id, {project}, card.error).then(ok => {
+      if (!ok) return;
+      close();
+      body.querySelector('[data-thread-id="home"]')?.focus({preventScroll: true});   // its row is gone; Home is where the conversation went
+    }));
+    confirm.append(confirmArchive, button('Cancel', 'margin-pill', () => { confirm.hidden = true; archive.focus(); }));
+    const actions = node('div', 'margin-actions'); actions.append(archive);
+    card.body.append(form, actions, confirm);
+    Object.assign(card, {confirm, field, thread, dirty: false});
+    threadCards.set(key, card);
+    return card;
+  }
+  function paintThreadCard(card, thread) {
+    card.thread = thread;
+    card.heading.textContent = text(thread.title, 'Thread');
+    if (!card.dirty && document.activeElement !== card.field) card.field.value = text(thread.title, '');
+    return card;
+  }
+  function pruneThreadCards() {
+    const live = new Set((model.projects || []).flatMap(p => (Array.isArray(p.threads) ? p.threads : []).map(t => threadCardKey(String(p.id), t.id))));
+    for (const [key, card] of threadCards) if (!live.has(key)) {
+      if (opened === card) close();
+      card.el.remove(); cards.delete(card); threadCards.delete(key);
+    }
+  }
+  /** "4m" is only true for a minute. The row keeps when it last spoke, and the clock rewrites the
+      label in place, so an open bar does not go on saying "just now" about this morning. */
+  function paintWhen(el) {
+    const when = el.dataset.lastAt ? relative(Date.parse(el.dataset.lastAt)) : '';
+    const label = el.querySelector('.project-thread-when');
+    if (label && label.textContent !== when) label.textContent = when;
+    el.setAttribute('aria-label', `${el.title} thread in ${el.dataset.projectName}${when ? ', last message ' + when : ''}`);
+  }
+  const clock = setInterval(() => { for (const el of body.querySelectorAll('.project-thread[data-last-at]')) paintWhen(el); }, 60000);
   /** A section tab says what is waiting, once. The headline (the badge) is the fact; the lines under it
       add only what the badge lacks. The records themselves fill the workspace, so there is no hint
       pointing at them — it said "beside the bar" in the drawer too, where they are not. */
@@ -599,6 +697,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   function update(next = {}) {
     if (destroyed) return;
     model = {...next, projects: Array.isArray(next.projects) ? next.projects : [], settings: next.settings || {}};
+    if (!model.busy && globalError.dataset.kind === 'notice') { globalError.hidden = true; globalError.textContent = ''; delete globalError.dataset.kind; }   // "switch when it's done": it is done
     const seen = new Set();
     let position = 0;
     for (const data of model.projects) {
@@ -617,7 +716,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       for (const b of bindings) if (entry.card.el.contains(b.el)) bindings.delete(b);
     }
     empty.hidden = seen.size > 0 || !menuOpen;
-    empty.textContent = next.projectsLoaded === false ? 'Loading projects…' : 'No projects yet. Create one to get started.';
+    empty.textContent = next.projectsLoaded === false ? (next.projectsError ? PROJECTS_UNREACHABLE : 'Loading projects…') : 'No projects yet. Create one to get started.';
     // One project is in the bar at a time, so the switcher, the strip and the body are rendered once.
     const focusKey = document.activeElement?.dataset?.marginTab;
     renderSwitcher(); renderTabs(); renderBody(); renderMenu();
@@ -672,7 +771,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   return {
     update, close: () => { close(); closeMenu(false); if (narrow.matches) setSidebar(false); }, setSidebar,
     destroy() {
-      close(); destroyed = true;
+      close(); destroyed = true; clearInterval(clock);
       document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keyboard, true);
       narrow.removeEventListener('change', resizeSidebar); restoreWorkspace();
       for (const card of cards) card.el.remove();

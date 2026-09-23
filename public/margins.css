@@ -68,6 +68,7 @@
 .margin-error { color: var(--fail-text); font-size: var(--type-meta); overflow-wrap: anywhere; }
 .margin-card .margin-error, .margin-rail .margin-error { margin-top: 10px; }
 .margin-global-error { background: var(--paper-raised); border: 1px solid var(--margin-line); border-radius: var(--r-control); padding: 8px; }
+.margin-error[data-kind="notice"] { color: var(--ink-2); }   /* "not now" is not a verdict: a refusal to switch mid-reply reads in ink */
 
 /* Navigation occupies one edge; the conversation uses the remaining workspace. */
 :root { --workspace-left: 0px; }   /* the width itself is a token; this is the state that reads it */
@@ -187,6 +188,20 @@ body.glass .margin-new { background: var(--wash-faint); }
 .project-thread[aria-current="true"] .project-section-copy { font-weight: 600; }
 .project-thread-new .project-section-copy { color: var(--ink-3); }
 .project-thread-new:hover .project-section-copy { color: var(--ink-2); }
+/* A thread's gear sits beside its row and shows when the row is in hand: hovered, focused, open, or
+   the one you are in. With no hover to reveal it, it is always there. */
+.project-thread-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.project-thread-row > .project-thread { flex: 1; min-width: 0; }
+.margin-body .project-thread-row > .project-section { width: auto; }
+.project-thread-row .project-options { opacity: 0; }
+.project-thread-row:hover .project-options, .project-thread-row:focus-within .project-options, .project-thread-row:has(> [aria-current="true"]) .project-options, .project-thread-row .project-options[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .project-thread-row .project-options { opacity: 1; } }
+@media (pointer: coarse) {
+  .project-thread-row .project-options { width: var(--touch); height: var(--touch); }
+  .margin-thread-card .margin-pill, .margin-rename input { min-height: var(--touch); }   /* the card's Save, Archive, confirm and name field; the shared card rule stops at 36px */
+}
+.margin-rename { grid-template-columns: 1fr auto; padding-top: 0; margin-top: 0; border-top: 0; }
+.margin-rename label { grid-column: 1 / -1; }
 
 /* ---------- the bar: one project at a time ----------
    A switcher names the project you are in and opens a list of the rest. Under it a strip of four
@@ -250,6 +265,8 @@ body.glass .margin-new { background: var(--wash-faint); }
 .margin-rollup:hover { color: var(--ink-2); }
 .margin-link { font-size: var(--type-meta); }
 .margin-empty-new { align-self: flex-start; margin-top: 4px; }
+.margin-empty-retry { align-self: flex-start; margin: 0 12px; }
+@media (pointer: coarse) { .margin-empty-retry { min-height: var(--touch); } }
 @media (max-width: 899px) { .margin-rollup { min-height: var(--touch); } }
 .margin-foot > .sidebar-progress { font-size: var(--type-meta); }
 @media (max-width: 899px) {

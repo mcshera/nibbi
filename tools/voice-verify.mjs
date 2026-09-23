@@ -129,7 +129,7 @@ try {
     await geometry(page); await page.screenshot({ path: out + name + '-armed.png' });
     await utter('A television is talking in the background'); await phase(page, 'armed'); assert.deepEqual(sent, []); assert.deepEqual(spoken, []);
     await utter('Hey Nibbi'); await phase(page, 'listening');
-    assert.deepEqual(spoken, ["What's up, Matty?"]); assert.deepEqual(sent, []);
+    assert.deepEqual(spoken, ["What's up?"]); assert.deepEqual(sent, []);
     assert.ok(await page.evaluate(() => window.voiceFake.played.length >= 1), 'Native audio playback started');
     assert.ok(await page.evaluate(() => window.voiceFake.ended.length >= 1), 'Follow-up starts after native audio ended');
     await geometry(page); await page.screenshot({ path: out + name + '-followup.png' });

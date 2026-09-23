@@ -74,6 +74,7 @@ and a thread can later be continued from any transport.
 `GET /api/threads?project=` lists home first, then live threads by recency, then archived ones.
 `thread.create`, `thread.rename` and `thread.archive` are ordinary project commands. `/api/send`
 carries `threadId`, and the SSE `start`, `ready` and `done` frames echo it back.
+Every write to a thread emits `thread.updated` (`{ id, project, title, lastAt, archived }`) on `/api/events` — including the first message naming it — and a touch that changes nothing emits nothing.
 
 Each thread gets its own provider session, its own continuity snapshot and its own `recent_chat`
 scope; `search_chat` takes `allThreads` to widen to the project. `/clear` resets one thread's
@@ -81,7 +82,11 @@ sessions rather than every project's. The home thread deliberately keeps the ori
 key, so upgrading resets nobody's live context.
 
 In the surface, threads are rows under a project's Builds, Issues and Plans, with New thread
-last. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
+leading the list. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
 localStorage; a turn that is still streaming keeps its own detached nodes and finishes in the
 thread it belongs to. The thread's name rides on the composer placeholder, never as a badge in
-the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused.
+the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused, except returning to the thread that is answering (the Chat tab can leave Builds mid-reply); the refusal is one sentence in the bar, in ink, and goes when the reply does.
+Each thread keeps its own draft (`draft:<project>:<thread>` in localStorage; attached images stay in memory for the life of the page), and quoting adds to a draft rather than replacing it.
+A project starts from New project, which offers `/new <name>` (a fresh repository) or `/register <path> [name]` (one you already have: the root of a git repository, name defaulting to the folder's; `/api/project-create` with `mode: 'existing'`, owner-only). A command that makes another project active (`/new`, `/register`, `/project <name>`) takes the conversation to that project's home, with the command's turn. A thread with no messages says `nothing here yet — say what you want built`; an empty home is the character.
+A thread's row has the project rows' gear, which opens a card to rename it (`thread.rename`) or archive it (`thread.archive`, after a confirm; it stays in the log). Home has no gear, and nothing deletes. When the daemon holds more than the first sixty messages, the top of the conversation is a `load earlier` divider that reads the page before (`/api/history?before=`) without moving what you were reading. A history read that lands after its thread was left is dropped and read again on return.
+A reload returns to the active project's remembered thread. A project's home keeps its own stored copy (`transcript:<project>:home`; the vault's home keeps `transcript`), and a home with no copy is read from the daemon, so it is never blank.
