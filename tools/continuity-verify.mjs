@@ -390,6 +390,41 @@ async function loadEarlierKeepsYourPlace() {
   await context.close();
 }
 
+/* A page is sixty rows, and its edge can fall between a message and its reply: the message came up
+   over an empty reply, with the reply as a turn of its own below it. And leaving while the earlier
+   page was being read left its button disabled for good. */
+async function loadEarlierAtAPageEdge() {
+  const thread = fixture.createThread('Seam history');
+  const rows = [];
+  for (let i = 0; i < 35; i++) rows.push({ role: 'user', text: 'Seam ' + i, threadId: thread.id }, { role: 'oracle', text: 'Seam reply ' + i, threadId: thread.id });
+  rows.splice(50, 0, { role: 'oracle', text: 'A build finished in the middle of it.', threadId: thread.id });   // 71 rows: the newest sixty start on a reply
+  fixture.seedChat(rows);
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  let release; const held = new Promise(resolve => { release = resolve; });
+  await page.route(url => url.pathname === '/api/history' && url.searchParams.has('before'), async route => { await held; await route.continue(); });
+  const row = page.locator(`[data-thread-id="${thread.id}"]`);
+  await row.click();
+  const earlier = page.locator('#feed .earlier');
+  await earlier.waitFor({ timeout: 10_000 });
+  await earlier.click();
+  await page.locator('[data-thread-id="home"]').click();
+  await page.waitForFunction(() => window.nibbiApp.state().thread.id === 'home');
+  release(); await page.waitForTimeout(500);
+  await row.click();
+  await page.waitForFunction(id => window.nibbiApp.state().thread.id === id, thread.id);
+  assert.equal(await earlier.isDisabled(), false, 'coming back, load earlier can be pressed again');
+  const turns = await page.locator('#feed .turn').count();
+  await earlier.click();
+  await page.waitForFunction(n => document.querySelectorAll('#feed .turn').length > n, turns, { timeout: 10_000 });
+  const seen = await page.evaluate(() => [...document.querySelectorAll('#feed .turn')].map(el => ({ you: el.querySelector('.you')?.textContent ?? null, said: el.querySelector('.said').textContent.trim() })));
+  assert.deepEqual(seen.filter(turn => turn.you !== null && !turn.said), [], 'no message sits over an empty reply');
+  assert.deepEqual(seen.find(turn => turn.you === 'Seam 5'), { you: 'Seam 5', said: 'Seam reply 5' }, 'the reply at the page edge is with its message');
+  assert.deepEqual(seen.filter(turn => turn.you === null).map(turn => turn.said), ['A build finished in the middle of it.'], 'the one row nibbi began is the only event turn');
+  assert.equal(seen.length, 36);
+  await context.close();
+}
+
 /* Three quick clicks used to land the second thread's history in the third. A read that arrives
    after its thread was left is dropped, and read again when you return. */
 async function aReadThatLandsLateIsDropped() {
@@ -488,6 +523,7 @@ try {
   await attachmentsSayWhy();
   await renameAndArchiveFromTheRow();
   await loadEarlierKeepsYourPlace();
+  await loadEarlierAtAPageEdge();
   await aReadThatLandsLateIsDropped();
   await projectsThatNeverArriveSaySo();
   await firstRunOffersAWayIn();

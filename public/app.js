@@ -607,12 +607,15 @@ function renderHistory(rows) {
    too, and they were drawn twice. The rows go from the owner's first message on screen: found by its
    words among the log's last user rows, and failing that by the clock (this page stamped the turn,
    the daemon the row, a moment later; on the Mac they are one clock). Nibbi's news — briefs, fixer
-   bubbles — is not in the log and its time is when it happened, so it is no edge. `more`: the daemon
-   has older rows worth asking for. */
+   bubbles — is not in the log and its time is when it happened, so it is no edge. A full page's top
+   edge can fall between a message and its reply, which drew the message over an empty reply and the
+   reply as a turn of its own: nibbi's rows before a full page's first message are left to the page
+   before, where they meet what they answer. `more`: the daemon has older rows worth asking for. */
 function pageRows(project, id, rows, present = []) {
   const all = Array.isArray(rows) ? rows : [], since = tidiedAt(project, id);
   let kept = since ? all.filter((r) => !(Date.parse(r.ts) <= since)) : all;
   const tidyEdge = kept.length < all.length;
+  if (all.length === PAGE && !tidyEdge) { const first = kept.findIndex((r) => r.role === 'user' && r.channel === 'app' && r.text); if (first > 0) kept = kept.slice(first); }
   const onScreen = present.filter((T) => !T.history && (T.stored || typeof T.text === 'string'));
   if (onScreen.length) kept = kept.filter((r) => !(Date.parse(r.ts) >= onScreen[0].at));
   const said = onScreen.filter((T) => typeof T.text === 'string').map((T) => T.text);
@@ -661,7 +664,7 @@ async function loadEarlier(project, id, row, more) {
   let rows;
   try { rows = await api.get(historyUrl(project, id, state.oldest)); }
   catch { more.disabled = false; more.removeAttribute('aria-busy'); toast('couldn’t reach the earlier messages — try again', 3200); return; }
-  if (activeThreadKey() !== key || !row.isConnected) return;
+  if (activeThreadKey() !== key || !row.isConnected) { more.disabled = false; more.removeAttribute('aria-busy'); return; }   // left while it was read: it is pressable again when you come back
   // Whatever you were reading stays where it was: the older block goes in above it and the scroll
   // position moves down by exactly its height.
   const before = feed.scrollHeight, had = more === document.activeElement;
