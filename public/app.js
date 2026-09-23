@@ -290,6 +290,7 @@ function daySep(d) { const sep = document.createElement('div'); sep.className = 
 /* `into` builds the turn off-document (restored history), so it neither scrolls nor counts as unread */
 function newTurn(text, images, at, into) {
   const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now()); const host = into || feed;
+  if (!into) feed.querySelector(':scope > .feed-empty')?.remove();   // an empty thread's line goes with its first turn; left in, it earned that turn a "today" divider
   if (!last || new Date(last.at || Date.now()).toDateString() !== now.toDateString()) { if (host.children.length) host.appendChild(daySep(now)); }
   const turn = document.createElement('article'); turn.className = 'turn';
   const you = document.createElement('div'); you.className = 'you';
@@ -926,6 +927,29 @@ const COMMANDS = [
   { cmd: '/help', args: '', desc: 'this list', local: true },
 ];
 
+/* A command that makes another project the active one (/new, /register, /project <name>) takes the
+   conversation with it. It used to change only the project: the next message went to the new project
+   with the old conversation's thread, and from a thread the daemon answered "Unknown thread". The turn
+   that did it goes along to the project's home, so its reply and its chips stay in front of you. */
+function followProject(T) {
+  const project = activeProject();
+  if (!T || S.busy || project === 'vault' || project === (S.thread.project || 'vault')) return T;
+  const i = S.turns.indexOf(T);
+  if (i >= 0) {
+    S.turns.splice(i, 1);
+    const before = T.el.previousElementSibling;
+    T.el.remove();
+    if (before?.classList.contains('when') && !before.nextElementSibling) before.remove();   // its day divider, if it was the last thing under it
+  }
+  void openThread(project, 'home', { focus: false, closeView: false });   // the swap is synchronous; the read settles behind it
+  if (i >= 0) {
+    const last = S.turns.at(-1);
+    if (feed.children.length && (!last || new Date(last.at).toDateString() !== new Date(T.at).toDateString())) feed.appendChild(daySep(new Date(T.at)));
+    feed.appendChild(T.el); S.turns.push(T); setMode('talk'); S.stick = true; scrollFeed(true);
+  }
+  void loadThreads(project);   // the bar lists the project's conversations, Home first
+  return T;
+}
 async function runLocalCommand(name, arg, opts) {
   switch (name) {
     case 'preview': return localTurn('/preview ' + arg, async () => {
@@ -972,7 +996,7 @@ async function runLocalCommand(name, arg, opts) {
       const lines = ['Working in **' + p.name + '** — `' + p.repo + '`', readme ? '_' + md.esc(readme) + '_' : '', '`' + (p.branch || '?') + '`' + (p.dirty ? ' · ' + p.dirty + ' dirty file' + (p.dirty > 1 ? 's' : '') : ''), total ? 'plan · ' + done + '/' + total + ' tasks (' + Math.round(100 * done / total) + '%)' : 'no plan file yet (`plans/' + p.name + '.md`)', auto ? 'auto ' + (auto.on ? auto.mode + ' mode · ' + auto.inflight + ' in flight · ' + auto.pending + ' pending · ' + auto.staged + ' staged' : 'off') : '', (issues !== null ? issues + ' open issue' + (issues === 1 ? '' : 's') : 'no issues file yet') + (staged ? ' · ' + staged + ' fix' + (staged > 1 ? 'es' : '') + ' staged for review' : ''), commits.length ? '\n**recent commits**\n' + commits.map((c) => '`' + c.hash + '` ' + md.esc(c.msg).slice(0, 70) + ' — ' + relTime(c.at)).join('\n') : ''].filter(Boolean);
       const others = projectNames().filter((n) => n !== p.name);
       return { text: lines.join('\n'), acts: [{ label: 'plan', run: () => send('/plan ' + p.name) }, ...(staged ? [{ label: 'review', run: () => send('/review ' + p.name) }] : []), ...(S.playable || []).filter((x) => x.name === p.name).map(() => ({ label: 'play', run: () => send('/play ' + p.name) })), { label: 'issues', run: () => send('/issue') }, ...others.slice(0, 1).map((n) => ({ label: 'switch to ' + n, run: () => send('/project ' + n) }))] };
-    });
+    }).then(followProject);
     case 'new': { const tm = arg.match(/^(.*?)\s+(web|game)$/i); const name = (tm ? tm[1] : arg).trim(); const template = tm ? tm[2].toLowerCase() : null;
       return localTurn('/new ' + arg, async (T) => {
       if (!name) return { ok: false, text: 'Give it a name: `/new <name> [web|game]`.' };
@@ -988,7 +1012,7 @@ async function runLocalCommand(name, arg, opts) {
       await refreshProjects();
       const ok = code === 0;
       return { ok, text: ok ? '**' + md.esc(name) + '** is a ' + (template === 'web' ? 'web app' : 'game') + ' now — `' + r.repo + '`' + (files.length ? ' (' + files.map((f) => '`' + f + '`').join(', ') + ')' : '') + '.' + (template === 'web' ? ' `npm run dev` is wired, so `/play ' + r.slug + '` works.' : ' The plan is in the vault; tell me the pitch and I\'ll fill it in.') : 'The template landed but `npm install` exited with ' + code + ' — check the log above.', acts: template === 'web' ? [{ label: 'play it', run: () => send('/play ' + r.slug) }, { label: 'first fix', run: () => { ask.value = '/fix '; focusComposer(); autosize(); } }] : [{ label: 'plan', run: () => send('/plan ' + r.slug) }, { label: 'write the pitch', run: () => { ask.value = 'The pitch for ' + name + ': '; focusComposer(); autosize(); } }] };
-    }); }
+    }).then(followProject); }
     case 'register': return localTurn('/register ' + arg, async (T) => {
       const m = String(arg || '').trim().match(/^(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+([\s\S]+))?$/);
       if (!m) return { ok: false, text: 'Point me at the folder: `/register /path/to/repo [name]`. It has to be the root of a git repository. Quote a path with spaces in it.' };
@@ -1000,7 +1024,7 @@ async function runLocalCommand(name, arg, opts) {
       const r = await api.post('/api/project-create', { mode: 'existing', name, path });   // owner-only: the daemon checks it is a repository root
       markStep(st, 'done'); await refreshProjects(); S.project = slug; LS.set('project', slug); renderProject();
       return { text: '**' + md.esc(slug) + '** is a project now — `' + (r.repo || path) + '`. Nothing in the folder changed. It\'s the active project.', acts: [{ label: 'what\'s in it?', run: () => send('/project ' + slug) }, { label: 'plan it', run: () => { ask.value = 'Plan ' + slug + ': '; focusComposer(); autosize(); } }] };
-    });
+    }).then(followProject);
     case 'issue': return localTurn('/issue' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = activeProject(); const f = await issuesFile(proj);
       if (!arg) { const open = f ? (f.content.match(/^\s*[-*]\s*\[ \][^\n]*/gm) || []).slice(0, 12) : []; return { text: open.length ? '**' + proj + '** — ' + open.length + ' open issue' + (open.length > 1 ? 's' : '') + ' (`' + f.path + '`)\n\n' + open.map((l) => l.trim()).join('\n') : 'No open issues for **' + proj + '**' + (f ? ' in `' + f.path + '`' : '') + '. File one with `/issue <text>`.', acts: [{ label: 'triage them', run: () => send('triage the open issues in ' + (f ? f.path : 'the issues file') + ' for ' + proj + ': bug / balance / idea, severity, and which one to fix first') }] }; }
@@ -1682,7 +1706,7 @@ function renderProposalCard(T, p, prompt) {
 const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart the brain — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
 function errorActs(text) {
   const acts = [{ label: 'try again', run: () => { const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }];
-  if (/oauth|authenticate|token|sign-in has lapsed/i.test(text)) acts.push({ label: 'sign in', run: () => openPlatform('Providers') });   // the chip goes where signing in happens, instead of describing it
+  if (/oauth|authenticate|token|sign-in has lapsed|isn't signed in/i.test(text)) acts.push({ label: 'sign in', run: () => openPlatform('Providers') });   // the chip goes where signing in happens, instead of describing it
   if (/gateway (offline|isn)|failed to fetch|networkerror|not reachable/i.test(text)) { acts.push(restartAct()); acts.push({ label: 'use the demo brain', run: () => { S.demo = true; refreshStatus(); const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }); }
   return acts;
 }

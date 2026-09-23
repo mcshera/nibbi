@@ -581,6 +581,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     const key = threadCardKey(project, thread.id);
     if (threadCards.has(key)) return threadCards.get(key);
     const card = makeCard(text(thread.title, 'Thread'));
+    card.el.classList.add('margin-thread-card');
     const form = node('form', 'margin-cap margin-rename');
     const label = node('label', '', 'Name'), field = node('input');
     field.type = 'text'; field.maxLength = 60; field.autocomplete = 'off'; field.spellcheck = false;

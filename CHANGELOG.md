@@ -7,11 +7,12 @@
 **Where a reload lands.** The conversation was chosen before the app knew which project it was in,
 so it was always the vault's: a thread you were in never came back, and a project's home whose saved
 copy had expired rendered blank. Boot now waits for the project list, returns to the thread you were
-in, and reads a home with no saved copy from the daemon. Each project's home keeps its own saved copy
-instead of sharing one. A reply nibbi began no longer sits under an empty grey "you" bubble, and a
-history read that lands after you have moved on is dropped instead of drawn into the conversation
-you moved to. The daemon now says when it names a thread from its first message, so the bar and the
-composer stop saying "New thread" until a reload, and a row's "4m" keeps counting while the bar is open.
+in, and reads a home with no saved copy from the daemon, leaving out whatever you tidied away and
+anything already on screen. Each project's home keeps its own saved copy instead of sharing one. A
+reply nibbi began no longer sits under an empty grey "you" bubble, and a history read that lands
+after you have moved on is dropped instead of drawn into the conversation you moved to. The daemon
+now says when it names a thread from its first message, so the bar and the composer stop saying "New
+thread" until a reload, and a row's "4m" keeps counting while the bar is open.
 
 **One turn at a time, said once.** The Chat tab during a reply asks for the conversation that is
 answering, and it was refused, so Builds could not be left while nibbi spoke. It is allowed now.
@@ -36,12 +37,15 @@ one loaded; the read now happens behind the switch, and one that lands late is t
 **A first run that makes sense.** The chips offered a playtest of "shipless" to anyone, and "what's
 new?" to someone with no past; with no projects they are now "new project" and "what can you do?",
 and New project offers both ways in — a fresh repository, or `/register` for one you already have,
-which the daemon has always supported and nothing could ask for. The bar no longer says "Loading
-projects…" forever when the daemon is away: it says it couldn't reach the list, retries every ten
-seconds, and has a Retry. A thread with nothing in it says so. The lapsed-sign-in reply pointed at
-`claude setup-token`, which Settings never mentions; it points at Settings → Providers, its chip opens
-it, the tab checks your sign-in as it opens and puts it first, and a Codex sign-in finishing elsewhere
-says "signed in". The wake greeting stops using a name nothing in the app knows.
+which the daemon has always supported and nothing could ask for. `/new`, `/register` and `/project
+<name>` take the conversation to the home of the project they make active; they used to change the
+project under it, and the next message from a thread came back "unknown thread". The bar no longer
+says "Loading projects…" forever when the daemon is away: it says it couldn't reach the list,
+retries every ten seconds, and has a Retry. A thread with nothing in it says so. The lapsed-sign-in
+reply pointed at `claude setup-token`, which Settings never mentions; it points at Settings →
+Providers, its chip opens it, the tab checks your sign-in as it opens and puts it first, and a Codex
+sign-in finishing elsewhere says "signed in". The wake greeting stops using a name nothing in the
+app knows.
 
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 

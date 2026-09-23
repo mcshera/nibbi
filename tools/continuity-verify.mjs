@@ -92,6 +92,7 @@ async function newThreadTakesItsName() {
   assert.equal(await page.locator('#ask').getAttribute('placeholder'), placeholderFor('Rebalance the salvage dice'), 'the composer names it too');
   assert.match(await page.locator(`[data-thread-id="${id}"]`).getAttribute('aria-label'), /^Rebalance the salvage dice thread in fixture/);
   assert.equal(await empty.isVisible(), false, 'and stops saying so once it has something in it');
+  assert.equal(await page.locator('#feed > .when').count(), 0, 'and its first message has no "today" over it, as an empty home’s first message has none');
   await page.unroute('**/api/send');
   await context.close();
 }
@@ -488,23 +489,95 @@ async function firstRunOffersAWayIn() {
 }
 
 /* The daemon could always register an existing repository (mode: 'existing'); nothing in the app
-   could ask it to. */
+   could ask it to. Registering makes it the active project, and the conversation goes with it: the
+   project used to change under the conversation, and the next message from a thread was sent to the
+   new project with the old one's thread — "Unknown thread". */
 async function registerAFolderYouHave() {
   const repo = join(fixture.directory, 'lantern-repo');
   mkdirSync(repo); execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+  const thread = fixture.createThread('Lantern notes');
   const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
   const page = await open(context);
   await page.locator('.margin-switch-trigger[data-current-project="fixture"]').waitFor({ timeout: 10_000 });
   assert.equal(await page.locator('#project-rail [data-project-id]').count(), 1);
+  await page.locator(`[data-thread-id="${thread.id}"]`).click();
+  await page.waitForFunction(id => window.nibbiApp.state().thread.id === id, thread.id);
   await page.evaluate(repo => window.nibbiApp.send('/register ' + repo + ' Lantern'), repo);
   await page.waitForFunction(() => !window.nibbiApp.state().busy, null, { timeout: 15_000 });
   const said = await page.locator('.turn').last().locator('.said').innerText();
   assert.match(said, /^lantern is a project now/, 'was ' + JSON.stringify(said));
   await page.waitForFunction(() => document.querySelectorAll('#project-rail [data-project-id]').length === 2, null, { timeout: 10_000 });
   assert.deepEqual((await (await fetch(fixture.base + '/api/projects')).json()).filter(p => p.kind !== 'brain').map(p => p.name).sort(), ['fixture', 'lantern']);
+  await page.locator('.margin-switch-trigger[data-current-project="lantern"]').waitFor({ timeout: 10_000 });
+  await page.locator('[data-thread-id="home"][aria-current="true"]').waitFor({ timeout: 10_000 });
+  assert.deepEqual(await page.evaluate(() => ({ project: window.nibbiApp.state().thread.project, id: window.nibbiApp.state().thread.id })), { project: 'lantern', id: 'home' }, 'the conversation went with the project');
+  assert.equal(await page.locator('#ask').getAttribute('placeholder'), 'Ask nibbi to build something...');
+  assert.deepEqual(await yous(page), [await page.evaluate(repo => '/register ' + repo + ' Lantern', repo)], 'with the turn that registered it, reply and chips');
+  const request = page.waitForRequest('**/api/send');
+  await answered(page);
+  await page.evaluate(() => window.nibbiApp.send('What is in the lantern repo?'));
+  const sent = (await request).postDataJSON();
+  assert.deepEqual([sent.project, sent.threadId], ['lantern', 'home'], 'the next message goes where it is shown');
+  await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  assert.equal(await page.locator('.turn').last().locator('.said').innerText(), 'Noted: What is in the lantern repo?');
+  await page.unroute('**/api/send');
   await page.evaluate(() => window.nibbiApp.send('/register ~/games/lantern'));
   await page.waitForFunction(() => !window.nibbiApp.state().busy);
   assert.match(await page.locator('.turn').last().locator('.said').innerText(), /whole path/, 'a ~ path is refused with the reason, before the daemon sees it');
+  assert.equal(await page.evaluate(() => window.nibbiApp.state().thread.project), 'lantern', 'and a refusal moves nothing');
+  await page.screenshot({ path: out + 'registered-1180x820.png' });
+  await context.close();
+}
+
+/* The Providers tab checks sign-in as it opens, and against real accounts that takes seconds. A check
+   that landed after "Sign in with Claude" wrote over the instructions it had just shown. */
+async function aSlowCheckDoesNotWriteOverSignIn() {
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  await page.route('**/api/providers', async route => { await new Promise(resolve => setTimeout(resolve, 1500)); await route.fulfill({ json: { claude: { connected: false, error: 'Sign in to Claude Code with your Claude account.' }, codex: { connected: false } } }); });
+  await page.route('**/api/providers/claude/login', route => route.fulfill({ json: { message: 'Claude Code opened in Terminal. Complete its browser sign-in, then click Check again.' } }));
+  await page.evaluate(() => document.querySelector('#st-platform').click());
+  const line = page.locator('.platform-connections + p[role="status"]');
+  await line.waitFor({ timeout: 10_000 });
+  assert.equal(await line.innerText(), 'Checking your sign-ins…');
+  await page.getByRole('button', { name: 'Sign in with Claude', exact: true }).click();
+  await page.waitForFunction(() => /Terminal/.test(document.querySelector('.platform-connections + p[role="status"]').textContent));
+  await page.waitForTimeout(2000);   // past the open-time check
+  assert.equal(await line.innerText(), 'Claude Code opened in Terminal. Complete its browser sign-in, then click Check again.', 'the slower, older check does not write over it');
+  await page.getByRole('button', { name: 'Check again', exact: true }).click();
+  await page.waitForFunction(() => /^Claude: /.test(document.querySelector('.platform-connections + p[role="status"]').textContent), null, { timeout: 5_000 });
+  await context.close();
+}
+
+const openDrawer = async page => {
+  if (await page.locator('#workspace-sidebar').getAttribute('aria-hidden') === 'true') await page.locator('#sidebar-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#workspace-sidebar').getAttribute('aria-hidden') === 'false');
+  await page.evaluate(() => Promise.all(document.querySelector('#workspace-sidebar').getAnimations().map(a => a.finished.catch(() => {}))));
+};
+/* A touch screen gets 44px targets. The thread gear was 40 wide, and the thread card's Save and
+   Archive and the Retry under an unreachable list followed the 32–36px pill rules. */
+async function touchTargetsOnTheNewControls() {
+  const thread = fixture.createThread('Touch targets');
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  let page = await open(context);
+  const box = selector => page.evaluate(selector => [...document.querySelectorAll(selector)].filter(el => el.getClientRects().length).map(el => { const b = el.getBoundingClientRect(); return [Math.round(b.width), Math.round(b.height)]; }), selector);
+  await openDrawer(page);
+  const gear = page.locator(`.project-thread-row:has([data-thread-id="${thread.id}"]) .project-options`);
+  await gear.waitFor({ timeout: 10_000 });
+  for (const [w, h] of await box('.project-thread-row .project-options')) assert.ok(w >= 44 && h >= 44, 'a thread gear is ' + w + 'x' + h);
+  await gear.click();
+  const card = page.locator('.margin-card:not([hidden])');
+  await card.getByRole('button', { name: 'Archive', exact: true }).click();
+  for (const [w, h] of await box('.margin-thread-card:not([hidden]) .margin-pill, .margin-thread-card:not([hidden]) input')) assert.ok(h >= 44, 'a thread card control is ' + w + 'x' + h);
+  await page.screenshot({ path: out + 'thread-card-touch-390x844.png' });
+  await page.close();
+  page = await open(context, '/?nosw=1', { before: page => page.route('**/api/projects', route => route.abort()), expectFailed: /\/api\/projects$/ });
+  await openDrawer(page);
+  const retry = page.locator('.margin-empty-retry');
+  await retry.waitFor({ timeout: 10_000 });
+  const [w, h] = (await box('.margin-empty-retry'))[0];
+  assert.ok(h >= 44, 'Retry is ' + w + 'x' + h);
+  await page.screenshot({ path: out + 'projects-unreachable-touch-390x844.png' });
   await context.close();
 }
 
@@ -528,6 +601,8 @@ try {
   await projectsThatNeverArriveSaySo();
   await firstRunOffersAWayIn();
   await registerAFolderYouHave();
+  await aSlowCheckDoesNotWriteOverSignIn();
+  await touchTargetsOnTheNewControls();
   assert.deepEqual(errors, [], 'No unexpected browser errors');
-  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, the Chat tab returns to a reply in progress, drafts belong to their thread, attachments say why they were refused, a thread is renamed and archived from its row, earlier history loads without moving the reader, a late read is dropped, an unreachable project list says so and retries, a first run offers a way in, and an existing folder can be registered.');
+  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, a tidy survives a reload, news does not hold a reload in Home, a message is drawn once, a message before the list goes where it is shown, a rebuilt list keeps focus, the Chat tab returns to a reply in progress, drafts belong to their thread, attachments say why they were refused, a thread is renamed and archived from its row, earlier history loads without moving the reader or splitting a reply from its message, a late read is dropped, an unreachable project list says so and retries, a first run offers a way in, an existing folder can be registered and the conversation goes with it, a slow sign-in check does not write over sign-in, and the new controls are 44px on touch.');
 } finally { await browser?.close(); await fixture.close(); }
