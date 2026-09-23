@@ -152,6 +152,7 @@ Proposed ramp — one per verdict, three roles each:
 `#873f35`, `#743b2f`, `#65432c`, `#365342` retire into these. The three that survive in `styles.css` are the ones with measured contrast behind them; the workspace variants were picked independently and are the ones to drop.
 
 **Rule.** There is no warning colour and no info colour. A warning is a `--fail-edge` border with ink text (`.chip.warn`, `.planr .prwarn` already do this). Info is ink. Adding an amber or a blue would break principle 1.
+The bar's `.margin-error` follows it: a refusal that means "not now" — switching away while nibbi is answering — carries `data-kind="notice"` and is `--ink-2`; only an action that failed is `--fail-text`.
 
 ### 2.4 Agent tint
 
@@ -495,6 +496,7 @@ Governed by `docs/PERSONALITY.md`, which is more thorough than most product voic
 - **Labels are lowercase sentence case.** `new thread`, `jump to latest`, `plan first`. Uppercase appears only at `--type-micro` with tracking, for machine categories (`TOOL`, `EXECUTED`).
 - **Numbers, not adjectives.** `4 files · +82 −14`, not "several changes".
 - **A truncated string always carries a `title`.** Taken from the sidebar lab's reading of Cursor's live complaint about untitled truncated repo names.
+- **Drafts are per conversation.** A half-written message stays with the thread it was written in, survives a reload, and a quote is added under it, never over it. A file that cannot be attached says why, with the number (`4 images is the most per message`).
 
 ---
 

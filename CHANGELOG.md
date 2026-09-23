@@ -13,6 +13,18 @@ history read that lands after you have moved on is dropped instead of drawn into
 you moved to. The daemon now says when it names a thread from its first message, so the bar and the
 composer stop saying "New thread" until a reload, and a row's "4m" keeps counting while the bar is open.
 
+**One turn at a time, said once.** The Chat tab during a reply asks for the conversation that is
+answering, and it was refused, so Builds could not be left while nibbi spoke. It is allowed now.
+Leaving for another thread or project is still refused, with one sentence in the bar where you
+clicked — "nibbi is answering in “Home” — switch when it’s done" — in ink, because waiting is not a
+failure, and it goes when the reply does.
+
+**Drafts.** One composer field served every thread, so half a message followed you into the next
+one. Each thread keeps its own draft through a switch and a reload, and quoting adds to it instead of
+replacing it. A file that cannot be attached says why, with the number, instead of vanishing — and a
+drop of six no longer attaches all six, because the four-image check now counts files still loading;
+the daemon refused the whole message. A file pasted into a workspace field is that field's.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which

@@ -81,5 +81,6 @@ In the surface, threads are rows under a project's Builds, Issues and Plans, wit
 leading the list. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
 localStorage; a turn that is still streaming keeps its own detached nodes and finishes in the
 thread it belongs to. The thread's name rides on the composer placeholder, never as a badge in
-the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused.
+the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused, except returning to the thread that is answering (the Chat tab can leave Builds mid-reply); the refusal is one sentence in the bar, in ink, and goes when the reply does.
+Each thread keeps its own draft (`draft:<project>:<thread>` in localStorage; attached images stay in memory for the life of the page), and quoting adds to a draft rather than replacing it.
 A reload returns to the active project's remembered thread. A project's home keeps its own stored copy (`transcript:<project>:home`; the vault's home keeps `transcript`), and a home with no copy is read from the daemon, so it is never blank.

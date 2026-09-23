@@ -66,6 +66,7 @@
 .margin-error { color: var(--fail-text); font-size: var(--type-meta); overflow-wrap: anywhere; }
 .margin-card .margin-error, .margin-rail .margin-error { margin-top: 10px; }
 .margin-global-error { background: var(--paper-raised); border: 1px solid var(--margin-line); border-radius: var(--r-control); padding: 8px; }
+.margin-error[data-kind="notice"] { color: var(--ink-2); }   /* "not now" is not a verdict: a refusal to switch mid-reply reads in ink */
 
 /* Navigation occupies one edge; the conversation uses the remaining workspace. */
 :root { --workspace-left: 0px; }   /* the width itself is a token; this is the state that reads it */

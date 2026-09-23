@@ -494,7 +494,7 @@ function setMeta(T, r) {
   // Local provenance lives above the reply, including while tokens stream.
   if (r && r.raw) bits.push(String(r.raw).replace(/^\s*error:\s*/i, '').slice(0, 90));
   T.meta.textContent = bits.filter(Boolean).join(' · '); T.meta.prepend(tm, document.createTextNode(bits.filter(Boolean).length ? ' · ' : ''));
-  const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; focusComposer(); autosize(); };
+  const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = (ask.value.trim() ? ask.value.replace(/\s*$/, '\n\n') : '') + '> ' + s + '\n\n'; focusComposer(); autosize(); };
   const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => { navigator.clipboard?.writeText(T.acc); toast('copied'); };
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
   const acts = document.createElement('span'); acts.className = 'metaacts'; acts.setAttribute('role', 'group'); acts.setAttribute('aria-label', 'reply actions');
@@ -520,6 +520,20 @@ const activeThreadKey = () => threadKey(S.thread.project ?? activeProject(), S.t
 // The vault's home keeps the original localStorage key, so upgrading loses nobody's transcript. A
 // project's home has its own: one shared key let a reload paint one project's conversation in another.
 const transcriptKey = () => S.thread.id !== 'home' ? 'transcript:' + S.thread.id : (S.thread.project || 'vault') === 'vault' ? 'transcript' : 'transcript:' + S.thread.project + ':home';
+/* A draft belongs to the conversation it was written in: one field for every thread let a half-typed
+   message follow you into another. Text survives a reload; attached images live as long as the page. */
+const draftKey = () => 'draft:' + (S.thread.project || 'vault') + ':' + S.thread.id;
+const draftImages = new Map();
+let draftTimer = 0;
+function saveDraft() {
+  clearTimeout(draftTimer); draftTimer = 0;
+  if (ask.value.trim()) LS.set(draftKey(), ask.value); else try { localStorage.removeItem('nibbi.' + draftKey()); } catch { /* private mode */ }
+}
+function stashDraft() { saveDraft(); draftImages.set(draftKey(), pendingImages); }
+function unstashDraft() {
+  ask.value = LS.get(draftKey(), '') || ''; pendingImages = draftImages.get(draftKey()) || []; draftImages.delete(draftKey());
+  renderAttach(); autosize();
+}
 function threadState(key) {
   if (!S.threads.has(key)) S.threads.set(key, { turns: [], nodes: [], hydrated: false });
   return S.threads.get(key);
@@ -621,7 +635,9 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   current.turns = S.turns; current.nodes = [...feed.children];
   if (S.review) endReview();
   persistTranscript();
+  stashDraft();
   S.thread = { project, id, title: threadTitle(project, id) };
+  unstashDraft();
   LS.set('thread:' + (project || 'vault'), id);
   // Talking in a project's thread is what makes that project the one you are working on.
   // S.thread is set first, so selecting the project does not bounce back into here.
@@ -1401,7 +1417,7 @@ async function send(text, images, opts) {
   if (mode === 'plan' && S.planFirst) setPlanFirst(false);
   S.busy = true; body.classList.add('busy'); S.activeRunId = null; S.steerable = false; S.liveThreadKey = activeThreadKey(); syncSendButton(); syncMargins();
   activity(); hideChips();
-  ask.value = ''; autosize(); clearAttach(); sound('send');
+  ask.value = ''; autosize(); clearAttach(); saveDraft(); sound('send');
   setMode('talk');
   const T = newTurn(text, images); T.plain = isCommand; T.mode = mode; S.liveTurn = T;
   if (mode === 'plan') T.el.classList.add('plan');
@@ -1794,11 +1810,18 @@ function selectMarginProject(id) {
   }
   return p.name;
 }
+/* One turn runs at a time. Leaving the conversation that is answering is refused with one sentence,
+   shown by the bar where the click happened; going back to it — the Chat tab from Builds — is not. */
+const liveKey = () => S.liveThreadKey || activeThreadKey();   // a local command is busy in the open conversation
+function busyNotice() { const [project, id] = liveKey().split('\u0000'); return notice(NAME + ' is answering in “' + threadTitle(project, id) + '” — switch when it’s done'); }
+const notice = (message) => Object.assign(new Error(message), { kind: 'notice' });   // the bar shows it in ink: waiting is not a failure
 async function handleMarginAction(action, id, value) {
   activity();
-  if (['newProject', 'fix', 'plan', 'play', 'review', 'autoMode', 'spendCap'].includes(action) && S.busy) throw new Error(NAME + ' is still working — one thing at a time.');
+  if (['newProject', 'fix', 'plan', 'play', 'review', 'autoMode', 'spendCap'].includes(action) && S.busy) throw notice(NAME + ' is still working — one thing at a time.');
   switch (action) {
-    case 'selectProject': if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
+    case 'selectProject':
+      if (S.busy && id !== activeProject()) throw busyNotice();
+      if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
     case 'projectSection': openProjectSection(id, value); return;
     case 'repository': openProjectSection(id, 'repository'); margins.close(); return;
     case 'newProject': margins.close(); ask.value = '/new '; focusComposer(); autosize(); return;
@@ -1829,11 +1852,11 @@ async function handleMarginAction(action, id, value) {
     case 'glass': if (glassAvailable) { glassOn = !glassOn; LS.set('glass', glassOn); applyPaper(); syncMargins(); toast(glassOn ? 'glass window' : 'paper window'); } return;
     case 'demo': S.demo = !S.demo; syncMargins(); await refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); return;
     case 'thread': {
-      if (S.busy) { toast(NAME + ' is answering in “' + threadTitle(S.thread.project, S.thread.id) + '” — one thing at a time'); return; }
+      if (S.busy && threadKey(id, value) !== liveKey()) throw busyNotice();
       margins.close(); await openThread(id, value); return;
     }
     case 'newThread': {
-      if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
+      if (S.busy) throw busyNotice();
       margins.close(); await newThread(id); return;
     }
     case 'tidy': margins.close(); tidy(); return;
@@ -2011,6 +2034,7 @@ async function bootThread() {
   }
   const home = threadKey(project, 'home');
   threadState(home).hydrated = S.turns.length > 0;
+  if (!ask.value) { ask.value = LS.get(draftKey(), '') || ''; autosize(); }   // before any thread swap, which saves the field under home
   await loadThreads(project);
   const remembered = LS.get('thread:' + project, 'home');
   if (!typed && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) await openThread(project, remembered, { focus: false, closeView: false });
@@ -2068,6 +2092,7 @@ function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c
 function autosize() { if (S.autosizeRaf) return; S.autosizeRaf = requestAnimationFrame(() => { S.autosizeRaf = 0; resizeField(); }); }
 function resizeField() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
+ask.addEventListener('input', () => { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 400); }); addEventListener('pagehide', saveDraft);   // the draft, a beat after typing stops; the field as it really is when the page goes
 ask.addEventListener('focus', () => { layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
@@ -2076,7 +2101,7 @@ ask.addEventListener('keydown', (e) => {
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   // Escape dismisses; it does not destroy. Clearing the whole conversation is a two-step action and
   // lives on the Settings card's Tidy conversation, next to what it affects.
-  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else ask.blur(); }
+  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); saveDraft(); } else ask.blur(); }
 });
 /* mid-run steering: typed text while a steerable turn runs becomes guidance for that turn; an empty send still stops it */
 async function steerTurn(text) {
@@ -2117,9 +2142,19 @@ addEventListener('keydown', (e) => {
 });
 
 /* images: paste or drop */
+/* A file that cannot go says why, in numbers. It used to vanish. The limits are the daemon's: four
+   images, and 8M base64 characters each, which is about 6 MB before encoding. `reading` counts files
+   still loading: the check used to see only what had landed, so a drop of six attached all six. */
+let reading = 0;
 function addImage(file) {
-  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type) || pendingImages.length >= 4) return;
-  const rd = new FileReader(); rd.onload = () => { const data = String(rd.result).split(',')[1]; pendingImages.push({ media_type: file.type, data }); renderAttach(); interactions.event('attach'); }; rd.readAsDataURL(file);
+  if (!file) return;
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { toast('images only — png, jpeg, webp or gif', 2600); return; }
+  if (pendingImages.length + reading >= 4) { toast('4 images is the most per message', 2600); return; }
+  if (file.size > 6_000_000) { toast((file.size / 1e6).toFixed(1) + ' MB — 6 MB is the most one image can be', 3200); return; }
+  const into = pendingImages; reading++;
+  const rd = new FileReader();
+  rd.onloadend = () => { reading--; if (rd.error || into !== pendingImages) return; const data = String(rd.result).split(',')[1]; pendingImages.push({ media_type: file.type, data }); renderAttach(); interactions.event('attach'); };
+  rd.readAsDataURL(file);
 }
 function renderAttach() {
   attachEl.hidden = !pendingImages.length; attachEl.replaceChildren();
@@ -2127,7 +2162,7 @@ function renderAttach() {
   layout(false);   // the strip changes the pill's height (its own row at ≤640px): suggestion chips, feed and fixers re-place above it
 }
 function clearAttach() { pendingImages = []; renderAttach(); }
-document.addEventListener('paste', (e) => { for (const it of e.clipboardData?.items || []) if (it.kind === 'file') addImage(it.getAsFile()); });
+document.addEventListener('paste', (e) => { if (keyboardInputOwned(e, true)) return; for (const it of e.clipboardData?.items || []) if (it.kind === 'file') addImage(it.getAsFile()); });   // a paste into a workspace form or a card is that field's
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => { const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return; e.preventDefault(); for (const f of files) addImage(f); focusComposer(); });
 

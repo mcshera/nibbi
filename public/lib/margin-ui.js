@@ -161,7 +161,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       if (typeof onAction === 'function') await onAction(action, id, value);
       return true;
     } catch (cause) {
-      if (!destroyed) { error.textContent = text(cause?.message || cause, 'Could not complete this action.'); error.hidden = false; }
+      if (!destroyed) { error.textContent = text(cause?.message || cause, 'Could not complete this action.'); error.dataset.kind = cause?.kind === 'notice' ? 'notice' : 'error'; error.hidden = false; }
       return false;
     } finally { pending.delete(key); if (!destroyed) refreshDisabled(); }
   }
@@ -612,6 +612,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   function update(next = {}) {
     if (destroyed) return;
     model = {...next, projects: Array.isArray(next.projects) ? next.projects : [], settings: next.settings || {}};
+    if (!model.busy && globalError.dataset.kind === 'notice') { globalError.hidden = true; globalError.textContent = ''; delete globalError.dataset.kind; }   // "switch when it's done": it is done
     const seen = new Set();
     let position = 0;
     for (const data of model.projects) {
