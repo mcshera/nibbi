@@ -512,9 +512,11 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       : 'No builds yet';
     content.append(toolbar(summary, [action('Repository & GitHub', () => onNavigate?.(view.selection.project, 'repository'), { mutating: false }), action('New build', () => onAction?.('newBuild', current.project), { primary: true })]), formHost());
     // To push and Pull requests only mean something to a project that delivers through GitHub: hide the
-    // group, not each zero. Needs attention stays, since that is where a local project's failed builds are.
-    // Every run carries a github record (a local one says mode 'local'), so the mode is what decides.
-    const githubProject = runs.some(run => run.workflowMode === 'github' || run.github?.mode === 'github');
+    // group when it is all zeros, not each zero. Needs attention stays, since that is where a local
+    // project's failed builds are. Every run carries a github record (a local one says mode 'local'), so
+    // the mode decides, and so does a count: a local merge on a GitHub-connected project with no binding
+    // is mode 'local' and still to push (github-builds.ts, githubBuildSummary), and the bar counts it.
+    const githubProject = count('toPush') > 0 || count('pullRequests') > 0 || runs.some(run => run.workflowMode === 'github' || run.github?.mode === 'github');
     const extra = githubProject ? [['toPush', 'To push', count('toPush')], ['pullRequests', 'Pull requests', count('pullRequests')]] : [];
     content.append(filters([['all', 'All', runs.length], ['active', 'Active', count('active')], ['review', 'Review', count('review')], ...extra, ['attention', 'Needs attention', count('attention')], ['history', 'History', count('history')]], 'Build status'));
     if (!runs.length) { content.append(empty('No builds yet', 'Start a build to give Nibbi something to work on for this project.')); return; }

@@ -260,6 +260,11 @@ test('a GitHub project shows its delivery filters, and the key hint needs a keyb
       assert.deepEqual(await page.locator('.project-filters [data-filter]').evaluateAll(els => els.map(el => el.dataset.filter)), ['all', 'active', 'review', 'toPush', 'pullRequests', 'attention', 'history']);
       assert.equal(await page.locator('[data-filter="toPush"]').innerText(), 'To push 1');
       assert.equal(await page.locator('.project-lobby-keys').isVisible(), true, 'a pointer with a keyboard sees j/k · a · x · p');
+      // A local merge on a GitHub-connected project with no binding: the daemon says mode 'local' and
+      // toPush, and the bar's badge counts it. The group shows, or only All would reach that build.
+      await page.evaluate(() => { for (const run of sections.builds.runs) { delete run.workflowMode; run.github = { mode: 'local' }; } sections.builds.runs.find(run => run.id === 'run-history').github = { mode: 'local', delivery: 'local_merge_unpublished', toPush: true, pullRequest: false }; });
+      await open('builds');
+      assert.deepEqual(await page.locator('.project-filters [data-filter]').evaluateAll(els => els.map(el => el.textContent)), ['All 4', 'Active 1', 'Review 1', 'To push 1', 'Pull requests 0', 'Needs attention 1', 'History 0'], 'a group with something in it is not hidden');
       assert.deepEqual(errors, []);
     } finally { await context.close(); }
     const touch = await harness(browser, { width: 1180, height: 712 }, { hasTouch: true });

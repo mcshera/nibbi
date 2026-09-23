@@ -24,8 +24,8 @@ paint does. The fixers no longer float over a section's records, and the floatin
 button is gone — it duplicated the Chat tab and covered a card's status on a phone. The header × has
 always been the way back, and it never scrolls away. At 390 the header puts its summary on a line of
 its own and its controls in one row under it; the filters scroll sideways instead of wrapping; To
-push and Pull requests appear only for a project that delivers through GitHub; and a phone is not
-shown keyboard shortcuts.
+push and Pull requests appear only for a project that delivers through GitHub, or when one of them
+has something in it; and a phone is not shown keyboard shortcuts.
 
 **The bar says one thing once.** A section tab said "2 open" and then "2 open." under it, and "The
 full list is open beside the bar." on every section — untrue in the phone drawer, where nothing is

@@ -119,8 +119,11 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
   .project-workspace { width: calc(100vw - 32px); }
   .project-workspace h1 { font-size: var(--type-title); }
   /* The summary takes its own line and the controls one row under it: wrapped together they made a
-     jagged two-row stack at 390. Only the header's own row stays unwrapped; record actions still wrap. */
-  .project-toolbar { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 12px; }
+     jagged two-row stack at 390. Only the header's own row stays unwrapped; record actions still wrap.
+     The GitHub panels' toolbars are a heading and one button, with no actions group: they keep the row,
+     since stacked and stretched the button became a full-width slab. */
+  .project-toolbar { gap: 8px; flex-wrap: wrap; padding-block: 12px; }
+  .project-toolbar:has(> .project-toolbar-actions) { flex-direction: column; align-items: stretch; }
   .project-toolbar > .project-toolbar-actions { flex-wrap: nowrap; }
   .project-build > summary, .project-record > summary { flex-wrap: wrap; column-gap: 10px; row-gap: 4px; }
   .project-build-label, .project-record-copy { min-width: 65%; }

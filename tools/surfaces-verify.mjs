@@ -69,6 +69,37 @@ try {
     });
   }
 
+  // Below 900 the section header stacks its summary over its controls. The GitHub panels' toolbars are
+  // a heading and one button with no actions group, and they keep their row: stacked, the button
+  // stretched into a full-width slab.
+  for (const [width, height] of [[700, 900], [390, 844]]) {
+    await scenario(`the repository toolbar keeps its row at ${width}x${height}`, async () => {
+      const { context, page: tab, errors } = await page({ width, height }, { isMobile: true, hasTouch: true });
+      try {
+        await tab.locator('#sidebar-toggle').click();
+        await tab.waitForFunction(() => document.querySelector('#workspace-sidebar').getAttribute('aria-hidden') === 'false');
+        await tab.locator('.margin-tab[data-margin-tab="builds"]').click();
+        await tab.waitForFunction(() => window.nibbiApp.state().projectView?.section === 'builds' && document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false');
+        await tab.getByRole('button', { name: 'Repository & GitHub', exact: true }).first().click();
+        await tab.waitForFunction(() => window.nibbiApp.state().projectView?.section === 'repository' && document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false' && document.querySelector('.github-panel .project-toolbar'), null, { timeout: 15_000 });
+        await settled(tab);
+        const bars = await tab.evaluate(() => [...document.querySelectorAll('.project-toolbar')].filter(bar => bar.getClientRects().length && !bar.querySelector(':scope > .project-toolbar-actions')).map(bar => {
+          const box = el => el.getBoundingClientRect(), heading = bar.querySelector(':scope > h2'), button = bar.querySelector(':scope > button');
+          return { heading: heading?.textContent, button: button?.textContent, bar: Math.round(box(bar).width), width: Math.round(box(button).width), sameRow: box(button).top < box(heading).bottom && box(heading).top < box(button).bottom };
+        }));
+        assert.ok(bars.length >= 1, 'the repository panel has its toolbar');
+        for (const bar of bars) {
+          assert.ok(bar.width < bar.bar / 2, `"${bar.button}" keeps its own width, ${JSON.stringify(bar)}`);
+          assert.ok(bar.sameRow, `and sits beside "${bar.heading}", ${JSON.stringify(bar)}`);
+        }
+        const header = await tab.evaluate(() => { const bar = document.querySelector('.project-toolbar:has(> .project-toolbar-actions)'); return bar && getComputedStyle(bar).flexDirection; });
+        if (header) assert.equal(header, 'column', 'while a section header still stacks its summary over its controls');
+        await tab.screenshot({ path: `${out}repository-${width}x${height}.png` });
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
+  }
+
   // A fixer's card opens for the pointer, for the pin, and for keyboard focus. A click focuses the
   // agent as well, and that focus must not hold the card open once the click has unpinned it.
   await scenario('an agent card closes when it is unpinned', async () => {
@@ -148,4 +179,4 @@ try {
   await fixture.close();
 }
 if (failed) process.exitCode = 1;
-else console.log('Surface checks passed: a section is a room, an agent card closes when unpinned, the copy button is a 44px target, and an old step summary is a line.');
+else console.log('Surface checks passed: a section is a room, the repository toolbar keeps its row, an agent card closes when unpinned, the copy button is a 44px target, and an old step summary is a line.');
