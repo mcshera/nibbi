@@ -207,6 +207,13 @@
   --feed-top: 40vh;
   --feed-bottom: 140px;      /* anything perched above the composer must track this */
   --touch: 44px;             /* the floor at pointer: coarse */
+
+  /* ---------------------------------------------------------- interaction
+   * one dimmed state and one ring, so a disabled control and a focused one
+   * read the same wherever they are. The ring's offset stays per surface:
+   * 3px, or 2px inside a dense panel (LANGUAGE.md 12). */
+  --dim-disabled: .45;
+  --focus-ring: 2px solid var(--ink);
 }
 
 /* phones: the composer shortens and the dock radius follows it. everything else

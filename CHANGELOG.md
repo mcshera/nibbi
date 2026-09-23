@@ -35,6 +35,14 @@ or browser settings" sat under the microphone row with no subject; every status 
 now, and a denied permission reads Blocked rather than Off. Session reads `$1.00 · 7 turns` on one
 line — the row's label already says whose numbers they are.
 
+**One rule, one check.** Two resets at (0,1,1) outranked every control's own class in the bar and
+the workspace, and twenty-seven `!important` flags were holding the line; the resets are under
+`:where()` and the flags are gone. Six disabled opacities are one `--dim-disabled`, every focus ring is one
+`--focus-ring`, and `tools/style-verify.mjs`, first in `npm run verify`, fails a new flag, a new dimming,
+a hand-drawn ring or verdict colour on something that is not a verdict. Measured across 260 visible
+controls at 1180 and 390, two things changed: the section's × is the 21px it always declared, and a
+disabled pill dims to .45 instead of .42.
+
 **Copy copies what you read.** The code block's button stripped a trailing "copy" from the block's
 text, but a capped block ends in "show all (18 lines)", so the label came along; it copies the code
 itself now. A reply's copy took the raw text with its `»acts:` lines, and both said "copied" whether

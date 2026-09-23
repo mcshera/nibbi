@@ -190,7 +190,7 @@ body.busy .pill { border-color: var(--veil-hover); }
 .dock-menu .mi { flex: none; color: var(--ink-3); transition: color var(--t1); }
 .dock-menu .ico:hover .mi, .dock-menu .mitem:hover .mi, .dock-menu .ico[aria-pressed="true"] .mi { color: var(--ink); }
 .dock-menu .mi-label, .dock-menu .mic-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.dock-menu .ico:focus-visible, .dock-menu .mitem:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.dock-menu .ico:focus-visible, .dock-menu .mitem:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 /* plan first carries no mark on the "+" by owner preference: the placeholder says it while the field is empty,
    #dock's title names it on hover, the field's aria-describedby states it, and #plan-first keeps aria-pressed in the panel. */
 /* send: an ink squircle */
@@ -199,7 +199,7 @@ body.busy .pill { border-color: var(--veil-hover); }
 /* The same press the send button takes, on the other controls that commit something. */
 .chip.armed:active, .planr .acts .chip:active { transform: scale(.96); }
 .pill.tall .dock, .pill.tall .send { align-self: flex-end; }   /* a multi-line field: the controls sit on its last line, not floating mid-height */
-.pill .send:disabled { opacity: .35; cursor: default; transform: none; }
+.pill .send:disabled { opacity: var(--dim-disabled); cursor: default; transform: none; }
 body.busy .pill .send { background: var(--ink-3); }
 body.busy .pill .send svg { display: none; }
 body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-radius: var(--r-bar); background: var(--ink-inverse); }
@@ -240,8 +240,8 @@ body.busy .pill .send::after { content: ""; width: 14px; height: 14px; border-ra
 body.calm *, body.calm *::before, body.calm *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 
 /* ---------- focus + screen readers ---------- */
-:where(.chip, .steps .fold, .meta button, .jump, .toast button, .copycode, .agent):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: var(--r-pill); }
-.pill .send:focus-visible, .pill .dock:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+:where(.chip, .steps .fold, .meta button, .jump, .toast button, .copycode, .agent):focus-visible { outline: var(--focus-ring); outline-offset: 3px; border-radius: var(--r-pill); }
+.pill .send:focus-visible, .pill .dock:focus-visible { outline: var(--focus-ring); outline-offset: 3px; }
 .pill textarea:focus-visible { outline: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -298,7 +298,7 @@ body:has(.pill.dock-open) .agents { opacity: .25; pointer-events: none; }   /* t
 .phonev .qr { width: 164px; height: 164px; padding: 8px; background: #fff; border-radius: var(--r-card); border: 1px solid var(--line); flex: none; } .phonev .qr svg { width: 100%; height: 100%; display: block; }
 .phonev .ptxt { flex: 1; min-width: 220px; font-size: var(--type-body); line-height: 1.55; } .phonev .ptxt code { font-size: var(--type-fine); word-break: break-all; }
 body.standalone .feed { top: calc(var(--feed-top) + env(safe-area-inset-top) * .5); }
-@media (max-width: 640px) { .palette { width: calc(100vw - 24px) !important; } }
+@media (max-width: 640px) { .palette { max-width: calc(100vw - 24px); } }   /* caps the width the palette copies from the composer inline, without outranking it */
 
 .shots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; } .shots img { height: 96px; max-width: 220px; object-fit: cover; border-radius: var(--r-control); border: 1px solid var(--line); background: var(--bed); }
 body.playtest .pill { border-color: var(--veil-strong); }
@@ -341,14 +341,14 @@ details.step { display: block; padding: 0; }
 details.step > summary { display: flex; align-items: center; gap: 10px; padding: 3px 0; list-style: none; cursor: pointer; border-radius: var(--r-inline); }
 details.step > summary::-webkit-details-marker { display: none; }
 details.step > summary:hover .l, details.step[open] > summary .l { color: var(--ink-2); }
-details.step > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+details.step > summary:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 details.step > summary .l::after { content: "›"; display: inline-block; margin-left: 6px; color: var(--ink-4); transition: transform var(--t2) var(--ease); }
 details.step[open] > summary .l::after { transform: rotate(90deg); }
 .step.fail > summary .l, .step.fail.steer > summary .l { color: var(--fail-text); }
 .step .sbody { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 2px 0 8px 3px; padding: 2px 0 2px 14px; border-left: 1px solid var(--line); font-size: var(--type-fine); color: var(--ink-3); user-select: text; -webkit-user-select: text; }
 .step .shead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .step .sname { font: 500 var(--type-fine)/1.6 var(--font-mono); color: var(--ink-2); background: var(--veil-well); padding: 0 6px; border-radius: var(--r-inline); overflow-wrap: anywhere; }
-.step .skind { font-size: var(--type-micro); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-4); }
+.step .skind { font-size: var(--type-micro); letter-spacing: var(--track-micro); text-transform: uppercase; color: var(--ink-4); }
 .step .sin { margin: 0; padding: 8px 10px; border-radius: var(--r-control); background: var(--veil-well); font: var(--type-meta)/var(--leading-body) var(--font-mono); color: var(--ink-2); white-space: pre-wrap; word-break: break-word; max-height: 14em; overflow: auto; }
 .step .sres { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .step .sverdict { color: var(--ink-2); overflow-wrap: anywhere; }
@@ -377,7 +377,7 @@ body.busy.steer-ready .pill .send::after { display: none; }
 .planr { margin: 10px 0 2px; padding: 12px 14px 10px; border: 1px solid var(--veil-edge); border-radius: var(--r-panel); background: var(--chip-bg); font-size: var(--type-body); line-height: 1.5; min-width: 0; }
 .planr .prh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
 .planr .prh b { font-size: var(--type-body); }
-.planr .prs { font-size: var(--type-micro); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 1px 7px; border-radius: var(--r-pill); border: 1px solid var(--line); white-space: nowrap; }
+.planr .prs { font-size: var(--type-micro); letter-spacing: var(--track-micro); text-transform: uppercase; color: var(--ink-3); padding: 1px 7px; border-radius: var(--r-pill); border: 1px solid var(--line); white-space: nowrap; }
 .planr[data-state="executed"] .prs { color: var(--pass-text); border-color: var(--pass-edge); }
 .planr[data-state="executing"] .prs { animation: pulse 1.4s ease-in-out infinite; }
 .planr:is([data-state="failed"], [data-state="changed"], [data-state="expired"], [data-state="cancelled"], [data-state="interrupted"]) .prs { color: var(--fail-text); border-color: var(--fail-edge); }
@@ -396,7 +396,7 @@ body.busy.steer-ready .pill .send::after { display: none; }
 .planr .prwarn li { margin: 2px 0; }
 .planr .prerr { margin: 6px 0 0; color: var(--fail-text); font-size: var(--type-control); overflow-wrap: anywhere; }
 .planr .acts { margin: 8px 0 0; }
-.planr .acts .chip:disabled { opacity: .4; cursor: default; }
+.planr .acts .chip:disabled { opacity: var(--dim-disabled); cursor: default; }
 .planr .acts .chip:disabled:hover { background: var(--chip-bg); color: var(--ink-2); border-color: var(--line); }
 .turn.plan .bubble { border-color: var(--veil-edge); }
 
@@ -405,9 +405,9 @@ body.busy.steer-ready .pill .send::after { display: none; }
 .agent .card .guide .grow { display: flex; align-items: flex-end; gap: 6px; }
 .agent .card .guide textarea { flex: 1; min-width: 0; min-height: var(--touch); resize: none; font: inherit; font-size: var(--type-fine); line-height: 1.4; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--wash-hover); color: var(--ink); user-select: text; -webkit-user-select: text; }
 .agent .card .guide textarea::placeholder { color: var(--ink-4); }
-.agent .card .guide textarea:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.agent .card .guide textarea:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 .agent .card .guide .chip { min-height: var(--touch); padding: 6px 12px; }
-.agent .card .guide .chip:disabled { opacity: .45; cursor: default; }
+.agent .card .guide .chip:disabled { opacity: var(--dim-disabled); cursor: default; }
 .agent .card .guide .gres { font-size: var(--type-meta); color: var(--ink-3); white-space: pre-wrap; word-break: break-word; }
 .agent .card .guide .gres.fail { color: var(--fail-text); }
 /* phones: a 260px card centred on a 44px agent hangs off the screen edge, hiding the Guide box; the agents row is a transformed ancestor, so a fixed card is positioned relative to it and sits centred above the row instead */

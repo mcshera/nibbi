@@ -59,8 +59,8 @@
 .platform-panel nav button[aria-current=page]:hover:not(:disabled),
 .platform-panel nav button[aria-current=page]:active:not(:disabled) { background: var(--ink, #151413); color: var(--paper-raised); border-color: transparent; }
 .platform-panel .platform-close { flex: none; margin: 0; font-size: var(--type-control); }
-.platform-panel button:disabled { opacity: .5; cursor: not-allowed; }
-.platform-panel :is(button, select, input, textarea, a):focus-visible { outline: 2px solid var(--ink, #151413); outline-offset: 3px; }
+.platform-panel button:disabled { opacity: var(--dim-disabled); cursor: not-allowed; }
+.platform-panel :is(button, select, input, textarea, a):focus-visible { outline: var(--focus-ring); outline-offset: 3px; }
 .platform-panel .platform-content { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--veil-strong) transparent; padding: 3px 5px 4px; margin: 0 -5px; }
 .platform-panel fieldset { min-width: 0; border: 1px solid var(--line, var(--veil-hairline)); border-radius: var(--r-panel); background: var(--wash-faint); padding: 14px 16px 16px; margin: 8px 0 18px; }
 .platform-panel legend { padding: 0 6px; color: var(--ink, #151413); font-weight: 600; }
