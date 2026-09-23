@@ -23,10 +23,6 @@ jobs:
       - run: npm test
       - run: npm run verify
         env: { CI: '1' }
-      - run: npx playwright install webkit
-      - run: npm run verify:webkit
-        timeout-minutes: 8   # a stalled engine fails this step, not the whole job
-        env: { CI: '1' }
       - run: node tools/github-workflow-verify.mjs
         env: { CI: '1' }
       - run: npm run test:fresh
@@ -38,6 +34,29 @@ jobs:
           path: |
             output/playwright/
             output/attention/
-            output/webkit/
+          if-no-files-found: ignore
+          retention-days: 7
+  # WKWebView is the engine Nibbi ships in. Its own job, on macos-15: Playwright's WebKit for macOS 14
+  # is a frozen build that launches and then never opens a page (both sizes stalled after launch).
+  webkit:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: command -v rg || brew install ripgrep
+      - run: npm ci
+      - run: npx playwright install webkit
+      - run: npm run build
+      - run: npm run verify:webkit
+        timeout-minutes: 8   # a stalled engine fails this step with the step it reached
+        env: { CI: '1' }
+      - name: Preserve WebKit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-evidence
+          path: output/webkit/
           if-no-files-found: ignore
           retention-days: 7
