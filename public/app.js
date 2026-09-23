@@ -162,8 +162,11 @@ function watchProjectSummaries() {
   for (const project of wanted) if (project && !threadsRead.has(project)) { threadsRead.add(project); void loadThreads(project); }
 }
 const threadsRead = new Set();
+const drawerIsModal = matchMedia('(max-width: 899px)');   // the bar's own breakpoint: below it the open bar is a modal drawer
 function syncProjectComposer() {
-  pill.inert = !!S.projectView;
+  // Out of reach in a project view, and behind the drawer while it is open. The drawer inerts the page
+  // and then asks for a layout, which runs this: it must not hand the composer back behind a modal.
+  pill.inert = !!S.projectView || (drawerIsModal.matches && body.classList.contains('sidebar-open'));
 }
 
 /* ------------------------------------------------------------------ layout: where nibbi sits */
