@@ -369,6 +369,12 @@ test('a section says its fact once, and a blocked permission says so', {timeout:
     assert.equal(await page.locator('#st-notifications .margin-pref-value').innerText(), 'Blocked', 'a denied permission reads Blocked, not Off');
     const note = await page.locator('.margin-pref-note').filter({hasText: /blocked/}).innerText();
     assert.match(note, /^Notifications /, 'and its note names what is blocked');
+    // A value too long to sit beside its label takes a line of its own, and stays right-aligned with the rest.
+    await page.evaluate(() => { Object.assign(model.settings, {brain: 'ready', model: 'fixture-model', provider: 'fixture', context: '240 turns · $31.20 known lifetime cost'}); ui.update(model); });
+    await page.locator('#status').click();
+    const rows = await page.locator('.margin-card:not([hidden]) .margin-data-row').evaluateAll(els => els.map(row => { const r = row.getBoundingClientRect(), dt = row.querySelector('dt').getBoundingClientRect(), dd = row.querySelector('dd').getBoundingClientRect(); return {label: row.querySelector('dt').textContent, wrapped: dd.top >= dt.bottom - 1, gap: Math.round(r.right - dd.right)}; }));
+    assert.ok(rows.some(row => row.wrapped), 'one value is long enough to wrap: ' + JSON.stringify(rows));
+    for (const row of rows) assert.equal(row.gap, 0, 'every value ends at the right edge, wrapped or not: ' + JSON.stringify(row));
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

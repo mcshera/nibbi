@@ -55,7 +55,7 @@
 .margin-metadata { margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--margin-line); }
 .margin-data-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 16px; padding: 4px 0; }   /* a long value takes its own line rather than squeezing the label */
 .margin-data-row dt { flex: none; color: var(--margin-muted); font-size: var(--type-meta); }
-.margin-data-row dd { margin: 0; color: var(--ink-2, #383633); text-align: right; overflow-wrap: anywhere; min-width: 0; font-variant-numeric: tabular-nums; }
+.margin-data-row dd { margin: 0 0 0 auto; color: var(--ink-2, #383633); text-align: right; overflow-wrap: anywhere; min-width: 0; font-variant-numeric: tabular-nums; }   /* auto: a value that wraps to its own line stays at the right edge */
 .margin-pref { width: 100%; min-height: 36px; border: 0; border-bottom: 1px solid var(--veil-hover); background: transparent; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; text-align: left; }
 .margin-pref:hover:not(:disabled) { background: var(--veil-well); }
 .margin-pref:active:not(:disabled) { background: var(--veil-hover); }
