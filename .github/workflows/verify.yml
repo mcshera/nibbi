@@ -23,6 +23,9 @@ jobs:
       - run: npm test
       - run: npm run verify
         env: { CI: '1' }
+      - run: npx playwright install webkit
+      - run: npm run verify:webkit
+        env: { CI: '1' }
       - run: node tools/github-workflow-verify.mjs
         env: { CI: '1' }
       - run: npm run test:fresh
@@ -31,6 +34,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: browser-evidence
-          path: output/playwright/
+          path: |
+            output/playwright/
+            output/attention/
+            output/webkit/
           if-no-files-found: ignore
           retention-days: 7

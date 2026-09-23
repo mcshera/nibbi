@@ -444,7 +444,11 @@ function renderLive(T) {
   if (T.plain) { renderPlain(T, clean); return; }
   const blocks = splitBlocks(clean), settled = blocks.length - 1;
   if (!T.tail) { T.tail = document.createElement('div'); T.tail.className = 'said-tail'; T.said.appendChild(T.tail); T.stable = 0; }
-  if (settled > T.stable) { T.said.insertBefore(mdFragment(blocks.slice(T.stable, settled).join('\n\n')), T.tail); T.stable = settled; }
+  if (settled > T.stable) {
+    T.said.insertBefore(mdFragment(blocks.slice(T.stable, settled).join('\n\n')), T.tail);
+    if (!S.stick) noteUnread(settled - T.stable);   // reading further up: each block that finishes below is one more "new"
+    T.stable = settled;
+  }
   else if (settled < T.stable) { T.said.replaceChildren(mdFragment(blocks.slice(0, settled).join('\n\n')), T.tail); T.stable = settled; }   // a boundary cannot retreat while text only grows; rebuild rather than trust it
   patchChildren(T.tail, mdFragment(blocks[settled]));
 }
@@ -635,6 +639,13 @@ async function* demoTurn(message, _images, signal, mode) {
     return;
   }
   if (/\berror\b|\bbreak\b/.test(m)) { yield { ev: 'tool', name: 'Bash' }; await wait(900); yield { ev: 'done', text: 'error: Failed to authenticate: OAuth session expired and could not be refreshed', isError: true, costUsd: 0 }; return; }
+  if (/\bcode\b/.test(m)) {
+    // a fence and a table: the two blocks a streamed reply most often gets wrong mid-flight
+    const reply = 'Here is the change.\n\n```ts\nexport function lock(): Lock {\n  return new TurnLock({ clearOnAbort: true });\n}\n\nexport default lock;\n```\n\n| file | change |\n|---|---|\n| `session.ts` | clears on abort |\n| `webapp.ts` | always sends done |\n\nTwo files.';
+    yield* say(reply);
+    yield { ev: 'done', text: reply, costUsd: 0.004, isError: false, voice: 'Here is the change. Two files.' };
+    return;
+  }
   if (/fix|bug|build|make|add|change|ship/.test(m)) {
     // a real turn thinks before it speaks, and the surface has to show that rather than go quiet
     for (const t of ['weighing the turn lock ', 'against the abort path — ', 'the stream owes a done either way']) { await wait(300); yield { ev: 'thinking', t }; }

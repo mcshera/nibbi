@@ -22,6 +22,17 @@ in the tab title, offers steer, stop and open build, and is named in the while-y
 project wants from you, in words ("1 review", "2 failed"). It is still labelled "Open sidebar"; the
 words describe it. The project you are in is read with the bar closed, so the words are current.
 
+**A streamed reply counts as new.** The jump button counted only what nibbi said on its own, so
+scrolling up during a long reply always read "latest". Each block that finishes below you counts
+now, so it can say "3 new" while you read.
+
+**The harness.** The demo has a reply with a fence and a table (`show me the code`), and the
+streaming suite runs it at 1180×600, 390×844 and under glass: an open fence is code from its first
+line, the caret sits on the sentence being written, the table fits a phone, and glass changes the
+paper but not the ink. WebKit, the engine the app ships in, has a suite of its own —
+`npm run verify:webkit`: the bar, a streamed reply and the Builds lobby at two sizes — which CI runs
+after `npm run verify`. The sidebar lab renders on the real tokens again, and fails when it does not.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which
