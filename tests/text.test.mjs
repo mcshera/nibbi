@@ -75,3 +75,11 @@ test('a machine verdict and a machine being unreachable are different kinds of b
   }
   assert.equal(errorKind(''), 'failure', 'with nothing to go on, say nothing reassuring');
 });
+
+test('a reply the daemon stored already humanised keeps its kind', () => {
+  for (const raw of ['error: Failed to authenticate: OAuth session expired', 'gateway offline', 'HTTP 502', 'rate limit exceeded']) {
+    assert.equal(errorKind(humanError(raw)), 'notice', humanError(raw));
+  }
+  assert.equal(errorKind("The gateway isn't answering, so there's no brain behind me right now."), 'notice');
+  assert.equal(errorKind(humanError('Checks failed on the staged branch')), 'failure', 'a verdict stays a verdict once it has been put into words');
+});

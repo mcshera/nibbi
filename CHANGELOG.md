@@ -18,6 +18,18 @@ kind ("Confirm this build action below.") was painted in the failure red; it is 
 thinking dot and the plan badge flickered instead of standing still. Every animation plays once now,
 and Calm motion, which only ever reached the character, reaches the CSS as `body.calm`.
 
+**Copy copies what you read.** The code block's button stripped a trailing "copy" from the block's
+text, but a capped block ends in "show all (18 lines)", so the label came along; it copies the code
+itself now. A reply's copy took the raw text with its `»acts:` lines, and both said "copied" whether
+or not the clipboard took it. The fold ("5 steps in 9s — show") opened the steps and vanished, taking
+focus with it; it is a toggle now that stays where it is. An event turn no longer offers "ask again"
+with nothing to ask.
+
+**One of everything.** A running step counts in whole seconds and a long one reads `1m 05s`, not
+`1.1m` — the thinking step's format. A failed turn restored from history, or stored by the daemon
+already put into words, wears the same notice or failure mark it wore live. Reduced motion and Calm
+motion scroll the feed without smoothing.
+
 **Also.** The toast is a live region and sits above the fixers instead of on them. An agent's card
 stays open while you type in it. On a phone the jump button and a toast's action are 44px, the code
 block's copy button has a hit area larger than the pill it paints, and all four take the focus ring.

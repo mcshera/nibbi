@@ -135,6 +135,21 @@ try {
     assert.ok(!/(^|\n)- /.test(settled.text), 'and no raw list markers either');
 
     if (reducedMotion === 'no-preference') await page.screenshot({ path: out + 'settled-1180x820.png' });
+
+    // The folded steps are a toggle that stays under the pointer: it opens, closes, and keeps focus.
+    const fold = page.locator('.turn:last-child .steps .fold');
+    const foldState = () => fold.evaluate(el => ({ expanded: el.getAttribute('aria-expanded'), folded: el.closest('.steps').classList.contains('folded'), word: el.querySelector('.fw').textContent, line: el.querySelector('.l').textContent, focused: document.activeElement === el, controls: document.getElementById(el.getAttribute('aria-controls')) === el.closest('.steps') }));
+    const closed = await foldState();
+    assert.deepEqual([closed.expanded, closed.folded, closed.word, closed.controls], ['false', true, ' — show', true], 'the steps settle folded behind their summary');
+    assert.match(closed.line, /^\d+ steps? in /, 'and the summary line carries no toggle word of its own');
+    await fold.click();
+    const opened2 = await foldState();
+    assert.deepEqual([opened2.expanded, opened2.folded, opened2.word, opened2.focused], ['true', false, ' — hide', true], 'show opens them, and focus stays on the toggle');
+    assert.ok(await page.locator('.turn:last-child .steps .step:visible').count() >= 4, 'the steps are on screen');
+    await fold.click();
+    const closedAgain = await foldState();
+    assert.deepEqual([closedAgain.expanded, closedAgain.folded, closedAgain.word, closedAgain.focused], ['false', true, ' — show', true], 'and hide folds them again from the same place');
+
     const writesAfter = await page.evaluate(() => window.__transcriptWrites);
     assert.ok(writesAfter > writesWhileStreaming, 'the settled turn is written once it is done');
 
@@ -149,6 +164,7 @@ try {
     assert.equal(restored.text, settled.text, 'the restored reply is the reply that was read');
     assert.equal(restored.items, 2, 'its list came back');
     assert.equal(restored.tails, 0, 'a restored reply has no live tail');
+    assert.equal(await page.locator('.turn:last-child .steps.foldable.folded .fold[aria-expanded="false"]').count(), 1, 'a restored reply folds its steps behind the same toggle');
 
     if (reducedMotion === 'no-preference') {
       // Calm motion is the same kill switch as the system setting, carried as a class on body.
@@ -163,7 +179,38 @@ try {
     assert.deepEqual(errors, [], 'No unexpected browser errors (' + reducedMotion + ')');
     await context.close();
   }
-  console.log('Streaming checks passed: block-stable rendering, a surviving selection, a clean settle and no transcript writes mid-reply.');
+
+  // Copy gives you what you read: the code without its buttons' labels, the reply without its
+  // protocol lines. A scripted /api/send answers once, with a long fence and an »acts: line.
+  {
+    const errors = [];
+    const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: fixture.base });
+    const page = await context.newPage();
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text() + ' @ ' + message.location().url); });
+    const code = Array.from({ length: 18 }, (_, i) => `const line${i} = ${i};`).join('\n');
+    const reply = 'Here it is.\n\n```js\n' + code + '\n```\n\nTwo lines of it matter.\n»acts: ship it | not now\n';
+    await page.route('**/api/send', route => route.fulfill({ json: { text: reply, costUsd: 0, isError: false } }));
+    await page.goto(fixture.base + '/?nosw=1');
+    await page.waitForFunction(() => window.nibbiApp && document.body.dataset.link === 'live');
+    await page.evaluate(() => window.nibbiApp.send('show me the snippet'));
+    await page.waitForFunction(() => !window.nibbiApp.state().busy && document.querySelector('.turn:last-child pre .copycode'), null, { timeout: 20_000 });
+    assert.equal(await page.locator('.turn:last-child pre .expand').count(), 1, 'the long fence is capped, so it has a second button inside it too');
+    const copied = async () => { await page.waitForFunction(() => document.querySelector('#toast')?.textContent === 'copied' && !document.querySelector('#toast').hidden); const text = await page.evaluate(() => navigator.clipboard.readText()); await page.evaluate(() => { document.querySelector('#toast').hidden = true; document.querySelector('#toast').textContent = ''; }); return text; };
+    await page.locator('.turn:last-child pre .copycode').click();
+    const fence = await copied();
+    assert.equal(fence.trimEnd(), code, 'the code block copies its code and nothing else');
+    assert.ok(!/copy\s*$/.test(fence) && !fence.includes('show all'), 'no button label rides along');
+    await page.locator('.turn:last-child .meta .metaacts button', { hasText: /^copy$/ }).click();
+    const whole = await copied();
+    assert.ok(whole.startsWith('Here it is.') && whole.includes('const line17 = 17;'), 'the reply copies as it reads');
+    assert.ok(!whole.includes('»') && !whole.includes('acts:'), 'without its protocol lines, was ' + JSON.stringify(whole.slice(-60)));
+    assert.deepEqual(await page.locator('.turn:last-child .meta .metaacts button').allTextContents(), ['quote', 'copy', 'ask again'], 'a reply to something you said can be asked again');
+    assert.deepEqual(errors, [], 'No unexpected browser errors (copy)');
+    await context.close();
+  }
+  console.log('Streaming checks passed: block-stable rendering, a surviving selection, a clean settle, no transcript writes mid-reply, a fold that toggles in place, and copy that copies what was read.');
 } finally {
   await browser?.close();
   await fixture.close();

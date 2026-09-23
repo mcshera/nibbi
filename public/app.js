@@ -246,7 +246,7 @@ function noteUnread(n) {
 }
 function scrollFeed(force) { if (!force && !S.stick) return; if (scrollRaf) return; scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; feed.scrollTop = feed.scrollHeight; }); }
 feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; if (atBottom) noteUnread(0); } }, { passive: true });
-jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); };
+jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: reducedMotion.matches || calmMotion ? 'auto' : 'smooth' }); };
 new MutationObserver(() => scrollFeed(false)).observe(feed, { childList: true, subtree: true, characterData: true });
 new ResizeObserver(() => scrollFeed(false)).observe(feed);
 
@@ -274,7 +274,8 @@ function decoratePre(root) {
   for (const pre of root.querySelectorAll('pre')) {
     if (pre.querySelector('.copycode')) continue;
     const b = document.createElement('button'); b.type = 'button'; b.className = 'copycode'; b.textContent = 'copy';
-    b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/copy$/, '').replace(/show all \(\d+ lines\)$/, '')); toast('copied'); };
+    // marked writes <pre><code>, and the buttons are the code's siblings, so the code is exactly what was written
+    b.onclick = () => copyText((pre.querySelector('code') || pre).textContent);
     pre.appendChild(b);
     const n = (pre.textContent.match(/\n/g) || []).length;
     if (n > 16) { pre.classList.add('capped'); const x = document.createElement('button'); x.type = 'button'; x.className = 'expand'; x.textContent = 'show all (' + n + ' lines)'; x.onclick = () => { pre.classList.remove('capped'); x.remove(); }; pre.appendChild(x); }
@@ -282,9 +283,25 @@ function decoratePre(root) {
   return root;
 }
 function renderMd(src) { const frag = mdFragment(src); decoratePre(frag); return frag; }
+/* The clipboard only exists on a secure page, and a write can be refused; "copied" is said only once it is true. */
+function copyText(s) {
+  const w = navigator.clipboard?.writeText(s);
+  if (!w) return toast('copy needs a secure page');
+  w.then(() => toast('copied'), () => toast('copy failed'));
+}
 
 /* ------------------------------------------------------------------ feed */
 
+let stepsSeq = 0;
+function syncFold(steps, fold) {
+  const open = !steps.classList.contains('folded');
+  fold.setAttribute('aria-expanded', String(open)); fold.querySelector('.fw u').textContent = open ? 'hide' : 'show';
+}
+/* A finished turn's steps fold behind one line, and the line opens and closes them. */
+function foldSteps(T, line) {
+  T.fold.querySelector('.l').textContent = line;
+  T.steps.classList.add('foldable', 'folded'); syncFold(T.steps, T.fold);
+}
 function newTurn(text, images, at) {
   const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now());
   if (!last || new Date(last.at || Date.now()).toDateString() !== now.toDateString()) { if (feed.children.length) { const sep = document.createElement('div'); sep.className = 'when'; sep.textContent = now.toDateString() === new Date().toDateString() ? 'today' : now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }); feed.appendChild(sep); } }
@@ -296,8 +313,13 @@ function newTurn(text, images, at) {
   const nib = document.createElement('div'); nib.className = 'nib';
   const ava = null;   // no small nibbi beside the bubble: the bubble's corner dot is the signature
   const nibBody = document.createElement('div'); nibBody.className = 'nibbody';
-  const steps = document.createElement('div'); steps.className = 'steps'; steps.hidden = true;
-  const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="l"></span>'; fold.onclick = () => steps.classList.remove('folded'); steps.appendChild(fold);
+  const steps = document.createElement('div'); steps.className = 'steps'; steps.hidden = true; steps.id = 'steps-' + (++stepsSeq);
+  // The summary is a toggle that stays where it is, so focus never leaves it. .l holds the summary alone;
+  // the word that says what a press does sits beside it, so the saved line never carries it.
+  const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="lw"><span class="l"></span><span class="fw"> — <u>show</u></span></span>';
+  fold.setAttribute('aria-expanded', 'false'); fold.setAttribute('aria-controls', steps.id);
+  fold.onclick = () => { if (!steps.classList.contains('foldable')) return; steps.classList.toggle('folded'); syncFold(steps, fold); };
+  steps.appendChild(fold);
   for (const P of S.turns) { const a = P.nib.querySelector('.acts:not(.sticky)'); if (a) a.remove(); }
   turn.setAttribute('aria-busy', 'true');
   const said = document.createElement('div'); said.className = 'said';
@@ -362,7 +384,7 @@ function insertStep(T, ev) {
   T.steps.hidden = false; T.steps.insertBefore(el, T.fold);
   const st = stepRecord(el, ev.label, null, ev); T.stepsList.push(st); return st;
 }
-function markStep(st, state) { st.el.classList.remove('live', 'done', 'fail'); st.el.classList.add(state); if (state === 'fail') st.ok = false; else if (state === 'done' && st.ok === null) st.ok = true; const dt = (performance.now() - st.at) / 1000; if (dt > 1.5) st.el.querySelector('.t').textContent = dt < 60 ? dt.toFixed(0) + 's' : (dt / 60).toFixed(1) + 'm'; }
+function markStep(st, state) { st.el.classList.remove('live', 'done', 'fail'); st.el.classList.add(state); if (state === 'fail') st.ok = false; else if (state === 'done' && st.ok === null) st.ok = true; const ms = performance.now() - st.at; if (ms > 1500) st.el.querySelector('.t').textContent = elapsedLabel(ms, { live: true }); }
 function fillStepResult(st) {
   const res = st.el.querySelector('.sres'); if (!res) return;
   res.replaceChildren(); res.hidden = false; res.classList.toggle('fail', st.ok === false);
@@ -390,7 +412,7 @@ function noteThinking(T, t) {
     const st = addStep(T, 'thinking', 'think');
     st.el.querySelector('.l').insertAdjacentHTML('afterend', '<span class="tailwrap"><span class="tail"></span></span>');
     st.tailText = '';
-    st.timer = setInterval(() => { const el = st.el.querySelector('.t'); if (el) el.textContent = Math.round((performance.now() - st.at) / 1000) + 's'; }, 1000);
+    st.timer = setInterval(() => { const el = st.el.querySelector('.t'); if (el) el.textContent = elapsedLabel(performance.now() - st.at, { live: true }); }, 1000);
     T.think = st;
     if (nibbi.mood() !== 'thinking') nibbi.setMood('thinking');
   }
@@ -417,8 +439,7 @@ function finishSteps(T, ok) {
   if (!rows.length) { if (thought) T.stepLine = 'thought for ' + elapsedLabel(thought.elapsedMs); return; }
   const line = (ok ? '' : 'stopped after ') + stepSummaryLine(rows, performance.now() - T.startedAt);
   T.stepLine = line;
-  T.fold.querySelector('.l').innerHTML = escapeHtml(line) + ' — <u>show</u>';
-  T.steps.classList.add('folded');   // the screen reader hears T.stepLine once, composed into the reply's announcement by the caller; individual tool frames are never announced
+  foldSteps(T, line);   // the screen reader hears T.stepLine once, composed into the reply's announcement by the caller; individual tool frames are never announced
 }
 /* A command's output is text with links in it, never markdown. */
 function renderPlain(T, clean) {
@@ -492,13 +513,16 @@ function setMeta(T, r) {
   if (r && r.raw) bits.push(String(r.raw).replace(/^\s*error:\s*/i, '').slice(0, 90));
   T.meta.textContent = bits.filter(Boolean).join(' · '); T.meta.prepend(tm, document.createTextNode(bits.filter(Boolean).length ? ' · ' : ''));
   const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; focusComposer(); autosize(); };
-  const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => { navigator.clipboard?.writeText(T.acc); toast('copied'); };
+  const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => copyText(cleanReply(T.acc));   // the reply as read, without its »voice/»acts lines
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
   const acts = document.createElement('span'); acts.className = 'metaacts'; acts.setAttribute('role', 'group'); acts.setAttribute('aria-label', 'reply actions');
   const dot = () => { const d = document.createElement('span'); d.textContent = '·'; d.setAttribute('aria-hidden', 'true'); return d; };   // a separator is punctuation, not a word to read out; the gap around it is the row's own
-  acts.append(quote, dot(), copy, dot(), again);
+  acts.append(quote, dot(), copy);
+  if (T.text) acts.append(dot(), again);   // an event turn, or a reply restored without its question, has nothing to ask again
   T.meta.append(dot(), acts);
 }
+/* Every failed turn goes through here, so a restored or humanised error wears the same mark as a live one. */
+function markFailure(T, raw) { T.nib.classList.add(errorKind(raw) === 'notice' ? 'notice' : 'error'); }
 function addActs(T, acts, opts) {
   if (!acts.length) return;
   const w = document.createElement('div'); w.className = 'acts' + (opts && opts.sticky ? ' sticky' : '');
@@ -551,7 +575,7 @@ async function hydrateThread(project, id) {
   for (const row of pending.slice(-40)) {
     const T = newTurn(row.you === null ? undefined : row.you, undefined, row.at);
     T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true;
-    if (row.error) T.nib.classList.add('error');
+    if (row.error) markFailure(T, row.said);
     T.at = row.at; setMeta(T, { costUsd: row.cost }); T.el.removeAttribute('aria-busy');
   }
   S.stick = true; scrollFeed(true);
@@ -682,7 +706,7 @@ async function localTurn(userText, fn, opts) {
   finishSteps(T, ok);
   if (out.html) { T.said.replaceChildren(out.html); T.acc = out.text || ''; } else setSaid(T, out.text || '', false);
   setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
-  if (!ok) T.nib.classList.add('error');
+  if (!ok) markFailure(T, out.raw || out.text);
   if (out.acts && out.acts.length) addActs(T, out.acts);
   S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1400 : 2600); syncMargins();
   $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + stripMd(out.text || ''); scheduleIdleTimers(); refreshStatus();
@@ -1300,7 +1324,7 @@ async function playFlow(project, action) {
     }
   } catch (e) { ok = false; text = /unknown project/i.test(e.message) ? 'I don\'t know a project called **' + project + '**. Registered projects: ' + ((S.projects || []).map((p) => p.name).join(', ') || 'none yet') + '.' : /no web dev server|terminal game/i.test(e.message) ? '**' + project + '** has no web dev server — it\'s a terminal game (`npm run play`).' : 'I couldn\'t launch it — ' + e.message; }
   finishSteps(T, ok); setSaid(T, text, false); setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
-  if (!ok) T.nib.classList.add('error');
+  if (!ok) markFailure(T, text);
   const acts = [];
   if (url) { acts.push({ label: 'open it', run: () => openUrl(url), sticky: true }, { label: 'stop the server', run: () => send('/play ' + project + ' stop') }); }
   else if (ok && action === 'status' && /Want me to start/.test(text)) acts.push({ label: 'start it', run: () => send('/play ' + project) });
@@ -1418,7 +1442,7 @@ async function send(text, images, opts) {
   $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + (ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200));
   T.done = true;
   // A verdict is a failure; a gateway that cannot be reached is a notice. They do not look alike.
-  if (!ok) T.nib.classList.add(errorKind(result.raw || result.text) === 'notice' ? 'notice' : 'error');
+  if (!ok) markFailure(T, result.raw || result.text);
   if (result.proposal && typeof result.proposal === 'object') renderProposalCard(T, result.proposal, text);
   S.busy = false; body.classList.remove('busy'); S.abort = null; syncSendButton(); syncMargins();
   // The settled turn is written now rather than on a later tick. A turn that finished after its
@@ -2001,7 +2025,7 @@ ask.addEventListener('focus', () => { layout(false); interactions.event('focus')
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
-  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: 'smooth' }); }
+  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: reducedMotion.matches || calmMotion ? 'auto' : 'smooth' }); }
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   // Escape dismisses; it does not destroy. Clearing the whole conversation is a two-step action and
   // lives on the Settings card's Tidy conversation, next to what it affects.
@@ -2248,9 +2272,9 @@ function restoreTranscript() {
     if (Array.isArray(r.stepRows) && r.stepRows.length) {   // structured steps come back folded and expandable
       for (const row of r.stepRows.slice(0, 40)) if (row && typeof row === 'object') restoreStep(T, row);
       T.stepLine = r.steps || stepSummaryLine(T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s)));
-      T.fold.querySelector('.l').innerHTML = escapeHtml(T.stepLine) + ' — <u>show</u>'; T.steps.classList.add('folded');
+      foldSteps(T, T.stepLine);
     } else if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
-    setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error'); if (r.notice) T.nib.classList.add('notice');
+    setSaid(T, r.acc, false); T.done = true; if (r.notice) T.nib.classList.add('notice'); else if (r.error) markFailure(T, r.acc);
     T.at = r.at; setMeta(T, { costUsd: r.cost, ...localReplyMetadata(r) }); T.el.removeAttribute('aria-busy');
   }
   S.stick = true; scrollFeed(true); body.classList.add('rest');

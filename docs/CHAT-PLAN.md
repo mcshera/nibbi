@@ -26,12 +26,16 @@ messaging. It makes the chat history hard to read."*
 - Only the latest turn keeps its action chips (unchanged).
 - Thin scrollbar on hover so long histories are navigable.
 
-**P1 — history and reading — ✅ `pick up where we left off` / `/recent` with time separators, hover scrollbar, PageUp/PageDown/End; remaining: code-block cap, relative times**
+**P1 — history and reading — ✅ `pick up where we left off` / `/recent` with time separators, hover scrollbar, PageUp/PageDown/End, code-block cap, relative times**
 - `pick up where we left off` chip on open when there's recent conversation (last 12 h); `/recent` renders the last
   exchanges chronologically with time separators. Opening stays pure (idle) — history is a tap away, not forced.
 - Day/time separators when restoring history; relative times in the meta line.
 - Long replies: code blocks capped with expand; tables scroll horizontally.
 - Keyboard: `PageUp/PageDown` scroll the feed while typing; `End` jumps to latest.
+- The reply is a page-width card from its first frame, so it never changes width mid-reply, and its caret takes a line
+  of its own under a trailing fence, quote or table. The folded steps are a toggle (`— show` / `— hide`,
+  `aria-expanded`) that stays in place, so focus never leaves it. Copy copies what was read: a code block's code
+  without its buttons' labels, a reply without its `»` lines, and "copied" only once the clipboard has it.
 
 **P2 — how it streams — ✅ 2026-09-22**
 - Instant, not paced: text lands as it arrives, but at most one render per frame however many tokens
