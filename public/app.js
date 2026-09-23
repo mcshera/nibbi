@@ -83,10 +83,7 @@ let visibleProjectIds = [];
 const projectSummaries = createProjectSummaryStore({ onChange: () => syncMargins() });
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
 const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: () => closeProjectView(), onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
-const chatLauncher = document.createElement('button');
-chatLauncher.type = 'button'; chatLauncher.id = 'project-chat-launcher'; chatLauncher.className = 'project-chat-launcher';
-chatLauncher.textContent = 'Chat with Nibbi'; chatLauncher.hidden = true; chatLauncher.setAttribute('aria-controls', 'pill');
-chatLauncher.onclick = () => focusComposer(); document.body.append(chatLauncher);
+// A section's way back to the conversation is its own header ×, which never scrolls away and exists at every width.
 function focusComposer() { closeProjectView(false); ask.focus(); }
 /* "Plan first": the next message becomes a reviewable plan (numbered steps → approve → builds) instead of a chat turn */
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
@@ -165,7 +162,6 @@ function watchProjectSummaries() {
 }
 const threadsRead = new Set();
 function syncProjectComposer() {
-  chatLauncher.hidden = !S.projectView;
   pill.inert = !!S.projectView;
 }
 
@@ -173,8 +169,7 @@ function syncProjectComposer() {
 function workspaceLeft() { return parseFloat(getComputedStyle(body).getPropertyValue('--workspace-left')) || 0; }
 function idleRadius() { return Math.max(70, Math.min(185, Math.min(innerWidth - workspaceLeft(), innerHeight) * 0.20)); }
 function layout(snap) {
-  // Initialization runs before the attachment state is declared.
-  if (typeof chatLauncher !== 'undefined') syncProjectComposer();
+  syncProjectComposer();
   const W = innerWidth, H = innerHeight, r0 = idleRadius();
   const center = (W + workspaceLeft()) / 2;
   const pillTop = pill.getBoundingClientRect().top || (H - 124);
@@ -191,7 +186,7 @@ function layout(snap) {
     pose = { x: center, y: H * (focused ? 0.47 : 0.49) - (H < 600 ? 20 : 0), r: r0 };
   }
   const hasAgents = body.classList.contains('has-agents');
-  document.documentElement.style.setProperty('--agents-bottom', Math.round(S.projectView ? 80 : H - pillTop - 3) + 'px');   // perched on the pill's top edge
+  document.documentElement.style.setProperty('--agents-bottom', Math.round(H - pillTop - 3) + 'px');   // perched on the pill's top edge; a section hides them
   document.documentElement.style.setProperty('--feed-bottom', Math.round(H - pillTop + 18 + (hasAgents ? 52 : 0)) + 'px');
   if (snap) nibbi.snapTarget(pose); else nibbi.setTarget(pose);
 }
@@ -1822,7 +1817,10 @@ function openProjectSection(id, section, detail = {}) {
   closeDock(false); hideChips(); paletteEl.hidden = true;
   projectWorkspace.open({ project: id, kind: project.kind, section, ...detail });
   watchProjectSummaries();
-  syncMargins(); layout(false);
+  // From idle the hero snaps to the header pose, a scene change like first paint: springing, it shrank
+  // through the section's header for ~600ms while the section itself arrived in 220. From talk it is
+  // already small, and the short move springs.
+  syncMargins(); layout(S.mode !== 'talk');
 }
 function closeProjectView(focus = true) {
   if (!S.projectView) return;

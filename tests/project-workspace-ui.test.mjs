@@ -25,8 +25,8 @@ const fixtures = {
 };
 for (const milestone of fixtures.plans.milestones) milestone.tasks = fixtures.plans.items.filter(task => task.milestoneId === milestone.id);
 
-async function harness(browser, viewport) {
-  const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
+async function harness(browser, viewport, options = {}) {
+  const context = await browser.newContext({ viewport, serviceWorkers: 'block', ...options });
   const page = await context.newPage(); page.setDefaultTimeout(5000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.route('https://workspace.test/**', route => {
@@ -188,15 +188,28 @@ test('section controls and inline evidence fit narrow and short reading windows'
     for (const viewport of [{ width: 390, height: 844 }, { width: 390, height: 430 }]) {
       const { page, context, errors, open } = await harness(browser, viewport);
       try {
+        // To push and Pull requests are GitHub's; a project that does not deliver there hides the group.
+        // Needs attention stays: it is where a local project's failed builds are. The daemon gives every
+        // local run a github record too, so the fixture carries one.
+        await page.evaluate(() => { for (const run of sections.builds.runs) run.github = { mode: 'local' }; });
         await open('builds');
+        assert.equal(await page.locator('.project-build-delivery').first().innerText(), 'Local build', 'the runs carry the daemon\'s local github record');
+        assert.deepEqual(await page.locator('.project-filters [data-filter]').evaluateAll(els => els.map(el => el.dataset.filter)), ['all', 'active', 'review', 'attention', 'history']);
+        assert.equal(await page.locator('.project-filters').evaluate(el => getComputedStyle(el).flexWrap), 'nowrap', 'the filters keep one row and scroll sideways');
         await page.locator('[data-build-id="run-review"] > summary').click();
         assert.equal(await page.locator('.project-build:visible').count(), 1);
         await page.getByRole('button', { name: 'Back to build list', exact: true }).click();
         assert.equal(await page.locator('.project-build:visible').count(), 4);
         await page.locator('[data-filter="active"]').click();
         assert.equal(await page.locator('.project-build:visible').count(), 1);
-        for (const section of ['issues', 'plans']) {
+        for (const section of ['builds', 'issues', 'plans']) {
           await open(section);
+          // The summary has its own line; the controls share one row under it.
+          const header = await page.locator('.project-toolbar > .project-toolbar-actions > button').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top)));
+          assert.ok(header.length >= 2 && header.every(top => top === header[0]), `${section} header controls share one row at ${viewport.width}, tops ${header}`);
+          const summary = await page.locator('.project-toolbar > .project-summary').boundingBox(), row = await page.locator('.project-toolbar > .project-toolbar-actions').boundingBox();
+          assert.ok(summary.y + summary.height <= row.y + 1, 'and the summary sits above them');
+          if (section === 'builds') continue;
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
           const shortControls = await page.locator('.project-workspace button:visible').evaluateAll(elements => elements.filter(el => el.getBoundingClientRect().height < 43.9).map(el => ({ text: el.textContent, height: el.getBoundingClientRect().height })));
           assert.deepEqual(shortControls, []);
@@ -234,6 +247,29 @@ test('one verdict wears one colour at every width, and a notice without a kind i
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
     }
+  } finally { await browser.close(); }
+});
+
+test('a GitHub project shows its delivery filters, and the key hint needs a keyboard', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    const { page, context, errors, open } = await harness(browser, { width: 1180, height: 712 });
+    try {
+      await page.evaluate(() => { sections.builds.runs[0].workflowMode = 'github'; sections.builds.runs[0].github = { mode: 'github', toPush: true }; });
+      await open('builds');
+      assert.deepEqual(await page.locator('.project-filters [data-filter]').evaluateAll(els => els.map(el => el.dataset.filter)), ['all', 'active', 'review', 'toPush', 'pullRequests', 'attention', 'history']);
+      assert.equal(await page.locator('[data-filter="toPush"]').innerText(), 'To push 1');
+      assert.equal(await page.locator('.project-lobby-keys').isVisible(), true, 'a pointer with a keyboard sees j/k · a · x · p');
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+    const touch = await harness(browser, { width: 1180, height: 712 }, { hasTouch: true });
+    try {
+      await touch.open('builds');
+      assert.equal(await touch.page.evaluate(() => matchMedia('(hover: none), (pointer: coarse)').matches), true, 'the touch context is coarse');
+      assert.equal(await touch.page.locator('.project-lobby-keys').count(), 1);
+      assert.equal(await touch.page.locator('.project-lobby-keys').isVisible(), false, 'a touch screen has no keys to press');
+      assert.deepEqual(touch.errors, []);
+    } finally { await touch.context.close(); }
   } finally { await browser.close(); }
 });
 

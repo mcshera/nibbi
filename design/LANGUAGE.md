@@ -487,6 +487,8 @@ Nibbi drives most of its UI from `body` attributes and classes. The full set, be
 | `.playtest` | playtest mode | labelled border on the composer |
 | `.link-fresh` | recent state change | same: set on `body`, styled by nothing since the status label went. Vestigial alongside `data-link` |
 | `.calm` | `syncMotionPreference` (system reduced motion or Calm motion) | the reduced-motion kill switch of §7.4, so the in-app preference reaches the CSS and not only the character |
+| `.project-view` | `openProjectSection` / `closeProjectView` | a section is a room: the feed, chips, jump, composer and fixers stand down (the composer stays mounted and `inert`, so a draft survives); the header `×` is the way back |
+| `.has-agents` | `renderAgents` | the fixers are perched on the composer, so `--feed-bottom` rises 52px to keep the feed clear of them |
 
 **Rule.** New state goes on `body` as an attribute when it has 3+ values, a class when it is binary. Never a JS-set inline style — `.glass` is applied by `app.js` precisely so browsers and the PWA are untouched, and that separation is what keeps the contrast budget honest.
 
@@ -572,6 +574,8 @@ Everything found that was the same intent rendered two ways. **All 12 rows are a
 | 12 | `margins.css` wrote `220ms` literally instead of `--t2` | uses the token | ✅ |
 
 Two families were found while applying the register and are now documented rather than left loose: the opaque interaction beds (§2.2b, eight near-identical warm greys across two files) and the elevation ladder's one horizontal shadow, `--e-rail`.
+
+Round 2 (0.8.1) closed two more of the same kind. Builds showed `To push 0` and `Pull requests 0` on every project, GitHub or not: those two now hide as a group when no run delivers through GitHub (`github.mode` or `workflowMode` is `github`), while `Needs attention` stays, because that is where a local project's failed builds are.
 
 ## 16. References
 

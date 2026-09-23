@@ -18,6 +18,15 @@ kind ("Confirm this build action below.") was painted in the failure red; it is 
 thinking dot and the plan badge flickered instead of standing still. Every animation plays once now,
 and Calm motion, which only ever reached the character, reaches the CSS as `body.calm`.
 
+**A section is a room.** Opened from idle, the 164px character used to shrink through the section's
+header for 600ms while the section arrived in 220; it snaps to its header pose now, the way first
+paint does. The fixers no longer float over a section's records, and the floating "Chat with Nibbi"
+button is gone — it duplicated the Chat tab and covered a card's status on a phone. The header × has
+always been the way back, and it never scrolls away. At 390 the header puts its summary on a line of
+its own and its controls in one row under it; the filters scroll sideways instead of wrapping; To
+push and Pull requests appear only for a project that delivers through GitHub; and a phone is not
+shown keyboard shortcuts.
+
 **Copy copies what you read.** The code block's button stripped a trailing "copy" from the block's
 text, but a capped block ends in "show all (18 lines)", so the label came along; it copies the code
 itself now. A reply's copy took the raw text with its `»acts:` lines, and both said "copied" whether

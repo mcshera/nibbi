@@ -34,7 +34,7 @@ try{
  if(report.scope!=='responsive'){
  const {page,context}=await createPage();
  try{
-  await check('launcher preserves the active conversation and work while Nibbi is busy',async()=>{
+  await check('the section close preserves the active conversation and work while Nibbi is busy',async()=>{
    const release=fixture.holdChat();
    try {
     await page.locator('#ask').fill('Keep working while I browse');await page.locator('#ask').press('Enter');
@@ -43,7 +43,7 @@ try{
     const before=await page.evaluate(()=>({thread:nibbiApp.state().thread,run:nibbiApp.state().activeRunId,turns:nibbiApp.state().turns.map(t=>t.text)}));
     for(const section of ['builds','issues','plans'])await open(page,'observatory',section);
     const writes=fixture.calls.filter(c=>c.method==='POST').length;
-    await page.getByRole('button',{name:'Chat with Nibbi',exact:true}).click();
+    await page.getByRole('button',{name:'Close and return to the conversation',exact:true}).click();
     assert.deepEqual(await page.evaluate(()=>({thread:nibbiApp.state().thread,run:nibbiApp.state().activeRunId,turns:nibbiApp.state().turns.map(t=>t.text)})),before);
     assert.equal(await page.evaluate(()=>nibbiApp.state().busy),true);
     assert.equal(await page.evaluate(()=>document.activeElement.id),'ask');
@@ -101,7 +101,7 @@ try{
   await check('project and filter navigation retains reading state and drafts',async()=>{
    await tab(page,'issues');await page.locator('[data-filter="all"]').click();await page.getByRole('searchbox',{name:'Search issues'}).fill('seedlings');await tab(page,'plans');await tab(page,'issues');assert.equal(await page.getByRole('searchbox',{name:'Search issues'}).inputValue(),'seedlings');assert.equal(await page.locator('[data-filter="all"]').getAttribute('aria-pressed'),'true');
    await open(page,'observatory','plans');assert.match(await page.locator('.project-content').innerText(),/written plan/i);assert(!/seedlings/.test(await page.locator('.project-content').innerText()));await open(page,'weekend-notes','issues');assert.match(await page.locator('.project-content').innerText(),/No issues yet/);
-   await page.getByRole('button',{name:'Chat with Nibbi',exact:true}).click();assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);assert.equal(await page.locator('#project-workspace').isVisible(),false);
+   await page.getByRole('button',{name:'Close and return to the conversation',exact:true}).click();assert.equal(await page.locator('#ask').inputValue(),'Preserve this conversation draft');assert.equal(await page.locator('#attach img').count(),1);assert.equal(await page.locator('#project-workspace').isVisible(),false);
   });
   await check('empty plan supports inline milestone and task creation and editing',async()=>{
    await open(page,'weekend-notes','plans');await page.getByRole('button',{name:'Create milestone',exact:true}).click();await saveForm(page,'A useful weekend','Keep room for small ideas.');
@@ -125,10 +125,13 @@ try{
     assert.equal(await page.locator('#pill').isVisible(),false);
     assert.equal(await page.locator('#pill').evaluate(el=>el.inert),true);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-    const launcher=page.locator('#project-chat-launcher'),before=await launcher.boundingBox();
-    assert.equal(before.height,48);assert.equal(Math.round(w-before.x-before.width),16);assert.equal(Math.round(h-before.y-before.height),16);
+    // The header × is the way back at every width; the floating launcher that covered records is gone, and so are the fixers.
+    assert.equal(await page.locator('#project-chat-launcher').count(),0);assert.equal(await page.locator('#agents').evaluate(el=>getComputedStyle(el).display),'none');
+    await page.waitForFunction(()=>document.querySelector('#project-workspace').getAnimations().length===0);   // the section slides in 10px; measure it once it has arrived
+    const launcher=page.locator('.project-close'),before=await launcher.boundingBox();
+    assert(before.width>=44&&before.height>=44,'the close control is a 44px target');assert(before.x+before.width<=w&&before.y>=0,'inside the viewport');
     await page.locator('.project-workspace-body').evaluate(el=>el.scrollTop=el.scrollHeight);
-    assert.deepEqual(await launcher.boundingBox(),before,'launcher stays fixed while records scroll');
+    assert.deepEqual(await launcher.boundingBox(),before,'the close control stays fixed while records scroll');
     const scroll=await page.locator('.project-workspace-body').evaluate(el=>el.scrollTop);
     await shot(page,`${section}-${w}x${h}`);
     await launcher.focus();await page.keyboard.press(section==='issues'?'Space':'Enter');
@@ -137,7 +140,7 @@ try{
     await open(page,'paper-garden',section);
     assert.equal(await page.locator('.project-workspace-body').evaluate(el=>el.scrollTop),scroll);
    }
-   await page.getByRole('button',{name:'Chat with Nibbi',exact:true}).click();
+   await page.getByRole('button',{name:'Close and return to the conversation',exact:true}).click();
    const dock=page.locator('#dock'),dbox=await dock.boundingBox();assert(dbox.width>=(w<=640?44:40)&&dbox.height>=(w<=640?44:40),'options button target');const openDock=async()=>{if(await dock.getAttribute('aria-expanded')!=='true')await dock.click();};
    await openDock();const mic=page.locator('#mic'),box=await mic.boundingBox();assert(box.width>=44&&box.height>=44);await mic.click();await page.waitForFunction(()=>nibbiApp.voice.snapshot().phase==='paused');assert.equal(await page.locator('#dock-menu').isVisible(),false,'choosing a row closes the panel');assert.equal(await mic.getAttribute('aria-pressed'),'true','the panel toggle reports Hey Nibbi on');assert.equal(await page.locator('#listen').isVisible(),true,'the listen strip is the on-state cue inside the bar');assert.equal(await page.locator('.mode').count(),0,'no mode chips anywhere');await openDock();await mic.click();await page.waitForFunction(()=>nibbiApp.voice.snapshot().phase==='off');assert.equal(await mic.getAttribute('aria-pressed'),'false','the panel toggle reports Hey Nibbi off');assert.equal(await page.locator('#listen').isVisible(),false,'the listen strip leaves with the mode');assert.equal(await page.evaluate(()=>workflowMicrophone.requests),1);assert.equal(await page.evaluate(()=>workflowMicrophone.tracks.every(t=>t.readyState==='ended')),true);assert.equal(fixture.calls.some(r=>r.path==='/api/transcribe'),false);
    assert.equal(await page.evaluate(()=>nibbi.state().character),'pool-velvet');

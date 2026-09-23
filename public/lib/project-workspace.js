@@ -147,6 +147,10 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   }
   function filters(options, label) {
     const view = getView(), row = node('div', 'project-filters'); row.setAttribute('role', 'group'); row.setAttribute('aria-label', label);
+    // On a phone the row scrolls sideways; a render rebuilds it, so it keeps its place rather than
+    // jumping back to the start and hiding the filter that was just pressed.
+    row.addEventListener('scroll', () => { view.filterScroll = row.scrollLeft; }, { passive: true });
+    queueMicrotask(() => { if (row.isConnected && view.filterScroll) row.scrollLeft = view.filterScroll; });
     for (const [key, name, count] of options) {
       const b = button(`${name} ${count}`, 'project-filter', () => { view.filter = key; if (view.selection.section === 'builds') view.selectedBuild = null; render(true); content.querySelector(`[data-filter="${key}"]`)?.focus({ preventScroll: true }); });
       b.dataset.filter = key; b.setAttribute('aria-pressed', String(view.filter === key)); row.append(b);
@@ -507,8 +511,12 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       ? [waiting ? `${waiting} waiting on you` : 'nothing waiting on you', count('active') ? `${count('active')} building` : '', `${runs.length} in all`].filter(Boolean).join(' · ')
       : 'No builds yet';
     content.append(toolbar(summary, [action('Repository & GitHub', () => onNavigate?.(view.selection.project, 'repository'), { mutating: false }), action('New build', () => onAction?.('newBuild', current.project), { primary: true })]), formHost());
-    const extra = [['toPush', 'To push', count('toPush')], ['pullRequests', 'Pull requests', count('pullRequests')], ['attention', 'Needs attention', count('attention')]];
-    content.append(filters([['all', 'All', runs.length], ['active', 'Active', count('active')], ['review', 'Review', count('review')], ...extra, ['history', 'History', count('history')]], 'Build status'));
+    // To push and Pull requests only mean something to a project that delivers through GitHub: hide the
+    // group, not each zero. Needs attention stays, since that is where a local project's failed builds are.
+    // Every run carries a github record (a local one says mode 'local'), so the mode is what decides.
+    const githubProject = runs.some(run => run.workflowMode === 'github' || run.github?.mode === 'github');
+    const extra = githubProject ? [['toPush', 'To push', count('toPush')], ['pullRequests', 'Pull requests', count('pullRequests')]] : [];
+    content.append(filters([['all', 'All', runs.length], ['active', 'Active', count('active')], ['review', 'Review', count('review')], ...extra, ['attention', 'Needs attention', count('attention')], ['history', 'History', count('history')]], 'Build status'));
     if (!runs.length) { content.append(empty('No builds yet', 'Start a build to give Nibbi something to work on for this project.')); return; }
 
     const queue = byDecision(runs.filter(run => buildMatchesFilter(run, view.filter)));
