@@ -160,6 +160,14 @@ exists are gone (`margin-polish-verify`, `margin-surface-verify`, `project-secti
 longer waits forever on a turn's endless pulse; and `npm run verify:all` runs every manual suite in
 one go. The README and the sidebar doc say where Hey Nibbi lives: the composer's + panel.
 
+**Found by running the three together.** An interrupted build is ink in the lobby too, as it already
+was on the bar; failed keeps the verdict colour. A card's × and a project's gear are 44px on a phone
+and under touch — they were 32 and 40. On a phone the composer stays out of reach behind the open
+drawer: the drawer made the page inert and then asked for a layout, which handed the composer back.
+And switching the system's reduced motion always reaches the character: reading the setting between
+the switch and its change event swallowed the event, so Settings said "OS reduced motion" while the
+character kept moving.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which
