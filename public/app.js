@@ -288,14 +288,24 @@ function copyText(s) {
 /* ------------------------------------------------------------------ feed */
 
 let stepsSeq = 0;
+/* Attributes only: the feed pins itself to the bottom on any text or child change, and that pin, not the
+   list, is what would move the toggle out from under the pointer. The CSS shows the word that matches. */
 function syncFold(steps, fold) {
-  const open = !steps.classList.contains('folded');
-  fold.setAttribute('aria-expanded', String(open)); fold.querySelector('.fw u').textContent = open ? 'hide' : 'show';
+  fold.setAttribute('aria-expanded', String(!steps.classList.contains('folded')));
 }
-/* A finished turn's steps fold behind one line, and the line opens and closes them. */
+/* A finished turn's steps fold behind one line, and the line opens and closes them. While the turn runs
+   the line waits, hidden, after the steps it will summarise; folding moves it to the top of the list, so
+   the list opens under it and the toggle stays where it was pressed. */
 function foldSteps(T, line) {
   T.fold.querySelector('.l').textContent = line;
+  T.steps.prepend(T.fold);
   T.steps.classList.add('foldable', 'folded'); syncFold(T.steps, T.fold);
+}
+/* An older transcript kept the summary alone. There is nothing under it to open, so it is a line, not a toggle. */
+function summaryLine(T, line) {
+  const el = document.createElement('div'); el.className = 'fold'; el.innerHTML = '<span class="b"></span><span class="lw"><span class="l"></span></span>';
+  el.querySelector('.l').textContent = line; T.fold.replaceWith(el); T.fold = el;
+  T.steps.hidden = false; T.steps.classList.add('folded');
 }
 function newTurn(text, images, at) {
   const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now());
@@ -309,9 +319,9 @@ function newTurn(text, images, at) {
   const ava = null;   // no small nibbi beside the bubble: the bubble's corner dot is the signature
   const nibBody = document.createElement('div'); nibBody.className = 'nibbody';
   const steps = document.createElement('div'); steps.className = 'steps'; steps.hidden = true; steps.id = 'steps-' + (++stepsSeq);
-  // The summary is a toggle that stays where it is, so focus never leaves it. .l holds the summary alone;
+  // The summary is a toggle that stays where it is (foldSteps puts it above the list), so focus never leaves it. .l holds the summary alone;
   // the word that says what a press does sits beside it, so the saved line never carries it.
-  const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="lw"><span class="l"></span><span class="fw"> — <u>show</u></span></span>';
+  const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="lw"><span class="l"></span><span class="fw"> — <u class="fw-show">show</u><u class="fw-hide">hide</u></span></span>';
   fold.setAttribute('aria-expanded', 'false'); fold.setAttribute('aria-controls', steps.id);
   fold.onclick = () => { if (!steps.classList.contains('foldable')) return; steps.classList.toggle('folded'); syncFold(steps, fold); };
   steps.appendChild(fold);
@@ -2271,7 +2281,7 @@ function restoreTranscript() {
       for (const row of r.stepRows.slice(0, 40)) if (row && typeof row === 'object') restoreStep(T, row);
       T.stepLine = r.steps || stepSummaryLine(T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s)));
       foldSteps(T, T.stepLine);
-    } else if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
+    } else if (r.steps) { summaryLine(T, r.steps); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
     setSaid(T, r.acc, false); T.done = true; if (r.notice) T.nib.classList.add('notice'); else if (r.error) markFailure(T, r.acc);
     T.at = r.at; setMeta(T, { costUsd: r.cost, ...localReplyMetadata(r) }); T.el.removeAttribute('aria-busy');
   }

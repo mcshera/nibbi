@@ -138,17 +138,22 @@ try {
 
     // The folded steps are a toggle that stays under the pointer: it opens, closes, and keeps focus.
     const fold = page.locator('.turn:last-child .steps .fold');
-    const foldState = () => fold.evaluate(el => ({ expanded: el.getAttribute('aria-expanded'), folded: el.closest('.steps').classList.contains('folded'), word: el.querySelector('.fw').textContent, line: el.querySelector('.l').textContent, focused: document.activeElement === el, controls: document.getElementById(el.getAttribute('aria-controls')) === el.closest('.steps') }));
+    const foldState = () => fold.evaluate(el => ({ expanded: el.getAttribute('aria-expanded'), folded: el.closest('.steps').classList.contains('folded'), word: [...el.querySelectorAll('.fw u')].filter(u => u.getClientRects().length).map(u => u.textContent).join('|'), line: el.querySelector('.l').textContent, focused: document.activeElement === el, controls: document.getElementById(el.getAttribute('aria-controls')) === el.closest('.steps'), top: el.getBoundingClientRect().top, above: [...el.closest('.steps').querySelectorAll('.step')].every(step => el.compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING) }));
     const closed = await foldState();
-    assert.deepEqual([closed.expanded, closed.folded, closed.word, closed.controls], ['false', true, ' — show', true], 'the steps settle folded behind their summary');
+    assert.deepEqual([closed.expanded, closed.folded, closed.word, closed.controls, closed.above], ['false', true, 'show', true, true], 'the steps settle folded behind their summary, which sits above them');
     assert.match(closed.line, /^\d+ steps? in /, 'and the summary line carries no toggle word of its own');
-    await fold.click();
+    // Pressed with the pointer, twice, at one spot: the list opens under the toggle, so the toggle is still there.
+    const foldBox = await fold.boundingBox(), spot = [foldBox.x + 40, foldBox.y + foldBox.height / 2];
+    const underPointer = () => page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.fold'), spot);
+    await page.mouse.click(...spot);
     const opened2 = await foldState();
-    assert.deepEqual([opened2.expanded, opened2.folded, opened2.word, opened2.focused], ['true', false, ' — hide', true], 'show opens them, and focus stays on the toggle');
+    assert.deepEqual([opened2.expanded, opened2.folded, opened2.word, opened2.focused], ['true', false, 'hide', true], 'show opens them, and focus stays on the toggle');
     assert.ok(await page.locator('.turn:last-child .steps .step:visible').count() >= 4, 'the steps are on screen');
-    await fold.click();
+    assert.ok(Math.abs(opened2.top - closed.top) < 1 && await underPointer(), `the toggle has not moved (${closed.top} → ${opened2.top}) and is still under the pointer`);
+    await page.mouse.click(...spot);
     const closedAgain = await foldState();
-    assert.deepEqual([closedAgain.expanded, closedAgain.folded, closedAgain.word, closedAgain.focused], ['false', true, ' — show', true], 'and hide folds them again from the same place');
+    assert.deepEqual([closedAgain.expanded, closedAgain.folded, closedAgain.word, closedAgain.focused], ['false', true, 'show', true], 'and hide folds them again from the same place');
+    assert.ok(Math.abs(closedAgain.top - closed.top) < 1, `where it started (${closed.top} → ${closedAgain.top})`);
 
     const writesAfter = await page.evaluate(() => window.__transcriptWrites);
     assert.ok(writesAfter > writesWhileStreaming, 'the settled turn is written once it is done');

@@ -47,7 +47,7 @@ disabled pill dims to .45 instead of .42.
 text, but a capped block ends in "show all (18 lines)", so the label came along; it copies the code
 itself now. A reply's copy took the raw text with its `»acts:` lines, and both said "copied" whether
 or not the clipboard took it. The fold ("5 steps in 9s — show") opened the steps and vanished, taking
-focus with it; it is a toggle now that stays where it is. An event turn no longer offers "ask again"
+focus with it; it is a toggle now, above the steps it opens, that stays where it is. An event turn no longer offers "ask again"
 with nothing to ask.
 
 **One of everything.** A running step counts in whole seconds and a long one reads `1m 05s`, not

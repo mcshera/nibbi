@@ -34,7 +34,7 @@ messaging. It makes the chat history hard to read."*
 - Keyboard: `PageUp/PageDown` scroll the feed while typing; `End` jumps to latest.
 - The reply is a page-width card from its first frame, so it never changes width mid-reply, and its caret takes a line
   of its own under a trailing fence, quote or table. The folded steps are a toggle (`— show` / `— hide`,
-  `aria-expanded`) that stays in place, so focus never leaves it. Copy copies what was read: a code block's code
+  `aria-expanded`) above the list it opens, so it stays in place and focus never leaves it. Copy copies what was read: a code block's code
   without its buttons' labels, a reply without its `»` lines, and "copied" only once the clipboard has it.
 
 **P2 — how it streams — ✅ 2026-09-22**

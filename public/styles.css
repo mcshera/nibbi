@@ -126,11 +126,12 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 .steps .fold { display: none; align-items: center; gap: 10px; cursor: pointer; color: var(--ink-3); font: inherit; font-size: var(--type-fine); background: none; border: 0; padding: 3px 0; text-align: left; }
 .steps .fold u { text-decoration-color: var(--ink-4); text-underline-offset: 3px; }
 .steps .fold .b { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; transform: scale(.75); }
-/* The fold is a toggle: it stays in place open or closed, which is what keeps focus on it.
-   A summary-only row restored from an older transcript is folded but has nothing to open. */
+/* The fold is a toggle above the list it opens: it stays in place open or closed, which is what keeps focus on it.
+   A summary-only row restored from an older transcript is folded, has nothing to open, and is a line, not a button. */
 .steps:is(.foldable, .folded) .fold { display: flex; }
-.steps:not(.foldable) .fold .fw { display: none; }
-.steps .fold:hover { color: var(--ink-2); }
+.steps.folded .fold .fw-hide, .steps:not(.folded) .fold .fw-show { display: none; }   /* the word says what a press does */
+.steps.foldable .fold:hover { color: var(--ink-2); }
+.steps:not(.foldable) .fold { cursor: default; }
 /* thinking: the one step with no result. Its tail shows the end of what is being thought, so it
    reads as something still running rather than as a truncated sentence, and it goes when it closes. */
 .step.think .l { flex: none; }

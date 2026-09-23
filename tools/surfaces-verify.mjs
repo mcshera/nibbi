@@ -113,9 +113,39 @@ try {
       assert.deepEqual(errors, []);
     } finally { await context.close(); }
   });
+
+  // A transcript saved before the step rows were kept holds the summary line alone. There is nothing
+  // under it to open, so it must not be announced as a collapsed toggle that never expands.
+  await scenario("an older transcript's step summary is a line, not a toggle", async () => {
+    const { context, page: tab, errors } = await page({ width: 1180, height: 820 });
+    try {
+      await tab.evaluate(() => window.nibbiApp.send('fix the lock bug'));
+      await tab.waitForFunction(() => !window.nibbiApp.state().busy, null, { timeout: 40_000 });
+      // Rewrite what was saved the way an older build saved it, wherever this build keeps it. The page
+      // saves again as it unloads, so the older copy goes in as the reloaded page starts, before the app.
+      const older = await tab.waitForFunction(() => {
+        for (const key of Object.keys(localStorage)) {
+          let saved; try { saved = JSON.parse(localStorage.getItem(key)); } catch { continue; }
+          const row = saved?.rows?.findLast?.(r => Array.isArray(r.stepRows));
+          if (!row) continue;
+          for (const r of saved.rows) delete r.stepRows;
+          return { key, value: JSON.stringify(saved), summary: row.steps };
+        }
+        return null;
+      }, null, { timeout: 5_000 }).then(handle => handle.jsonValue());
+      const summary = older.summary;
+      assert.match(summary, /^\d+ steps? in /, 'the finished turn saved its summary');
+      await context.addInitScript(({ key, value }) => { if (!sessionStorage.getItem('surfaces.older')) { sessionStorage.setItem('surfaces.older', '1'); localStorage.setItem(key, value); } }, older);
+      await tab.reload();
+      await tab.waitForFunction(() => window.nibbiApp && document.querySelector('.turn:last-child .steps .fold'));
+      const line = await tab.locator('.turn:last-child .steps .fold').evaluate(el => ({ tag: el.tagName, text: el.textContent, expanded: el.getAttribute('aria-expanded'), controls: el.getAttribute('aria-controls'), tabIndex: el.tabIndex, shown: !!el.getClientRects().length, cursor: getComputedStyle(el).cursor }));
+      assert.deepEqual(line, { tag: 'DIV', text: summary, expanded: null, controls: null, tabIndex: -1, shown: true, cursor: 'default' }, 'the summary is shown as a line, with no toggle word and no toggle to press');
+      assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
 } finally {
   await browser?.close();
   await fixture.close();
 }
 if (failed) process.exitCode = 1;
-else console.log('Surface checks passed: a section is a room, an agent card closes when unpinned, and the copy button is a 44px target.');
+else console.log('Surface checks passed: a section is a room, an agent card closes when unpinned, the copy button is a 44px target, and an old step summary is a line.');

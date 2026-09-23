@@ -446,7 +446,7 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 | **your message** | `18 18 6 18`, `--veil-hover` | `--type-body` | none | right-aligned, max 78% |
 | **chip** | pill, `--veil-hairline` border | `--type-control` | none, `--blur-light` | hover inverts to solid ink; `.warn` takes `--fail-edge` |
 | **step** | row, 7px dot | `--type-fine` | none | dot state: live=ink+pulse, done=`--ink-3` at `scale(.75)`, fail=`--fail-mark` |
-| **steps fold** | one row | `--type-fine` | none | folds the whole list when complete; a toggle (`— show` / `— hide`, `aria-expanded`) that stays in place, so focus never leaves it |
+| **steps fold** | one row | `--type-fine` | none | folds the whole list when complete and moves above it; a toggle (`— show` / `— hide`, `aria-expanded`) that stays in place while the list opens under it, so focus never leaves it. It changes attributes only (CSS picks the word): a text change re-pins the feed and moves it. An older transcript's summary-only row is a plain line |
 | **composer (pill)** | `--r-dock` | `--type-field` | `--e-docked` + `--e-highlight` | `+` left, send squircle right; both drop to the last line when tall |
 | **dock panel** | `--r-surface` | `--type-control` | `--e-docked` | rows are 44px minimum |
 | **menu** (switch, dock) | `--r-surface` | `--type-fine`/`--type-control` | `--e-floating` | opens on hover *and* focus-within |
