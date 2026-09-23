@@ -96,6 +96,146 @@ async function newThreadTakesItsName() {
   await context.close();
 }
 
+/* A reply routed past the provider, logged the way the daemon logs a real one: stamped as it arrives.
+   `stamped: false` leaves the backend's seed clock, which runs an hour behind. */
+const answered = (page, { stamped = true } = {}) => page.route('**/api/send', async route => {
+  const input = route.request().postDataJSON(), reply = 'Noted: ' + input.message, at = Date.now();
+  const ts = n => stamped ? { ts: new Date(at + n).toISOString() } : {};
+  fixture.seedChat([{ role: 'user', text: input.message, threadId: input.threadId, project: input.project, ...ts(0) }, { role: 'oracle', text: reply, threadId: input.threadId, project: input.project, ...ts(1) }]);
+  await route.fulfill({ json: { text: reply, costUsd: 0, isError: false } });
+});
+const yous = page => page.evaluate(() => [...document.querySelectorAll('#feed .you')].map(el => el.textContent));
+const homeRead = page => page.waitForResponse(response => { const url = new URL(response.url()); return url.pathname === '/api/history' && url.searchParams.get('threadId') === 'home'; }, { timeout: 10_000 });
+
+/* Tidy clears the table, not the log. Once a home with no saved copy was read back from the daemon,
+   a reload laid the tidied conversation straight back. What is said after a tidy still comes back. */
+async function tidyStaysTidied() {
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  await page.waitForFunction(() => window.nibbiApp.state().thread.project === 'fixture' && !window.nibbiApp.state().busy);
+  await answered(page);
+  await page.evaluate(() => window.nibbiApp.send('Which deck did we cut?'));
+  await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  await page.evaluate(() => window.nibbiApp.tidy());
+  await page.waitForFunction(() => !document.querySelector('#feed .turn'));
+  let read = homeRead(page);
+  await page.reload(); await ready(page); await read; await page.waitForTimeout(400);
+  assert.deepEqual(await yous(page), [], 'a reload does not lay the tidied conversation back');
+  assert.equal(await page.evaluate(() => document.body.dataset.mode), 'idle');
+  await page.evaluate(() => window.nibbiApp.send('After the tidy'));
+  await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  // No saved copy on the next load (the page writes one as it goes, so it is removed as the next one starts).
+  await page.addInitScript(() => { for (const key of Object.keys(localStorage)) if (key.startsWith('nibbi.transcript')) localStorage.removeItem(key); });
+  read = homeRead(page);
+  await page.reload(); await ready(page); await read;
+  await page.waitForFunction(() => document.querySelectorAll('#feed .you').length > 0, null, { timeout: 10_000 });
+  assert.deepEqual(await yous(page), ['After the tidy'], 'read back from the daemon, only what came after it');
+  await page.unroute('**/api/send');
+  await context.close();
+}
+
+/* Nibbi's own news is not something the owner said. A reload with a brief waiting used to count it as
+   typed, stay in Home instead of the thread you were in, and leave Home's history unread. */
+async function newsDoesNotHoldYouAtHome() {
+  const thread = fixture.createThread('Tide charts');
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  let page = await open(context);
+  await page.locator(`[data-thread-id="${thread.id}"]`).click();
+  await page.waitForFunction(id => window.nibbiApp.state().thread.id === id, thread.id);
+  await page.evaluate(() => { for (const key of Object.keys(localStorage)) if (key.startsWith('nibbi.transcript')) localStorage.removeItem(key); });
+  await page.waitForTimeout(800);   // the event cursor is saved, so the next visit replays only what it missed
+  await page.close();
+  fixture.emit({ type: 'brief', payload: { text: 'While you were away: the tide build finished.' } });
+  // The list of projects runs three git commands a project, so it is often the last thing boot hears.
+  page = await open(context, '/?nosw=1', { before: page => page.route('**/api/projects', async route => { await new Promise(resolve => setTimeout(resolve, 1500)); await route.continue(); }) });
+  await page.waitForFunction(id => window.nibbiApp.state().thread.id === id, thread.id, { timeout: 10_000 });
+  assert.equal(await page.locator('#ask').getAttribute('placeholder'), placeholderFor('Tide charts'), 'back in the thread you were in');
+  await page.locator('[data-thread-id="home"]').click();
+  await page.waitForFunction(() => [...document.querySelectorAll('#feed .you')].some(el => el.textContent === 'Where did we leave the salvage dice?'), null, { timeout: 10_000 });
+  const saids = await page.evaluate(() => [...document.querySelectorAll('#feed .turn .said')].map(el => el.textContent.trim()));
+  assert.equal(saids.at(-1), 'While you were away: the tide build finished.', 'the news waits in Home, under the history that was read above it');
+  await context.close();
+}
+
+/* A read that failed, then a message, then Home again: the daemon's copy of the message came back
+   with the history and was drawn a second time. */
+async function aMessageIsDrawnOnce() {
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  let failed = 0;
+  const page = await open(context, '/?nosw=1', { expectFailed: /\/api\/history/, before: page => page.route(url => url.pathname === '/api/history' && url.searchParams.get('threadId') === 'home', route => failed++ === 0 ? route.abort() : route.continue()) });
+  await page.waitForFunction(() => window.nibbiApp.state().thread.project === 'fixture');
+  await page.waitForFunction(() => document.body.dataset.link === 'live');
+  await page.waitForTimeout(300);
+  assert.equal(failed, 1, 'the first read of Home failed');
+  await answered(page, { stamped: false });   // an hour behind, so the clock cannot find it on screen: its words have to
+  await page.evaluate(() => window.nibbiApp.send('Only said once'));
+  await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  const read = homeRead(page);
+  await page.locator('[data-thread-id="home"]').click();
+  await read;
+  await page.waitForFunction(() => [...document.querySelectorAll('#feed .you')].some(el => el.textContent === 'Where did we leave the salvage dice?'), null, { timeout: 10_000 });
+  const mine = (await yous(page)).filter(text => text === 'Only said once');
+  assert.equal(mine.length, 1, 'the history came back above it, without it');
+  assert.equal((await yous(page)).at(-1), 'Only said once');
+  await page.unroute('**/api/send');
+  await context.close();
+}
+
+/* A message sent while the project list is on its way goes where the window files it. activeProject()
+   read "vault" then, while the window showed the saved project's home. With nothing saved it does go
+   to the vault; it stays on screen but is not saved as the project's. */
+async function sentBeforeTheListIsFiledWhereItWent() {
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const sent = [];
+  const held = page => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    return { release: () => release(), route: page.route('**/api/projects', async route => { await gate; await route.continue(); }) };
+  };
+  let page = await context.newPage();
+  page.on('pageerror', error => errors.push(error.message));
+  let hold = held(page); await hold.route;
+  await page.route('**/api/send', async route => { const input = route.request().postDataJSON(); sent.push(input.project); await route.fulfill({ json: { text: 'Filed.', costUsd: 0, isError: false } }); });
+  await page.goto(fixture.base + '/?nosw=1'); await ready(page);
+  await page.evaluate(() => window.nibbiApp.send('Nothing saved yet'));
+  await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  hold.release();
+  await page.waitForFunction(() => window.nibbiApp.state().thread.project === 'fixture', null, { timeout: 10_000 });
+  await page.waitForTimeout(1400);   // past the transcript's write-behind
+  assert.equal((await yous(page)).at(-1), 'Nothing saved yet', 'still on screen after the list arrives, under the project home read above it');
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('nibbi.transcript:fixture:home') || 'null')?.rows?.map(row => row.you) ?? []);
+  assert.ok(!stored.includes('Nothing saved yet'), 'but not saved as the project’s: the daemon has it in the vault');
+  await page.close();
+  page = await context.newPage();
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => localStorage.setItem('nibbi.project', JSON.stringify('fixture')));
+  hold = held(page); await hold.route;
+  await page.route('**/api/send', async route => { const input = route.request().postDataJSON(); sent.push(input.project); await route.fulfill({ json: { text: 'Filed.', costUsd: 0, isError: false } }); });
+  await page.goto(fixture.base + '/?nosw=1'); await ready(page);
+  await page.evaluate(() => window.nibbiApp.send('The saved project’s'));
+  await page.waitForFunction(() => !window.nibbiApp.state().busy);
+  hold.release();
+  assert.deepEqual(sent, ['vault', 'fixture'], 'with a project saved, a message before the list goes to it');
+  await context.close();
+}
+
+/* The bar's list is rebuilt whenever a thread in the project is written to, now that the daemon says
+   so. A keyboard on a row's gear dropped to the page each time. */
+async function aRebuiltListKeepsYourPlace() {
+  const [alpha, beta] = ['Keyboard alpha', 'Keyboard beta'].map(title => fixture.createThread(title));
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  const gear = page.locator(`.project-thread-row:has([data-thread-id="${alpha.id}"]) .project-options`);
+  await gear.waitFor({ state: 'attached', timeout: 10_000 });
+  await page.locator(`[data-thread-id="${alpha.id}"]`).focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await gear.evaluate(el => el === document.activeElement), true);
+  const before = await page.locator(`[data-thread-id="${beta.id}"]`).getAttribute('data-last-at');
+  fixture.seedChat([{ role: 'user', text: 'from the phone', threadId: beta.id }]);
+  await page.waitForFunction(([id, was]) => document.querySelector(`[data-thread-id="${id}"]`)?.dataset.lastAt !== was, [beta.id, before], { timeout: 10_000 });
+  assert.equal(await gear.evaluate(el => el === document.activeElement), true, 'focus is still on the gear after the list was rebuilt');
+  await context.close();
+}
+
 /* One turn runs at a time, but the Chat tab during a reply asks for the conversation that is
    answering — it used to be refused with a toast, so Builds could not be left while nibbi spoke.
    Leaving for another thread is still refused, now in the bar where the click happened. */
@@ -336,6 +476,11 @@ try {
   await homeHistoryOnFirstBoot();
   await rememberedThreadAfterReload();
   await newThreadTakesItsName();
+  await tidyStaysTidied();
+  await newsDoesNotHoldYouAtHome();
+  await aMessageIsDrawnOnce();
+  await sentBeforeTheListIsFiledWhereItWent();
+  await aRebuiltListKeepsYourPlace();
   await returningToTheAnsweringThread();
   await draftsBelongToTheirThread();
   await attachmentsSayWhy();

@@ -146,6 +146,13 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     await page.keyboard.press('Escape');
     assert.equal(await card.count(), 0);
     assert.equal(await threadGear.evaluate(el => el === document.activeElement), true, 'Escape returns to the gear');
+    // The list is rebuilt whenever any thread in the project is written to, from any device. The
+    // keyboard stays where it was instead of dropping to the page.
+    await page.evaluate(() => {model.projects[0].threads = [...model.projects[0].threads, {id: 'other', title: 'Other', lastAt: new Date(Date.now() - 1000).toISOString()}]; ui.update(model);});
+    assert.equal(await threadGear.evaluate(el => el === document.activeElement), true, 'a rebuilt list keeps focus on the gear');
+    await longRow.focus();
+    await page.evaluate(() => {model.projects[0].threads = model.projects[0].threads.map(t => t.id === 'other' ? {...t, lastAt: new Date().toISOString()} : t); ui.update(model);});
+    assert.equal(await longRow.evaluate(el => el === document.activeElement), true, 'and on the row');
     await threadGear.click();
     await card.getByRole('button', {name: 'Archive', exact: true}).click();
     await card.locator('.margin-confirm').getByRole('button', {name: 'Archive', exact: true}).click();

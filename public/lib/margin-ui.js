@@ -517,7 +517,24 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
         data.inFlight, data.staged, data.pending, data.done, data.total, data.goal, data.planAvailable] : null]);
     if (key === bodyKey) return;
     bodyKey = key;
+    const refocus = heldRow();
     body.replaceChildren(...(summarised ? sectionBody(data, summarised) : chatBody(data, entry)));
+    refocus?.();
+  }
+  /* The list is rebuilt whenever a thread in the project is written to, from this window or another
+     device. A keyboard on a row, its gear or New thread stays on the same one instead of dropping to
+     the page; a row that went away hands focus to Home. */
+  function heldRow() {
+    const el = document.activeElement;
+    if (!el || el === body || !body.contains(el)) return null;
+    const fresh = el.classList.contains('project-thread-new'), gear = el.classList.contains('project-options');
+    const id = el.dataset.threadId ?? el.closest('.project-thread-row')?.querySelector('[data-thread-id]')?.dataset.threadId;
+    if (!fresh && id === undefined) return null;
+    return () => {
+      const row = fresh ? null : [...body.querySelectorAll('[data-thread-id]')].find(n => n.dataset.threadId === id);
+      const target = fresh ? body.querySelector('.project-thread-new') : gear ? row?.parentElement?.querySelector('.project-options') : row;
+      (target || body.querySelector('[data-thread-id="home"]'))?.focus({preventScroll: true});
+    };
   }
   function chatBody(data, entry) {
     const parts = [];

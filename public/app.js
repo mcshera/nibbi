@@ -564,7 +564,8 @@ function mergeThread(thread) {
   if ((S.thread.project || 'vault') === project && S.thread.id === thread.id) { S.thread.title = next.title; ask.placeholder = placeholderText(); }
   syncMargins();
 }
-const historyUrl = (project, id, before) => '/api/history?n=60&threadId=' + encodeURIComponent(id) + (project && project !== 'vault' ? '&project=' + encodeURIComponent(project) : '') + (before ? '&before=' + encodeURIComponent(before) : '');
+const PAGE = 60;   // rows per history read
+const historyUrl = (project, id, before) => '/api/history?n=' + PAGE + '&threadId=' + encodeURIComponent(id) + (project && project !== 'vault' ? '&project=' + encodeURIComponent(project) : '') + (before ? '&before=' + encodeURIComponent(before) : '');
 /** Daemon rows as turns, built off-document and put above whatever the feed already holds, so
     history lands above a turn typed while it was being read. Pairs each reply to the user message
     before it, which is the only linkage the message log records. */
@@ -586,7 +587,7 @@ function renderHistory(rows) {
   try {
     for (const row of shown) {
       const T = newTurn(row.you, undefined, row.at, frag);
-      T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true;
+      T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true; T.history = true;
       if (row.error) T.nib.classList.add('error');
       T.at = row.at; setMeta(T, { costUsd: row.cost }); T.el.removeAttribute('aria-busy');
     }
@@ -600,6 +601,28 @@ function renderHistory(rows) {
   S.turns.unshift(...block);
   return { oldest: shown[0].ts, more: pending.length > shown.length };
 }
+/* What a page of daemon rows adds to the feed. Two things stay out: what was tidied away (Tidy clears
+   the table, and a reload must not lay it again), and what the feed already shows — a read that lands
+   after the owner has spoken here (a first read that failed, then a message) returns those messages
+   too, and they were drawn twice. The rows go from the owner's first message on screen: found by its
+   words among the log's last user rows, and failing that by the clock (this page stamped the turn,
+   the daemon the row, a moment later; on the Mac they are one clock). Nibbi's news — briefs, fixer
+   bubbles — is not in the log and its time is when it happened, so it is no edge. `more`: the daemon
+   has older rows worth asking for. */
+function pageRows(project, id, rows, present = []) {
+  const all = Array.isArray(rows) ? rows : [], since = tidiedAt(project, id);
+  let kept = since ? all.filter((r) => !(Date.parse(r.ts) <= since)) : all;
+  const tidyEdge = kept.length < all.length;
+  const onScreen = present.filter((T) => !T.history && (T.stored || typeof T.text === 'string'));
+  if (onScreen.length) kept = kept.filter((r) => !(Date.parse(r.ts) >= onScreen[0].at));
+  const said = onScreen.filter((T) => typeof T.text === 'string').map((T) => T.text);
+  for (let i = kept.length - 1; said.length && i >= 0; i--) {
+    if (kept[i].role !== 'user' || kept[i].text !== said[0]) continue;
+    const after = kept.slice(i).filter((r) => r.role === 'user').map((r) => r.text);
+    if (after.every((text, n) => text === said[n])) { kept = kept.slice(0, i); break; }
+  }
+  return { rows: kept, more: all.length === PAGE && !tidyEdge, oldest: kept[0]?.ts ?? all[0]?.ts };
+}
 /** Rebuild a thread's conversation from the daemon. A read that lands after its thread was left is
     dropped rather than drawn into whichever conversation is open by then. */
 async function hydrateThread(project, id) {
@@ -612,18 +635,19 @@ async function hydrateThread(project, id) {
   catch { if (state.gen === gen) state.hydrated = false; return; }
   if (state.gen !== gen) return;   // a newer read owns this thread
   if (activeThreadKey() !== key) { state.hydrated = false; return; }   // left before it landed: read again on return
-  const shown = renderHistory(rows);
-  noteEarlier(project, id, rows, shown);
+  const page = pageRows(project, id, rows, S.turns);
+  const shown = renderHistory(page.rows);
+  noteEarlier(project, id, page, shown);
   if (!shown) return;
   S.stick = true; scrollFeed(true);
 }
 /* The daemon keeps every message; the first read brings the last sixty. When there is more, the top
    of the conversation says so, as a divider you can press. It is a feed child, so it leaves and comes
    back with the conversation. */
-function noteEarlier(project, id, rows, shown) {
+function noteEarlier(project, id, page, shown) {
   const state = threadState(threadKey(project, id));
-  state.oldest = shown?.oldest ?? rows?.[0]?.ts ?? state.oldest;
-  state.more = (rows || []).length === 60 || !!shown?.more;
+  state.oldest = shown?.oldest ?? page.oldest ?? state.oldest;
+  state.more = page.more || !!shown?.more;
   if (!state.more || !state.oldest) return;
   const row = document.createElement('div'); row.className = 'when';
   const more = document.createElement('button'); more.type = 'button'; more.className = 'chip in earlier'; more.textContent = 'load earlier';
@@ -642,8 +666,9 @@ async function loadEarlier(project, id, row, more) {
   // position moves down by exactly its height.
   const before = feed.scrollHeight, had = more === document.activeElement;
   row.remove();
-  const shown = renderHistory(rows);
-  noteEarlier(project, id, rows, shown);
+  const page = pageRows(project, id, rows);
+  const shown = renderHistory(page.rows);
+  noteEarlier(project, id, page, shown);
   feed.scrollTop += feed.scrollHeight - before;
   if (had) feed.querySelector('.earlier')?.focus({ preventScroll: true });   // keyboard: on to the next page, if there is one
 }
@@ -708,9 +733,9 @@ function tidy() {
   const saved = { turns: S.turns, nodes: [...feed.children] };
   for (const T of S.turns) T.el.classList.add('leave');
   setTimeout(() => { if (tidied === saved) feed.replaceChildren(); }, 240);
-  S.turns = []; tidied = saved; LS.set(transcriptKey(), null); threadState(activeThreadKey()).turns = S.turns;
+  S.turns = []; tidied = saved; const unforget = forgetTranscript(); threadState(activeThreadKey()).turns = S.turns;
   setMode('idle'); body.classList.remove('rest'); nibbi.lookFree(); nibbi.setMood('idle'); interactions.event('tidy'); hideChips();
-  toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); persistTranscript(); } });
+  toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); unforget(); persistTranscript(); } });
 }
 
 /* ------------------------------------------------------------------ toast */
@@ -2066,6 +2091,10 @@ async function refreshStatus() {
 // The saved project's home paints at once from its stored copy; which project is really active is
 // only known once the list arrives, and the conversation follows it there (bootThread, below).
 S.thread = { project: LS.get('project', null) || 'vault', id: 'home', title: 'Home' };
+// Until then a message goes to the project whose conversation is on screen. activeProject() read
+// "vault" before the list, so a message sent in that second was the vault's on the daemon and the
+// project's in the window.
+if (S.thread.project !== 'vault') S.project = S.thread.project;
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
 refreshStatus().then(connectEvents); setInterval(() => { if (!evReady) refreshStatus().then(connectEvents); }, 30000);
 function mostActiveProject(list) {
@@ -2112,23 +2141,33 @@ async function bootThread() {
   if (threadBooted || !Array.isArray(S.projects)) return;
   threadBooted = true;
   const project = activeProject();
-  // Anything said before the list arrived — a message sent, a reply still running — stays where it is
-  // being read, and the owner is not moved to another thread under it.
-  const typed = S.busy || S.turns.some((T) => !T.stored);
+  // Anything the owner said before the list arrived — a message sent, a reply still running — stays
+  // where it is being read, and the owner is not moved to another thread under it. Nibbi's own news
+  // (an away bubble, a fixer finishing) is not the owner's: it used to count, and a reload with news
+  // waiting landed in Home instead of the thread you were in, with Home's history unread.
+  const live = S.turns.filter((T) => !T.stored), typed = S.busy || live.some((T) => typeof T.text === 'string');
   if (project !== S.thread.project) {
-    if (typed) { if (S.liveThreadKey === activeThreadKey()) S.liveThreadKey = threadKey(project, 'home'); }
-    else { feed.replaceChildren(); S.turns = []; setMode('idle'); body.classList.remove('rest'); }   // the stored copy was another project's
+    if (typed) {
+      // Sent before the list named the project, so the daemon filed them under the conversation they
+      // were typed in. They stay on screen, and are not saved as this project's.
+      for (const T of live) if (typeof T.text === 'string') T.sentTo = S.thread.project || 'vault';
+      if (S.liveThreadKey === activeThreadKey()) S.liveThreadKey = threadKey(project, 'home');
+    } else { feed.replaceChildren(); S.turns = []; setMode('idle'); body.classList.remove('rest'); }   // the stored copy was another project's
     S.thread = { project, id: 'home', title: 'Home' };
-    // This project's own stored copy, if it has one, paints before the daemon is asked.
-    if (!typed) try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
+    if (!typed) {
+      // This project's own stored copy, if it has one, paints before the daemon is asked; the news comes after it.
+      try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
+      for (const T of live) { const last = S.turns.at(-1); if (last && new Date(last.at).toDateString() !== new Date(T.at).toDateString()) feed.appendChild(daySep(new Date(T.at))); feed.appendChild(T.el); S.turns.push(T); }
+      if (live.length) setMode('talk');
+    }
   }
   const home = threadKey(project, 'home');
-  threadState(home).hydrated = S.turns.length > 0;
+  threadState(home).hydrated = S.turns.some((T) => T.stored);   // only a saved copy is Home's history; news and early messages are not
   if (!ask.value) { ask.value = LS.get(draftKey(), '') || ''; autosize(); }   // before any thread swap, which saves the field under home
   await loadThreads(project);
   const remembered = LS.get('thread:' + project, 'home');
   if (!typed && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) await openThread(project, remembered, { focus: false, closeView: false });
-  else if (!S.turns.length) await settleThread(project, 'home');
+  else if (!threadState(home).hydrated) await settleThread(project, 'home');   // what the feed already shows is left out of the read (pageRows)
   ask.placeholder = placeholderText(); syncMargins();
 }
 void refreshProjects();   // and bootThread, the first time the list arrives
@@ -2434,11 +2473,21 @@ function restoreStep(T, row) {
 }
 function persistTranscript() {
   try {
-    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), notice: T.nib.classList.contains('notice'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
+    const rows = S.turns.filter((T) => T.done && !T.restoredOnly && (!T.sentTo || T.sentTo === (S.thread.project || 'vault'))).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), notice: T.nib.classList.contains('notice'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
     // An empty feed is never written over a saved one: Tidy clears the key itself, and a feed that is
     // empty only because it is still being read from the daemon must not erase the copy it replaces.
     if (rows.length) LS.set(transcriptKey(), { at: Date.now(), project: S.thread.project || 'vault', rows });
   } catch { /* quota */ }
+}
+/* Tidy clears the table, not the log: the daemon keeps every message, and a home with no saved copy is
+   read back from it. So the moment of a tidy is kept per conversation, and a read leaves out what came
+   before it (pageRows); a reload used to lay the tidied conversation straight back. Returns the undo. */
+const tidyKey = (project, id) => 'tidied:' + (project || 'vault') + ':' + id;
+const tidiedAt = (project, id) => Number(LS.get(tidyKey(project, id), 0)) || 0;
+function forgetTranscript() {
+  const key = tidyKey(S.thread.project, S.thread.id), was = LS.get(key, 0);
+  LS.set(transcriptKey(), null); LS.set(key, Date.now());
+  return () => LS.set(key, was);
 }
 function restoreTranscript() {
   const t = LS.get(transcriptKey(), null); if (!t || !t.rows || !t.rows.length || Date.now() - t.at > 12 * 3600000) return;
