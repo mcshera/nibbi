@@ -4,6 +4,14 @@ import {readFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {progressLine} from '../public/lib/margin-ui.js';
 
+// The bar is loaded into the page as a data: module, and a data: module cannot resolve a relative
+// import, so the one module margin-ui.js imports (./empty.js) is inlined into it the same way.
+async function marginModuleURL() {
+  const inline = async name => 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/' + name, import.meta.url))).toString('base64');
+  const source = (await readFile(new URL('../public/lib/margin-ui.js', import.meta.url), 'utf8')).replace("'./empty.js'", `'${await inline('empty.js')}'`);
+  return 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
+}
+
 test('progress line reports verified merges without proposing a next goal', () => {
   assert.equal(progressLine(undefined), 'Progress not available');
   assert.equal(progressLine(null), 'Progress not available');
@@ -32,8 +40,7 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
     await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
     // A data: module cannot resolve a relative import, so the one the bar has is inlined the same way.
-    const inline = async name => 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/' + name, import.meta.url))).toString('base64');
-    const moduleURL = 'data:text/javascript;base64,' + Buffer.from((await readFile(new URL('../public/lib/margin-ui.js', import.meta.url), 'utf8')).replace("'./empty.js'", `'${await inline('empty.js')}'`)).toString('base64');
+    const moduleURL = await marginModuleURL();
     await page.evaluate(async url => {
       const {installMarginUI} = await import(url);
       window.calls = [];
@@ -389,7 +396,7 @@ test('a section says its fact once, and a blocked permission says so', {timeout:
     await page.setContent('<style>*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav>');
     await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
     await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
-    const moduleURL = 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/margin-ui.js', import.meta.url))).toString('base64');
+    const moduleURL = await marginModuleURL();
     await page.evaluate(async url => {
       const {installMarginUI} = await import(url);
       window.calls = [];
