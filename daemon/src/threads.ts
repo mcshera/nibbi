@@ -48,18 +48,16 @@ export function requireThread(project: string | undefined, id: string | undefine
 export function createThread(project: string | undefined, title?: string, store: RuntimeStore = runtime()): Thread {
   const now = new Date().toISOString();
   const thread: Thread = { id: randomUUID(), project: scopeOf(project), title: safeTitle(title) || DEFAULT_TITLE, createdAt: now, lastAt: now };
-  store.put('threads', thread.id, thread); return thread;
+  return save(thread, store);
 }
 
 export function renameThread(project: string | undefined, id: string, title: string, store: RuntimeStore = runtime()): Thread {
   const record = existing(project, id, store);
-  const next = { ...record, title: safeTitle(title) || record.title };
-  store.put('threads', id, next); return next;
+  return save({ ...record, title: safeTitle(title) || record.title }, store);
 }
 
 export function archiveThread(project: string | undefined, id: string, archived: boolean, store: RuntimeStore = runtime()): Thread {
-  const next = { ...existing(project, id, store), archived };
-  store.put('threads', id, next); return next;
+  return save({ ...existing(project, id, store), archived }, store);
 }
 
 /** Called for every logged message so a thread's order and its first-line title stay true. */
@@ -68,7 +66,15 @@ export function touchThread(id: string | undefined, at: string, firstUserText?: 
   const record = store.get<Thread>('threads', id); if (!record) return;
   const title = record.title === DEFAULT_TITLE && firstUserText ? safeTitle(firstUserText.split('\n')[0]) || record.title : record.title;
   if (record.lastAt === at && record.title === title) return;
-  store.put('threads', id, { ...record, lastAt: at, title });
+  save({ ...record, lastAt: at, title }, store);
+}
+
+/** Every write says so on the event stream. Nothing else tells a window that the daemon named a
+ *  thread from its first message, so without this the bar kept saying "New thread" until a reload. */
+function save(thread: Thread, store: RuntimeStore): Thread {
+  const { id, project, title, lastAt } = thread;
+  return store.put('threads', id, thread, { type: 'thread.updated', ...(project ? { projectId: project } : {}),
+    payload: { thread: { id, project, title, lastAt, archived: thread.archived === true } } });
 }
 
 function existing(project: string | undefined, id: string, store: RuntimeStore): Thread {

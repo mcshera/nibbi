@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.1 — Unreleased
+
+### Conversation continuity and first run
+
+**Where a reload lands.** The conversation was chosen before the app knew which project it was in,
+so it was always the vault's: a thread you were in never came back, and a project's home whose saved
+copy had expired rendered blank. Boot now waits for the project list, returns to the thread you were
+in, and reads a home with no saved copy from the daemon. Each project's home keeps its own saved copy
+instead of sharing one. A reply nibbi began no longer sits under an empty grey "you" bubble, and a
+history read that lands after you have moved on is dropped instead of drawn into the conversation
+you moved to. The daemon now says when it names a thread from its first message, so the bar and the
+composer stop saying "New thread" until a reload, and a row's "4m" keeps counting while the bar is open.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which

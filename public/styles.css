@@ -48,6 +48,7 @@ body[data-mode="talk"].rest:hover .feed, body[data-mode="talk"].rest .feed:focus
 @keyframes leave { to { opacity: 0; transform: translateY(8px); } }
 .you { align-self: flex-end; margin-right: 2px; max-width: 78%; padding: 8px 14px; border-radius: var(--r-surface) var(--r-surface) var(--r-inline) var(--r-surface); background: var(--veil-hover); color: var(--ink-2); font-size: var(--type-body); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .you .imgs { display: flex; gap: 6px; margin: 4px 0 6px; } .you .imgs img { height: 64px; border-radius: var(--r-well); }
+.you:empty { display: none; }   /* belt and braces: a turn nibbi began has no "you", and an empty one is a grey pill saying nothing */
 .nib { align-self: stretch; color: var(--ink); font-size: var(--type-read); line-height: 1.55; display: flex; align-items: flex-start; }
 .nib .nibbody { flex: 1; min-width: 0; }
 /* the bubble carries the reply alone: no avatar, no tail. a 6px ink dot tucked in the top-left corner is nibbi's quiet signature */

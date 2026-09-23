@@ -70,6 +70,7 @@ and a thread can later be continued from any transport.
 `GET /api/threads?project=` lists home first, then live threads by recency, then archived ones.
 `thread.create`, `thread.rename` and `thread.archive` are ordinary project commands. `/api/send`
 carries `threadId`, and the SSE `start`, `ready` and `done` frames echo it back.
+Every write to a thread emits `thread.updated` (`{ id, project, title, lastAt, archived }`) on `/api/events` — including the first message naming it — and a touch that changes nothing emits nothing.
 
 Each thread gets its own provider session, its own continuity snapshot and its own `recent_chat`
 scope; `search_chat` takes `allThreads` to widen to the project. `/clear` resets one thread's
@@ -77,7 +78,8 @@ sessions rather than every project's. The home thread deliberately keeps the ori
 key, so upgrading resets nobody's live context.
 
 In the surface, threads are rows under a project's Builds, Issues and Plans, with New thread
-last. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
+leading the list. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
 localStorage; a turn that is still streaming keeps its own detached nodes and finishes in the
 thread it belongs to. The thread's name rides on the composer placeholder, never as a badge in
 the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused.
+A reload returns to the active project's remembered thread. A project's home keeps its own stored copy (`transcript:<project>:home`; the vault's home keeps `transcript`), and a home with no copy is read from the daemon, so it is never blank.

@@ -27,6 +27,12 @@ server.listen(0, '127.0.0.1', () => console.log('http://127.0.0.1:' + server.add
     }
     runtime().put('fixers', run.id, run);
   }
-  return { directory, base: 'http://127.0.0.1:' + port, close: async () => { await backend.close(); rmSync(directory, { recursive: true, force: true }); } };
+  // Conversation seeds go through the daemon's own writers, so a thread is renamed and announced
+  // exactly as a real message would do it. Rows default to the fixture's home thread in the app.
+  const history = await import('../daemon/dist/history.js'), threads = await import('../daemon/dist/threads.js');
+  let clock = Date.now() - 3600000;
+  const seedChat = rows => rows.map(row => history.logChat({ ts: row.ts ?? new Date(clock += 1000).toISOString(), channel: 'app', project: 'fixture', ...row, role: row.role === 'user' ? 'user' : 'oracle' }));
+  const createThread = (title, projectId = 'fixture') => threads.createThread(projectId, title);
+  return { directory, base: 'http://127.0.0.1:' + port, seedChat, createThread, close: async () => { await backend.close(); rmSync(directory, { recursive: true, force: true }); } };
 }
 if (process.argv[1] === new URL(import.meta.url).pathname) { const fixture = await testBackend(); console.log('Fixture URL:', fixture.base); }

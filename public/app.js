@@ -284,9 +284,12 @@ function renderMd(src) { const frag = mdFragment(src); decoratePre(frag); return
 
 /* ------------------------------------------------------------------ feed */
 
-function newTurn(text, images, at) {
-  const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now());
-  if (!last || new Date(last.at || Date.now()).toDateString() !== now.toDateString()) { if (feed.children.length) { const sep = document.createElement('div'); sep.className = 'when'; sep.textContent = now.toDateString() === new Date().toDateString() ? 'today' : now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }); feed.appendChild(sep); } }
+const dayLabel = (d) => d.toDateString() === new Date().toDateString() ? 'today' : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+function daySep(d) { const sep = document.createElement('div'); sep.className = 'when'; sep.textContent = dayLabel(d); return sep; }
+/* `into` builds the turn off-document (restored history), so it neither scrolls nor counts as unread */
+function newTurn(text, images, at, into) {
+  const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now()); const host = into || feed;
+  if (!last || new Date(last.at || Date.now()).toDateString() !== now.toDateString()) { if (host.children.length) host.appendChild(daySep(now)); }
   const turn = document.createElement('article'); turn.className = 'turn';
   const you = document.createElement('div'); you.className = 'you';
   if (text === null) turn.classList.add('event');
@@ -307,10 +310,11 @@ function newTurn(text, images, at) {
   nibBody.append(bubble, meta);
   nib.append(nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
-  feed.appendChild(turn);
+  host.appendChild(turn);
   // Your own message always pulls the feed down. Something that arrived on its own while you were
   // reading further up does not: it waits, and the jump button says how much of it there is.
-  if (text === null && !S.stick) noteUnread(1);
+  if (into) { /* history: the caller places it and decides where the reader ends up */ }
+  else if (text === null && !S.stick) noteUnread(1);
   else { S.stick = true; scrollFeed(true); }
   const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null, flush: null, tail: null, stable: 0 };
   S.turns.push(T);
@@ -513,8 +517,9 @@ function addActs(T, acts, opts) {
 
 const threadKey = (project, id) => (project || 'vault') + '\u0000' + (id || 'home');
 const activeThreadKey = () => threadKey(S.thread.project ?? activeProject(), S.thread.id);
-// The home thread keeps the original localStorage key, so upgrading loses nobody's transcript.
-const transcriptKey = () => S.thread.id === 'home' ? 'transcript' : 'transcript:' + S.thread.id;
+// The vault's home keeps the original localStorage key, so upgrading loses nobody's transcript. A
+// project's home has its own: one shared key let a reload paint one project's conversation in another.
+const transcriptKey = () => S.thread.id !== 'home' ? 'transcript:' + S.thread.id : (S.thread.project || 'vault') === 'vault' ? 'transcript' : 'transcript:' + S.thread.project + ':home';
 function threadState(key) {
   if (!S.threads.has(key)) S.threads.set(key, { turns: [], nodes: [], hydrated: false });
   return S.threads.get(key);
@@ -530,29 +535,69 @@ async function loadThreads(project) {
     S.threadsByProject.set(project, threads || []); syncMargins(); return threads || [];
   } catch { return S.threadsByProject.get(project) || []; }
 }
-/** Rebuild a thread's conversation from the daemon. Pairs each reply to its user message by
-    runId, which is the only linkage the message log actually records. */
+/** One thread as the daemon announced it (`thread.updated`). The list keeps the daemon's order:
+    home, then live threads by their last message, then archived ones. */
+function mergeThread(thread) {
+  if (!thread || typeof thread.id !== 'string') return;
+  const project = thread.project || 'vault', list = S.threadsByProject.get(project);
+  if (!list) return;   // never read, so nothing on screen to correct; the first read will be current
+  const known = list.find((t) => t.id === thread.id);
+  const next = { ...(known || { count: 0 }), id: thread.id, project: thread.project ?? null, title: String(thread.title || 'Thread'), lastAt: thread.lastAt || known?.lastAt || null, archived: thread.archived === true };
+  const rank = (t) => Date.parse(t.lastAt || '') || 0;
+  const rest = list.filter((t) => t.id !== 'home' && t.id !== thread.id).concat(next);
+  S.threadsByProject.set(project, [...list.filter((t) => t.id === 'home'), ...rest.filter((t) => !t.archived).sort((a, b) => rank(b) - rank(a)), ...rest.filter((t) => t.archived).sort((a, b) => rank(b) - rank(a))]);
+  if ((S.thread.project || 'vault') === project && S.thread.id === thread.id) { S.thread.title = next.title; ask.placeholder = placeholderText(); }
+  syncMargins();
+}
+const historyUrl = (project, id, before) => '/api/history?n=60&threadId=' + encodeURIComponent(id) + (project && project !== 'vault' ? '&project=' + encodeURIComponent(project) : '') + (before ? '&before=' + encodeURIComponent(before) : '');
+/** Daemon rows as turns, built off-document and put above whatever the feed already holds, so
+    history lands above a turn typed while it was being read. Pairs each reply to the user message
+    before it, which is the only linkage the message log records. */
+function renderHistory(rows) {
+  const pending = [];
+  for (const row of rows || []) {
+    if (row.channel !== 'app' || !row.text) continue;
+    const at = Date.parse(row.ts) || Date.now();
+    if (row.role === 'user') pending.push({ you: row.text, at, ts: row.ts, said: '', cost: 0, error: false });
+    else if (pending.length && pending.at(-1).you !== null && !pending.at(-1).said) { const turn = pending.at(-1); turn.said = row.text; turn.cost = row.costUsd || 0; turn.error = !!row.isError; }
+    else pending.push({ you: null, at, ts: row.ts, said: row.text, cost: row.costUsd || 0, error: !!row.isError });   // nibbi spoke first: an event turn, not an empty "you"
+  }
+  const shown = pending.slice(-40);
+  if (!shown.length) return null;
+  // newTurn reads the turn before it and appends to S.turns. Pointing S.turns at the block while it
+  // is built keeps day dividers right inside the block and leaves the live conversation's chips alone.
+  const frag = document.createDocumentFragment(), live = S.turns, block = [];
+  S.turns = block;
+  try {
+    for (const row of shown) {
+      const T = newTurn(row.you, undefined, row.at, frag);
+      T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true;
+      if (row.error) T.nib.classList.add('error');
+      T.at = row.at; setMeta(T, { costUsd: row.cost }); T.el.removeAttribute('aria-busy');
+    }
+  } finally { S.turns = live; }
+  // Where the block meets what was already here: a divider when the day changes, and never two.
+  const next = feed.firstElementChild, first = live[0];
+  const sameDay = first && new Date(block.at(-1).at).toDateString() === new Date(first.at).toDateString();
+  if (first && !sameDay && !next?.classList.contains('when')) frag.appendChild(daySep(new Date(first.at)));
+  else if (first && sameDay && next?.classList.contains('when') && next.textContent === dayLabel(new Date(first.at))) next.remove();
+  feed.insertBefore(frag, feed.firstChild);
+  S.turns.unshift(...block);
+  return { oldest: shown[0].ts, more: pending.length > shown.length };
+}
+/** Rebuild a thread's conversation from the daemon. A read that lands after its thread was left is
+    dropped rather than drawn into whichever conversation is open by then. */
 async function hydrateThread(project, id) {
-  const state = threadState(threadKey(project, id));
+  const key = threadKey(project, id), state = threadState(key);
   if (state.hydrated) return;
   state.hydrated = true;
+  const gen = state.gen = (state.gen || 0) + 1;
   let rows = [];
-  try { rows = await api.get('/api/history?n=60&threadId=' + encodeURIComponent(id) + (project && project !== 'vault' ? '&project=' + encodeURIComponent(project) : '')); }
-  catch { state.hydrated = false; return; }
-  const visible = (rows || []).filter((r) => r.channel === 'app' && r.text);
-  if (!visible.length) return;
-  const pending = [];
-  for (const row of visible) {
-    if (row.role === 'user') pending.push({ you: row.text, at: Date.parse(row.ts) || Date.now(), said: '', cost: 0, error: false });
-    else if (pending.length && !pending.at(-1).said) { const turn = pending.at(-1); turn.said = row.text; turn.cost = row.costUsd || 0; turn.error = !!row.isError; }
-    else pending.push({ you: null, at: Date.parse(row.ts) || Date.now(), said: row.text, cost: row.costUsd || 0, error: !!row.isError });
-  }
-  for (const row of pending.slice(-40)) {
-    const T = newTurn(row.you === null ? undefined : row.you, undefined, row.at);
-    T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true;
-    if (row.error) T.nib.classList.add('error');
-    T.at = row.at; setMeta(T, { costUsd: row.cost }); T.el.removeAttribute('aria-busy');
-  }
+  try { rows = await api.get(historyUrl(project, id)); }
+  catch { if (state.gen === gen) state.hydrated = false; return; }
+  if (state.gen !== gen) return;   // a newer read owns this thread
+  if (activeThreadKey() !== key) { state.hydrated = false; return; }   // left before it landed: read again on return
+  if (!renderHistory(rows)) return;
   S.stick = true; scrollFeed(true);
 }
 /** Switching threads swaps the whole conversation. A turn that is still streaming keeps its
@@ -565,7 +610,13 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   // This has to happen before the already-open check: the Chat tab asks for the conversation that
   // is already open, and what it is really asking for is to stop looking at Builds.
   if (closeView && S.projectView) closeProjectView(false);
-  if (target === activeThreadKey() && S.thread.project === project) { if (focus) focusComposer(); return; }
+  if (target === activeThreadKey() && S.thread.project === project) {
+    if (focus) focusComposer();
+    // The open conversation was never read (a reload whose saved copy had expired): read it now
+    // rather than leave the owner looking at a blank page they asked for.
+    if (!threadState(target).hydrated && !S.busy) { await hydrateThread(project, id); if (activeThreadKey() === target) setMode(S.turns.length ? 'talk' : 'idle'); }
+    return;
+  }
   const current = threadState(activeThreadKey());
   current.turns = S.turns; current.nodes = [...feed.children];
   if (S.review) endReview();
@@ -581,7 +632,7 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   ask.placeholder = placeholderText(); syncSendButton(); syncMargins();
   if (focus) focusComposer();
   await hydrateThread(project, id);
-  setMode(S.turns.length ? 'talk' : 'idle');
+  if (activeThreadKey() === target) setMode(S.turns.length ? 'talk' : 'idle');
 }
 async function newThread(project) {
   const created = await api.command('thread.create', {}, project);
@@ -1074,7 +1125,7 @@ function connectEvents() {
         if (!evReady) evReplay.push(ev); else { setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, text, false); setMeta(T, {}); T.done = true; }
       } else if (event.type === 'auto.updated') {
         S.auto = { ...(S.auto || {}), [event.projectId]: event.payload.config }; renderProject();
-      }
+      } else if (event.type === 'thread.updated') mergeThread(event.payload?.thread);
     }
   });
   evSource = { close };
@@ -1423,6 +1474,8 @@ async function send(text, images, opts) {
   // The settled turn is written now rather than on a later tick. A turn that finished after its
   // thread was left belongs to that thread's saved state, which openThread already wrote.
   if (S.liveThreadKey === activeThreadKey()) persistTranscript();
+  // Without the event stream nothing says the daemon named this thread from its first message.
+  if (!evReady && !S.demo && S.thread.id !== 'home') void loadThreads(S.thread.project);
   S.liveThreadKey = null;
   nibbi.lookFree();
   if (!ok) { nibbi.setMood('error'); addActs(T, T.local ? [{ label: 'try again', run: () => send(T.text) }] : errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
@@ -1906,19 +1959,10 @@ async function refreshStatus() {
   }
   syncMargins();
 }
+// The saved project's home paints at once from its stored copy; which project is really active is
+// only known once the list arrives, and the conversation follows it there (bootThread, below).
+S.thread = { project: LS.get('project', null) || 'vault', id: 'home', title: 'Home' };
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
-// The active project's remembered thread. Home restores from its stored transcript as before;
-// any other thread is rebuilt from the daemon, which is the only place threads are kept.
-(async () => {
-  const project = activeProject();
-  S.thread = { project, id: 'home', title: 'Home' };
-  threadState(threadKey(project, 'home')).hydrated = S.turns.length > 0;
-  await loadThreads(project);
-  const remembered = LS.get('thread:' + (project || 'vault'), 'home');
-  if (remembered && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) {
-    await openThread(project, remembered, { focus: false });
-  }
-})().catch((e) => clientLog('error', 'threads: ' + e.message));
 refreshStatus().then(connectEvents); setInterval(() => { if (!evReady) refreshStatus().then(connectEvents); }, 30000);
 function mostActiveProject(list) {
   const names = new Set(list.map((p) => p.name));
@@ -1946,7 +1990,35 @@ async function refreshProjects() {
     S.playable = playable.filter(Boolean); renderProject();
   } catch { /* offline */ }
 }
-refreshProjects(); setInterval(() => { if (!document.hidden) refreshProjects(); }, 120000);
+/* One sequence, once the projects are known: the conversation belongs to the active project, the
+   thread you were in comes back, and a home with no saved copy is read from the daemon rather than
+   left blank. Before this ran inside the first paint, every project's remembered thread was looked up
+   under 'vault' and never found. */
+let threadBooted = false;
+async function bootThread() {
+  if (threadBooted || !Array.isArray(S.projects)) return;
+  threadBooted = true;
+  const project = activeProject();
+  // Anything said before the list arrived — a message sent, a reply still running — stays where it is
+  // being read, and the owner is not moved to another thread under it.
+  const typed = S.busy || S.turns.some((T) => !T.stored);
+  if (project !== S.thread.project) {
+    if (typed) { if (S.liveThreadKey === activeThreadKey()) S.liveThreadKey = threadKey(project, 'home'); }
+    else { feed.replaceChildren(); S.turns = []; setMode('idle'); body.classList.remove('rest'); }   // the stored copy was another project's
+    S.thread = { project, id: 'home', title: 'Home' };
+    // This project's own stored copy, if it has one, paints before the daemon is asked.
+    if (!typed) try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
+  }
+  const home = threadKey(project, 'home');
+  threadState(home).hydrated = S.turns.length > 0;
+  await loadThreads(project);
+  const remembered = LS.get('thread:' + project, 'home');
+  if (!typed && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) await openThread(project, remembered, { focus: false, closeView: false });
+  else if (!S.turns.length) { await hydrateThread(project, 'home'); if (activeThreadKey() === home) setMode(S.turns.length ? 'talk' : 'idle'); }
+  ask.placeholder = placeholderText(); syncMargins();
+}
+(async () => { await refreshProjects(); await bootThread(); })().catch((e) => clientLog('error', 'threads: ' + e.message));
+setInterval(() => { if (!document.hidden) refreshProjects(); }, 120000);
 (async () => { try { const items = await api.get('/api/history?n=12'); const recent = (Array.isArray(items) ? items : []).filter((m) => m.channel === 'app'); S.recent = recent.length > 0 && Date.now() - Date.parse(recent[recent.length - 1].ts) < 12 * 3600000; } catch { S.recent = false; } })();
 if (S.demo) { renderAgents([], {}); renderProject(); }
 
@@ -2236,14 +2308,17 @@ function restoreStep(T, row) {
 function persistTranscript() {
   try {
     const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), notice: T.nib.classList.contains('notice'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
-    LS.set(transcriptKey(), { at: Date.now(), rows });
+    // An empty feed is never written over a saved one: Tidy clears the key itself, and a feed that is
+    // empty only because it is still being read from the daemon must not erase the copy it replaces.
+    if (rows.length) LS.set(transcriptKey(), { at: Date.now(), project: S.thread.project || 'vault', rows });
   } catch { /* quota */ }
 }
 function restoreTranscript() {
   const t = LS.get(transcriptKey(), null); if (!t || !t.rows || !t.rows.length || Date.now() - t.at > 12 * 3600000) return;
+  if (t.project !== undefined && t.project !== (S.thread.project || 'vault')) return;   // another project's conversation; rows saved before the field existed are accepted once and rewritten with it
   setMode('talk');
   for (const r of t.rows) {
-    const T = newTurn(r.you, undefined, r.at); T.plain = r.plain; T.bubble.classList.remove('live'); T.fixerId = r.fixerId; T.cost = r.cost;
+    const T = newTurn(r.you, undefined, r.at); T.plain = r.plain; T.bubble.classList.remove('live'); T.fixerId = r.fixerId; T.cost = r.cost; T.stored = true;
     if (Array.isArray(r.stepRows) && r.stepRows.length) {   // structured steps come back folded and expandable
       for (const row of r.stepRows.slice(0, 40)) if (row && typeof row === 'object') restoreStep(T, row);
       T.stepLine = r.steps || stepSummaryLine(T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s)));

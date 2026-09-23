@@ -521,11 +521,11 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     threads.append(...(Array.isArray(data.threads) ? data.threads : []).map(thread => {
       const el = button('', 'project-section project-thread', () => void dispatch('thread', data.id, thread.id));
       el.dataset.threadId = thread.id; el.dataset.threadProject = data.id;
-      const when = thread.lastAt ? relative(Date.parse(thread.lastAt)) : '';
+      el.dataset.lastAt = thread.lastAt || ''; el.dataset.projectName = text(data.name);
       el.append(icon('thread'), node('span', 'project-section-copy', text(thread.title, 'Thread')),
-        node('span', 'project-thread-when', when));
+        node('span', 'project-thread-when'));
       el.title = text(thread.title, 'Thread');   // the copy is one clipped line; the whole name has to be reachable
-      el.setAttribute('aria-label', `${text(thread.title, 'Thread')} thread in ${text(data.name)}${when ? ', last message ' + when : ''}`);
+      paintWhen(el);
       if (thread.active) el.setAttribute('aria-current', 'true');
       return el;
     }));
@@ -533,6 +533,15 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     parts.push(fresh, threads);
     return parts;
   }
+  /** "4m" is only true for a minute. The row keeps when it last spoke, and the clock rewrites the
+      label in place, so an open bar does not go on saying "just now" about this morning. */
+  function paintWhen(el) {
+    const when = el.dataset.lastAt ? relative(Date.parse(el.dataset.lastAt)) : '';
+    const label = el.querySelector('.project-thread-when');
+    if (label && label.textContent !== when) label.textContent = when;
+    el.setAttribute('aria-label', `${el.title} thread in ${el.dataset.projectName}${when ? ', last message ' + when : ''}`);
+  }
+  const clock = setInterval(() => { for (const el of body.querySelectorAll('.project-thread[data-last-at]')) paintWhen(el); }, 60000);
   /** A section tab shows what is waiting, in a sentence. The records themselves fill the workspace. */
   function sectionBody(data, section) {
     const info = data.sections?.[section] || {};
@@ -676,7 +685,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   return {
     update, close: () => { close(); closeMenu(false); if (narrow.matches) setSidebar(false); }, setSidebar,
     destroy() {
-      close(); destroyed = true;
+      close(); destroyed = true; clearInterval(clock);
       document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keyboard, true);
       narrow.removeEventListener('change', resizeSidebar); restoreWorkspace();
       for (const card of cards) card.el.remove();
