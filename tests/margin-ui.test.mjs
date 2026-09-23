@@ -330,3 +330,41 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+
+// On a phone the bar is a closed drawer, so what the project wants from you rides on the toggle, in words.
+test('the closed bar says on its toggle what is waiting, without renaming the toggle', {timeout: 60000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+    const errors = []; page.on('pageerror', err => errors.push(err.message));
+    await page.setContent('<meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav>');
+    await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
+    await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
+    const moduleURL = 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/margin-ui.js', import.meta.url))).toString('base64');
+    await page.evaluate(async url => {
+      const {installMarginUI} = await import(url);
+      window.ui = installMarginUI({onAction: () => {}});
+      window.model = {projects: [{id:'alpha', name:'Alpha', active:true, branch:'main', sections:{builds:{badge:'1 waiting on you', tone:'attention'}, issues:{badge:'No issues', tone:'quiet'}, plans:{badge:'No plan', tone:'quiet'}}}], activeProject:'alpha', settings:{}};
+      ui.update(model);
+    }, moduleURL);
+    const toggle = page.locator('#sidebar-toggle'), count = page.locator('#sidebar-toggle .sidebar-toggle-count');
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true', 'a phone starts with the bar closed');
+    assert.equal(await count.innerText(), '1 waiting on you', 'words, never a bare number');
+    assert.equal(await toggle.getAttribute('aria-label'), 'Open sidebar', 'the label is still what pressing it does');
+    assert.equal(await toggle.getAttribute('aria-describedby'), await count.getAttribute('id'), 'the count describes the toggle');
+    const box = await toggle.boundingBox();
+    assert.ok(box.width > 60 && box.height >= 40, 'the toggle grows to hold the words: ' + JSON.stringify(box));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'and stays on the page');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).fontVariantNumeric), 'tabular-nums');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).color), await count.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--ink-2)'; el.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }), 'attention is ink, not a verdict colour');
+    await page.evaluate(() => {model.projects[0].sections.builds = {badge:'2 failed', tone:'error'}; ui.update(model);});
+    assert.equal(await count.innerText(), '2 failed');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).color), await count.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--fail-text)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }), 'a failure is the verdict colour');
+    await page.evaluate(() => {model.projects[0].sections.builds = {badge:'No builds', tone:'quiet'}; ui.update(model);});
+    assert.equal(await count.textContent(), '', 'nothing waiting, nothing said');
+    assert.equal(Math.round((await toggle.boundingBox()).width), 40, 'and the toggle is its own size again');
+    await toggle.click();
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false');
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});

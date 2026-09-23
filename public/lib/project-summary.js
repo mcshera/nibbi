@@ -8,7 +8,7 @@ export function buildMatchesFilter(run, filter) {
   if(filter==='all')return true;
   if(filter==='toPush')return !!github.toPush;
   if(filter==='pullRequests')return !!github.pullRequest;
-  if(filter==='attention')return group==='failed'||!!github.needsAttention;
+  if(filter==='attention')return group==='failed'||!!github.needsAttention||run.status==='awaiting_input';
   if(filter==='review')return group==='review'&&!github.toPush&&!github.pullRequest&&!github.needsAttention;
   if(filter==='history')return group==='history'&&!github.toPush&&!github.pullRequest&&!github.needsAttention;
   return group===filter;
@@ -30,8 +30,10 @@ export function describeProjectSection(section, data) {
   const c = section==='builds'&&Array.isArray(data?.runs)?{...data?.counts,...projectBuildCounts(data.runs)}:data?.counts;
   if (state !== 'error' && c && integer(c.total) !== null) {
     if (section === 'builds') {
-      const n = key => integer(c[key]) ?? 0;
-      if(n('attention')&&(n('pullRequests')||n('toPush')||data.runs?.some(run=>run.github?.needsAttention))){badge=`${n('attention')} need attention`;tone='error';}
+      const n = key => integer(c[key]) ?? 0, waiting = integer(c.byStatus?.awaiting_input);
+      // A build that stopped to ask you something outranks every count: it goes nowhere until you answer.
+      if(waiting){badge=`${waiting} waiting on you`;tone='attention';}
+      else if(n('attention')&&(n('pullRequests')||n('toPush')||data.runs?.some(run=>run.github?.needsAttention))){badge=`${n('attention')} need attention`;tone='error';}
       else if(n('readyPR')){badge=`${n('readyPR')} PR ready`;tone='attention';}
       else if(n('toPush')){badge=`${n('toPush')} to push`;tone='attention';}
       else if(n('pullRequests')){badge=`${n('pullRequests')} pull request${n('pullRequests')===1?'':'s'}`;tone='attention';}

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.1 — Unreleased
+
+### Attention, liveness, and the harness
+
+**A stopped build is not a failed one.** A cancelled or interrupted build was announced with the
+failure sentence's shape, the happy face and the success sound. Each announced status is one row now
+— mood, sound, beat, notification — and a stop or an interruption is a notice that says the work is
+kept: no verdict colour, no sound, no splash.
+
+**Notifications arrive.** They were wired to a function nothing called. A build that is ready,
+failed, merged or waiting on you notifies when the window is hidden or not focused, and in a browser
+the click opens that build. In the desktop shell the click does nothing yet; that needs a handler in
+the shell and a window-focus capability, which is a shell release.
+
+**Waiting on you.** Nothing in the daemon reports `awaiting_input` yet, but a build that does now
+leads the Builds badge ("1 waiting on you"), joins the attention filter, counts on the dock badge and
+in the tab title, offers steer, stop and open build, and is named in the while-you-were-away line.
+
+**The closed bar still speaks.** On a phone the bar is a closed drawer, so its toggle carries what the
+project wants from you, in words ("1 review", "2 failed"). It is still labelled "Open sidebar"; the
+words describe it. The project you are in is read with the bar closed, so the words are current.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which

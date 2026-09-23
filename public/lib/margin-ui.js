@@ -82,7 +82,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     // rows more informative and cost a read for each one; those reads land later as "records
     // updated" and replace a panel someone is part-way through. The rows say what the app already
     // knows and fill in as it learns more, which is worth more than a list that interrupts.
-    const ids = sidebarOpen ? [String(model.activeProject ?? '')].filter(id => projects.has(id)) : [];
+    // Open or closed: with the bar closed the toggle still says what this project wants from you.
+    const ids = [String(model.activeProject ?? '')].filter(id => projects.has(id));
     const key = JSON.stringify(ids); if (key === visibleKey) return; visibleKey = key;
     queueMicrotask(() => { if (!destroyed) onVisibility?.(ids); });
   }
@@ -99,6 +100,10 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   const toggle = button('', 'sidebar-toggle', () => setSidebar(!sidebarOpen, true));
   toggle.id = 'sidebar-toggle'; toggle.append(icon('sidebar'));
   toggle.setAttribute('aria-controls', sidebar.id);
+  // With the bar closed (always, on a phone) what the project wants from you rides on the toggle, in
+  // words. Described by, not labelled by: the label stays exactly what pressing it does.
+  const toggleCount = node('span', 'sidebar-toggle-count'); toggleCount.id = 'sidebar-toggle-count';
+  toggle.append(toggleCount); toggle.setAttribute('aria-describedby', toggleCount.id);
   const collapse = button('', 'sidebar-collapse', () => setSidebar(false, true));
   collapse.append(icon('sidebar')); collapse.setAttribute('aria-label', 'Close sidebar');
   head.append(brand, collapse);
@@ -625,6 +630,9 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     // One project is in the bar at a time, so the switcher, the strip and the body are rendered once.
     const focusKey = document.activeElement?.dataset?.marginTab;
     renderSwitcher(); renderTabs(); renderBody(); renderMenu();
+    const current = activeEntry()?.data, waiting = current ? attentionOf(current) : '';
+    if (toggleCount.textContent !== waiting) toggleCount.textContent = waiting;
+    toggleCount.dataset.tone = current?.sections?.builds?.tone || 'quiet';
     if (focusKey) tabs.querySelector(`[data-margin-tab="${focusKey}"]`)?.focus({preventScroll: true});
     const line = progressLine(model.progress);
     if (progressStatus.textContent !== line) progressStatus.textContent = line;

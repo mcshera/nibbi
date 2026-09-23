@@ -76,6 +76,10 @@ body.sidebar-open .workspace-sidebar { transform: none; visibility: visible; }
 .sidebar-brand { font-size: var(--type-title); font-weight: 650; letter-spacing: -.035em; }
 .sidebar-toggle, .sidebar-collapse { display: grid; place-items: center; width: 40px; height: 40px; flex: none; color: var(--ink-2); background: transparent; border: 0; border-radius: var(--r-well); cursor: pointer; }
 .sidebar-toggle { position: fixed; left: 16px; top: 16px; z-index: var(--z-sheet-rail); background: rgba(245,242,236,.94); }
+.sidebar-toggle:has(.sidebar-toggle-count:not(:empty)) { width: auto; padding: 0 12px 0 8px; display: inline-flex; align-items: center; gap: 6px; }
+.sidebar-toggle-count { font-size: var(--type-meta); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.sidebar-toggle-count:empty { display: none; }
+.sidebar-toggle-count[data-tone="error"] { color: var(--fail-text); }
 .sidebar-toggle:hover, .sidebar-collapse:hover { background: var(--veil-hover); }
 .sidebar-toggle svg, .sidebar-collapse svg, .margin-project > svg, .project-folder svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; fill: none; }
 .sidebar-toggle:focus-visible, .sidebar-collapse:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

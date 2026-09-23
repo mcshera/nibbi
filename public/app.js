@@ -702,7 +702,8 @@ function fixerActs(f, opts) {
   const a = []; const st = f.status;
   if (st === 'staged' && githubBuild(f)) a.push({ label: 'Review GitHub delivery', run: () => inspectGithubBuild(f) }, { label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) });
   if (st === 'staged' && !githubBuild(f)) a.push({ label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) }, { label: 'approve & merge', confirm: 'merge into ' + (opts && opts.target || 'the branch') + ' — sure?', warn: true, run: () => send('/approve ' + f.id) });
-  if (st === 'running' || st === 'installing') a.push({ label: 'steer', run: () => { ask.value = '/steer ' + f.id + ' '; focusComposer(); autosize(); } }, { label: 'stop', confirm: 'stop it — sure?', warn: true, run: () => send('/stop ' + f.id) });
+  if (st === 'running' || st === 'installing' || st === 'awaiting_input') a.push({ label: 'steer', run: () => { ask.value = '/steer ' + f.id + ' '; focusComposer(); autosize(); } }, { label: 'stop', confirm: 'stop it — sure?', warn: true, run: () => send('/stop ' + f.id) });
+  if (st === 'awaiting_input' || st === 'cancelled' || st === 'interrupted') a.push({ label: 'open build', run: () => openProjectSection(f.game || f.project, 'builds', { buildId: f.id }) });
   if (st === 'queued') a.push({ label: 'unqueue', confirm: 'drop it from the queue?', run: () => api.post('/api/fix-unqueue', { id: f.id }).then(() => toast('unqueued')).catch((e) => toast(e.message)) });
   if (st === 'failed') a.push({ label: 'log', run: () => send('/log ' + f.id) }, { label: 'Start replacement build', run: () => api.post('/api/fix-requeue', { id: f.id }).then(() => toast('requeued')).catch((e) => toast(e.message)) });
   if (st === 'merged') a.push({ label: 'what changed', run: () => send('/diff ' + f.id) });
@@ -1007,18 +1008,27 @@ async function toggleNotifications() {
   LS.set('notifications', permission === 'granted'); syncMargins();
   if (permission !== 'granted') throw new Error('Notifications are not allowed. You can allow them in system or browser settings.');
 }
-async function notify(title, body) {
+async function notify(title, body, f) {
   if (!LS.get('notifications', true)) return;
   try {
     await refreshNotificationPermission();
     const n = notificationApi();
     if (!n || notificationPermission !== 'granted' || !LS.get('notifications', true)) return;
-    if (n.kind === 'native') n.api.sendNotification({ title, body });
-    else new n.api(title, { body });
+    // Native click-through needs a Rust handler and core:window:allow-set-focus in the shell's
+    // capabilities; tauri-plugin-notification 2 exposes no click callback to the page. A shell release.
+    if (n.kind === 'native') { n.api.sendNotification({ title, body }); return; }
+    const note = new n.api(title, { body, tag: f ? 'build:' + f.id : undefined });
+    if (f) note.onclick = () => { window.focus(); openProjectSection(f.game || f.project, 'builds', { buildId: f.id }); note.close?.(); };
   } catch { /* no notifications here */ }
 }
 async function setBadge(n) { try { const W = window.__TAURI__ && window.__TAURI__.window; if (W && W.getCurrentWindow) { const w = W.getCurrentWindow(); if (w.setBadgeCount) await w.setBadgeCount(n > 0 ? n : undefined); } } catch { /* unsupported */ } }
-function refreshBadge() { const n = (S.fixers || []).filter((f) => f.status === 'staged' && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length; if (n !== S.badge) { S.badge = n; setBadge(n); } }
+// What is waiting on you: builds to review from the last week, and builds that stopped to ask you something.
+function refreshBadge() {
+  const n = (S.fixers || []).filter((f) => (f.status === 'staged' && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)) || f.status === 'awaiting_input').length;
+  if (n === S.badge) return;
+  S.badge = n; setBadge(n);
+  if (!window.__TAURI__) document.title = n ? `(${n}) Nibbi` : 'Nibbi';   // a browser tab has no dock badge; the shell's title belongs to the traffic lights
+}
 
 /* ------------------------------------------------------------------ host event stream: exact history of what fixers did, even while the window was closed */
 let evSource = null, evReady = false, evReplay = [];
@@ -1079,34 +1089,41 @@ function connectEvents() {
   });
   evSource = { close };
 }
-async function onFixerEvent(ev) {
-  if (!['staged', 'failed', 'merged'].includes(ev.to)) { refreshStatus(); return; }
-  try { S.fixers = await api.get('/api/fixers'); } catch { /* keep */ }
-  const f = fixerById(ev.id) || { id: ev.id, status: ev.to, game: ev.project, title: ev.title, costUsd: ev.costUsd, model: ev.model, diffstat: ev.diffstat };
-  postFixerBubble(f);
-  renderAgents(S.fixers, S.auto); renderProject(); refreshBadge();
-  if (document.hidden) notify('nibbi · ' + (ev.to === 'staged' ? 'ready to review' : ev.to), (ev.title || ev.id) + ' — ' + ev.to + ' on ' + ev.project);
-}
 // Announced run statuses (id → status) and narration keys (key → kind), bounded so a long-lived window cannot grow it without limit.
 const bubbledRunStatus = new Map(), BUBBLE_MEMORY = 500;
 function rememberBubble(key, value) { bubbledRunStatus.delete(key); bubbledRunStatus.set(key, value); while (bubbledRunStatus.size > BUBBLE_MEMORY) bubbledRunStatus.delete(bubbledRunStatus.keys().next().value); }
+/* One row per announced run status: what the character does, what it sounds like, which beat it plays,
+   and what the notification says. Cancelled and interrupted are notices, not verdicts — something was
+   unreachable, not judged (styles.css .nib.notice) — so they carry no sound and no splash. */
+const VERDICT = {
+  staged: { mood: 'happy', sound: 'land', beat: 'success', note: 'Ready to review' },
+  merged: { mood: 'happy', sound: 'land', beat: 'delivered', note: 'Merged' },
+  failed: { mood: 'error', sound: 'error', cls: 'error', note: 'Build failed' },
+  cancelled: { mood: 'idle', cls: 'notice', kind: 'stopped' },
+  interrupted: { mood: 'idle', cls: 'notice', kind: 'interrupted' },
+  awaiting_input: { mood: 'listening', kind: 'waiting', beat: 'attention', note: 'Needs your input' },
+};
 function postFixerBubble(f) {
+  const v = VERDICT[f.status]; if (!v) return;
   if (S.busy) { setTimeout(() => postFixerBubble(f), 3000); return; }
   // Several backend records emit run.updated for one transition; announce each run status once.
   if (bubbledRunStatus.get(f.id) === f.status) return; rememberBubble(f.id, f.status);
+  // Only when you are somewhere else: a notification for the window you are looking at is noise.
+  if (v.note && !S.demo && (document.visibilityState === 'hidden' || !document.hasFocus())) void notify(v.note, fixerTitle(f) + ' · ' + (f.game || f.project), f);
   setMode('talk'); body.classList.remove('rest');
   const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
   const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
   const cost = (f.costUsd ? ' · $' + Number(f.costUsd).toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
   const mode = githubBuild(f) ? 'github' : autoOf(f.game || f.project).mode;
-  const merged = f.status === 'merged' ? narrate('merged', deliveryContext('merged', f)) : null;   // authored line: what merged, where; no next goal
-  const text = f.status === 'staged' ? (mode === 'ship' ? 'Fixer **' + title + '** finished on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Ship mode: it merges itself once you\'ve been quiet a few minutes (isolated integration → checks → target). I\'ll say when it lands.' : 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?') : merged ? merged.text : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '') + (/maximum number of turns/i.test(String(f.summary || '')) ? ' Work is preserved; inspect it before an explicit retry.' : '');
-  setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
-  addActs(T, (f.status === 'staged' && mode === 'ship') ? fixerActs(f).filter((a) => !/approve/.test(a.label)) : fixerActs(f), { sticky: true }); T.fixerId = f.id; if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
-  const a = agentEls.get(f.id); if (a) { const r = a.canvas.getBoundingClientRect(); nibbi.lookAt(r.left + r.width / 2, r.top); setTimeout(() => nibbi.lookFree(), 1800); nibbi.splash(AGENT_INK[hashId(f.id) % AGENT_INK.length], f.status === 'merged' ? 8 : 4); }
-  nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); if (f.status !== 'failed') interactions.event(merged ? 'delivered' : 'success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
-  sound(f.status === 'failed' ? 'error' : 'land');
-  $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(merged ? merged.voice : stripMd(text));
+  // Authored lines (narration.js): what merged, where; a stop or an interruption without a verdict; a question waiting on you.
+  const line = f.status === 'merged' ? narrate('merged', deliveryContext('merged', f)) : v.kind ? narrate(v.kind, deliveryContext(v.kind, f)) : null;
+  const text = line ? line.text : f.status === 'staged' ? (mode === 'ship' ? 'Fixer **' + title + '** finished on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Ship mode: it merges itself once you\'ve been quiet a few minutes (isolated integration → checks → target). I\'ll say when it lands.' : 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?') : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '') + (/maximum number of turns/i.test(String(f.summary || '')) ? ' Work is preserved; inspect it before an explicit retry.' : '');
+  setSaid(T, text, false); setMeta(T, {}); T.done = true; if (v.cls) T.nib.classList.add(v.cls);
+  addActs(T, (f.status === 'staged' && mode === 'ship') ? fixerActs(f).filter((a) => !/approve/.test(a.label)) : fixerActs(f), { sticky: true }); T.fixerId = f.id; if (f.status === 'staged' || f.status === 'merged') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
+  const a = agentEls.get(f.id); if (a) { const r = a.canvas.getBoundingClientRect(); nibbi.lookAt(r.left + r.width / 2, r.top); setTimeout(() => nibbi.lookFree(), 1800); if (v.sound) nibbi.splash(AGENT_INK[hashId(f.id) % AGENT_INK.length], f.status === 'merged' ? 8 : 4); }
+  nibbi.setMood(v.mood); if (v.beat) interactions.event(v.beat); if (v.mood !== 'idle') setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
+  if (v.sound) sound(v.sound);
+  $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(line ? line.voice : stripMd(text));
 }
 /* Authored progress narration. Each line reports one verified event once; wins wait for a quiet moment like postFixerBubble, while a failed check or an outside push may interrupt. */
 const NARRATION_BEAT = { 'draft-pr': 'draft', 'checks-failed': 'checks', 'remote-changed': 'attention', milestone: 'milestone', streak: 'streak' };
@@ -1126,13 +1143,14 @@ function postAwayBubble(evs) {
   const latest = new Map(); for (const e of evs) latest.set(e.id, e);   // one line per fixer: its latest state
   const briefs = evs.filter((e) => e.to === 'brief' && !e.silent);
   for (const b of briefs.slice(-3)) { setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, b.text, false); T.at = b.ts; setMeta(T, {}); T.done = true; }
-  const done = [...latest.values()].filter((e) => ['staged', 'failed', 'merged'].includes(e.to));
+  const done = [...latest.values()].filter((e) => ['staged', 'failed', 'merged', 'awaiting_input'].includes(e.to));
   if (!done.length) return;
   setMode('talk'); body.classList.remove('rest');
   const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
   const first = Math.min(...done.map((e) => e.ts)); const ago = Math.round((Date.now() - first) / 3600000);
   const grp = (st) => done.filter((e) => e.to === st);
   const parts = [];
+  if (grp('awaiting_input').length) parts.push(grp('awaiting_input').length + ' waiting on you (' + grp('awaiting_input').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('merged').length) parts.push(grp('merged').length + ' merged (' + grp('merged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('staged').length) parts.push(grp('staged').length + ' staged for review (' + grp('staged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('failed').length) parts.push(grp('failed').length + ' failed (' + grp('failed').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
@@ -1208,25 +1226,6 @@ addEventListener('keydown', (e) => {
 
 /* ------------------------------------------------------------------ fleet events: when a fixer lands while you weren't looking, nibbi says so */
 let fleetSeen = null;
-function awayBubble(list) {
-  const last = LS.get('lastSeen', 0); const now = Date.now(); LS.set('lastSeen', now);
-  if (!last || now - last < 20 * 60000) return;
-  const since = list.filter((f) => f.endedAt && Date.parse(f.endedAt) > last && ['staged', 'failed', 'merged'].includes(f.status));
-  if (!since.length) return;
-  setMode('talk'); body.classList.remove('rest');
-  const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
-  const away = Math.round((now - last) / 3600000);
-  const grp = (st) => since.filter((f) => f.status === st);
-  const parts = [];
-  if (grp('merged').length) parts.push(grp('merged').length + ' merged (' + grp('merged').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
-  if (grp('staged').length) parts.push(grp('staged').length + ' staged for your review (' + grp('staged').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
-  if (grp('failed').length) parts.push(grp('failed').length + ' failed (' + grp('failed').map((f) => md.esc(fixerTitle(f))).join(', ') + ')');
-  const text = 'While you were away' + (away >= 1 ? ' (' + away + 'h)' : '') + ': ' + parts.join(' · ') + '.';
-  setSaid(T, text, false); setMeta(T, {}); T.done = true;
-  const acts = grp('staged').slice(0, 2).map((f) => ({ label: 'diff ' + fixerTitle(f).slice(0, 18), run: () => send('/diff ' + f.id) }));
-  acts.push({ label: 'full report', run: () => send('/report ' + Math.max(1, Math.min(72, away + 1))) });
-  addActs(T, acts); $('#sr').textContent = stripMd(text);
-}
 function fleetEvents(list) {
   if (!list) return;
   const cur = new Map(list.map((f) => [f.id, f.status]));
@@ -1234,16 +1233,7 @@ function fleetEvents(list) {
   for (const f of list) {
     const prev = fleetSeen.get(f.id);
     if (prev === f.status || (prev === undefined && !ACTIVE.has(f.status))) continue;
-    if (!['staged', 'failed', 'merged'].includes(f.status) || S.busy) continue;
-    setMode('talk'); body.classList.remove('rest');
-    const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live');
-    const title = md.esc(fixerTitle(f)); const stat = String(f.diffstat || '').trim().split('\n').pop() || '';
-    const cost = (f.costUsd ? ' · $' + f.costUsd.toFixed(2) : '') + (f.model ? ' · ' + f.model : '');
-    const text = f.status === 'staged' ? 'Fixer **' + title + '** is done and staged on **' + f.game + '**' + (stat ? ' — ' + stat : '') + cost + '. Review it?' : f.status === 'merged' ? '**' + title + '** merged into **' + f.game + '**.' : 'Fixer **' + title + '** failed on **' + f.game + '**.' + (f.summary ? ' ' + md.esc(String(f.summary).slice(0, 160)) : '');
-    setSaid(T, text, false); setMeta(T, {}); T.done = true; if (f.status === 'failed') T.nib.classList.add('error');
-    addActs(T, fixerActs(f)); if (f.status !== 'failed') fixerShots(f).then((ps) => { const row = shotsRow(ps); if (row) T.said.appendChild(row); });
-    nibbi.setMood(f.status === 'failed' ? 'error' : 'happy'); if (f.status !== 'failed') interactions.event(f.status === 'merged' ? 'milestone' : 'success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 1600);
-    $('#sr').textContent = stripMd(text); if (S.voiceOn && !S.demo && S.link !== 'offline') speak(stripMd(text));
+    postFixerBubble(f);   // the demo's fleet speaks through the same verdict table as a real one
   }
   fleetSeen = cur;
 }
@@ -1562,7 +1552,7 @@ async function pollFixers(T, before) {
 const agentsEl = $('#agents');
 const AGENT_INK = [[0.23, 0.29, 0.61], [0.18, 0.50, 0.46], [0.69, 0.47, 0.16], [0.48, 0.25, 0.47], [0.71, 0.33, 0.24], [0.37, 0.48, 0.23]];
 const hashId = (id) => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
-const agentMood = (st) => ({ queued: 'sleep', installing: 'thinking', running: 'working', done: 'happy', merged: 'happy', failed: 'error', superseded: 'sleep', duty: 'sleep' }[st] || 'working');
+const agentMood = (st) => ({ queued: 'sleep', installing: 'thinking', running: 'working', awaiting_input: 'listening', done: 'happy', staged: 'happy', merged: 'happy', failed: 'error', cancelled: 'sleep', interrupted: 'sleep', superseded: 'sleep', duty: 'sleep' }[st] || 'working');
 const agentEls = new Map();
 const ACTIVE = new Set(['queued', 'installing', 'running', 'verifying', 'awaiting_input']);
 let tailCache = new Map();

@@ -32,3 +32,13 @@ test('published open PRs remain actionable with shared overlapping filters and n
  const counts=projectBuildCounts(runs);assert.equal(counts.history,0);assert.equal(counts.pullRequests,2);assert.equal(counts.toPush,2);assert.equal(counts.attention,1);assert.equal(counts.review,0);assert.equal(buildMatchesFilter(runs[1],'toPush'),true);assert.equal(buildMatchesFilter(runs[1],'history'),false);
  assert.equal(describeProjectSection('builds',{status:'ready',runs:[runs[0]]}).badge,'1 pull request');
 });
+
+test('a build waiting on you outranks every count and joins the attention filter',()=>{
+ const waiting={status:'ready',counts:{total:3,active:2,review:1,failed:0,history:0,byStatus:{awaiting_input:1,running:1,staged:1}}};
+ const view=describeProjectSection('builds',waiting);assert.equal(view.badge,'1 waiting on you');assert.equal(view.tone,'attention');
+ const runs=[{id:'ask',status:'awaiting_input'},{id:'run',status:'running'},{id:'bad',status:'failed'}];
+ assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:3,byStatus:{awaiting_input:1,running:1,failed:1}},runs}).badge,'1 waiting on you','a failure elsewhere does not hide the question');
+ assert.equal(buildMatchesFilter(runs[0],'attention'),true);assert.equal(buildMatchesFilter(runs[1],'attention'),false);assert.equal(projectBuildCounts(runs).attention,2);
+ assert.equal(buildGroup('awaiting_input'),'active','it is still in flight');
+ assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:1,active:1,byStatus:{running:1}}}).badge,'1 active','no question, no waiting badge');
+});
