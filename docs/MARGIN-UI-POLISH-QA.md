@@ -4,6 +4,8 @@
 
 2026-09-06: **13/13 focused checks passed** against the actual built UI in Chrome. Command: `node tools/margin-polish-verify.mjs`.
 
+Retired 2026-09-22: the tool pinned the two-rail layout that PR #14 replaced, and failed 12 of 13 checks against the bar it no longer describes. `tools/margin-ui-verify.mjs` and `tests/margin-ui.test.mjs` cover the bar now.
+
 - Evidence: `output/margin-polish/browser/results.json`.
 - Run log: `output/margin-polish/browser-run.log`.
 - Exact SHA-256 source, frontend-dist and daemon-dist pins are in `pins` and `endPins`. All pins stayed identical during the run.

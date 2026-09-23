@@ -1,6 +1,6 @@
 # Sidebar lab option contract (experimental, not production)
 
-Every option is ONE standalone ES module at `design/sidebar-lab/options/<id>.mjs` with one stylesheet beside it at `options/<id>.css`. The only imports allowed are `../chrome.mjs` (shared DOM helpers, glyphs and the relative-time formatter) and, for `peer`, `./_today.mjs`. Never import another design. Nothing under `public/` is touched, read or written — the lab serves the app's real `styles.css`, `margins.css` and `project-workspace.css` read-only so every option renders on the real tokens.
+Every option is ONE standalone ES module at `design/sidebar-lab/options/<id>.mjs` with one stylesheet beside it at `options/<id>.css`. The only imports allowed are `../chrome.mjs` (shared DOM helpers, glyphs and the relative-time formatter) and, for `peer`, `./_today.mjs`. Never import another design. Nothing under `public/` is touched, read or written — the lab serves the app's real `tokens.css`, `styles.css`, `margins.css` and `project-workspace.css` read-only so every option renders on the real tokens.
 
 ```js
 import { node, button, icon, relative, loadCss } from '../chrome.mjs';

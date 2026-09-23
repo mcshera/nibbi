@@ -108,3 +108,16 @@ test('what is finished stays finished, for every prefix of a reply', () => {
     }
   }
 });
+
+/* The demo's "show me the code" reply, the fixture the browser suites stream at three sizes. While
+   its fence is open — blank line inside and all — the fence is one block: the tail. */
+test('an open fence stays one block while it streams, and settles whole', () => {
+  const reply = 'Here is the change.\n\n```ts\nexport function lock(): Lock {\n  return new TurnLock({ clearOnAbort: true });\n}\n\nexport default lock;\n```\n\n| file | change |\n|---|---|\n| `session.ts` | clears on abort |\n| `webapp.ts` | always sends done |\n\nTwo files.';
+  const open = reply.indexOf('```ts'), close = reply.indexOf('\n```\n', open) + 4;
+  for (let i = open + 3; i < close; i++) {
+    const text = cleanReply(reply.slice(0, i), { partial: true });
+    assert.deepEqual(settled(text), ['Here is the change.'], 'nothing inside the open fence is finished at ' + JSON.stringify(reply.slice(open, i)));
+    assert.ok(tail(text).startsWith('```'), 'the whole open fence is the tail');
+  }
+  assert.deepEqual(splitBlocks(cleanReply(reply)), ['Here is the change.', reply.slice(open, close), '| file | change |\n|---|---|\n| `session.ts` | clears on abort |\n| `webapp.ts` | always sends done |', 'Two files.']);
+});

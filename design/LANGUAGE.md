@@ -13,8 +13,9 @@ Companion file: **`public/tokens.css`** — the same system as custom properties
 | character | shipped, contracted | `design/character-lab/CONTRACT.md`, `public/nibbi.js` |
 | motion / poses | shipped, contracted | `public/pocket-motion.js`, 24 poses, 8 moods |
 | voice / copy | shipped, contracted | `docs/PERSONALITY.md` |
-| sidebar shape | in lab | `design/sidebar-lab/` |
-| **colour, type, space, shape, elevation** | **shipped, contracted** | this document + `public/tokens.css` |
+| sidebar shape | shipped (PR #14), lab retained | `design/sidebar-lab/` |
+| **colour, type, shape, elevation** | **shipped, contracted** | this document + `public/tokens.css` |
+| space | declared, 0 uses | `--space-*` in `public/tokens.css` |
 
 That last row was the gap. Nibbi had a design language — legible in every file and genuinely good — but it lived as convention in 1,101 lines of CSS rather than as a system (1,050 now, after the dead shell came out). It was not visible as ugliness; it was visible as **drift**: the same intent rendered slightly differently depending on which file you were in when you wrote it.
 
@@ -47,7 +48,7 @@ These are read back out of the code and `docs/PERSONALITY.md`. They are the reas
 4. **State is spoken, not signalled.** From the sidebar lab: *"Leave the status dots — Nibbi says attention in words."* Dots carry presence and rhythm; words carry meaning.
 5. **Nothing animates to entertain.** Motion exists to explain where something came from (`arrive`), that work is live (`think`, `pulse`), or that a control took the press (`scale(.96)`). The character is the only element allowed expressive motion, and it is contracted separately.
 6. **Every control is reachable by keyboard and 44px under a finger.** Already enforced at `≤640px` and `pointer: coarse`. Non-negotiable for new work.
-7. **A surface that cannot verify its backdrop must carry contrast alone.** The glass budget at `public/styles.css:373` is the model: assume the worst backdrop, measure, and let the native material be a bonus.
+7. **A surface that cannot verify its backdrop must carry contrast alone.** The glass budget at `public/tokens.css` `body.glass` is the model: assume the worst backdrop, measure, and let the native material be a bonus.
 
 ---
 
@@ -129,7 +130,7 @@ The reply's own surface is a surface, not a wash, and is declared with the trans
 
 ### 2.3 Semantic colour — the biggest drift in the system
 
-Colour means *machine verdict*. There are exactly two verdicts, and they currently have **four reds and two greens** depending on which file you were editing:
+Colour means *machine verdict*. There are exactly two verdicts. Before the drift register: they had **four reds and two greens** depending on which file you were editing:
 
 | meaning | current values | used in |
 |---|---|---|
@@ -297,7 +298,7 @@ Every other step stays fixed on purpose: they are small UI text, and shrinking t
 
 ### 5.1 Radius ladder
 
-15 radii today. Eight, with a meaning each:
+Before the drift register: 15 radii. Eight, with a meaning each:
 
 | token | px | meaning | absorbs |
 |---|---|---|---|
@@ -348,18 +349,18 @@ Every shadow in the codebase, whether or not it was written deliberately, obeys 
 | `--e-dialog` | `0 20px 60px -24px rgba(21,20,19,.30)` | platform panels |
 | `--e-highlight` | `0 1px 0 rgba(255,255,255,.7) inset` | additive, on every lifted paper surface |
 
-⚠️ The toast is the one shadow using `rgba(0,0,0,.4)` instead of ink. It should be `--e-floating` at ink.
+The toast was the one shadow using `rgba(0,0,0,.4)` instead of ink. It is `--e-floating` at ink now (§15 row 5).
 
 ### 6.2 Blur ladder
 
 | token | px | role |
 |---|---|---|
-| `--blur-scrim` | 3 | behind a modal backdrop |
-| `--blur-light` | 10 | chips, jump — small floating tokens |
-| `--blur-glass` | 14 | **the standard**: composer, menus, cards, palette |
-| `--blur-heavy` | 16 | the Tauri glass shell |
+| `--glass-scrim` | 3 | behind a modal backdrop |
+| `--glass-light` | 10 | chips, jump — small floating tokens |
+| `--glass` | 14 | **the standard**: composer, menus, cards, palette |
+| `--glass-heavy` | 16 | the Tauri glass shell |
 
-`12px` and `18px` are one use each and fold into 14 and 16. Every blur is paired with `saturate(1.1)` — that pairing is what keeps the paper warm behind glass and should be part of the token.
+`12px` and `18px` are one use each and fold into 14 and 16. Every blur above the scrim is paired with `saturate(1.1)` — that pairing is what keeps the paper warm behind glass, and it is part of the token (`tokens.css:167-172`).
 
 ### 6.3 Layers
 
@@ -409,7 +410,7 @@ Three durations, one curve, applied consistently across every file. **This is th
 
 ### 7.4 Reduced motion
 
-Global kill switch at `styles.css:211` (`1ms !important` on everything), plus JS-side handling in `nibbi.js` and `pocket-motion.js` (`reduced=true` returns a *spatially static pose*, not a frozen frame). The character contract requires a reduced expression per action that is identical for every `t` — this is better than most shipped products and should be held to for anything new.
+Global kill switch at `styles.css:218` (`1ms !important` on everything), plus JS-side handling in `nibbi.js` and `pocket-motion.js` (`reduced=true` returns a *spatially static pose*, not a frozen frame). The character contract requires a reduced expression per action that is identical for every `t` — this is better than most shipped products and should be held to for anything new.
 
 The kill switch also sets `animation-iteration-count: 1`: at 1ms an infinite `think` or `pulse` does not stand still, it flickers, so every loop now plays once and lands on its base frame. The same block applies under `body.calm`, which `syncMotionPreference` sets whenever the system asks for reduced motion or Calm motion is on — the in-app preference used to reach only the character.
 
@@ -445,7 +446,7 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 |---|---|---|---|---|
 | **bubble** | `18px`/`10px` TL, 6px ink dot | `--type-read` | `--e-raised` | never gets an avatar; a page-width block card at every length, so it never changes width mid-reply — your message is the one that shrink-wraps. The caret takes a line of its own under a trailing fence, quote, table or rule |
 | **your message** | `18 18 6 18`, `--veil-hover` | `--type-body` | none | right-aligned, max 78% |
-| **chip** | pill, `--veil-hairline` border | `--type-control` | none, `--blur-light` | hover inverts to solid ink; `.warn` takes `--fail-edge` |
+| **chip** | pill, `--veil-hairline` border | `--type-control` | none, `--glass-light` | hover inverts to solid ink; `.warn` takes `--fail-edge` |
 | **step** | row, 7px dot | `--type-fine` | none | dot state: live=ink+pulse, done=`--ink-3` at `scale(.75)`, fail=`--fail-mark` |
 | **steps fold** | one row | `--type-fine` | none | folds the whole list when complete and moves above it; a toggle (`— show` / `— hide`, `aria-expanded`) that stays in place while the list opens under it, so focus never leaves it. It changes attributes only (CSS picks the word): a text change re-pins the feed and moves it. An older transcript's summary-only row is a plain line |
 | **composer (pill)** | `--r-dock` | `--type-field` | `--e-docked` + `--e-highlight` | `+` left, send squircle right; both drop to the last line when tall |
@@ -453,12 +454,12 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 | **menu** (switch, dock) | `--r-surface` | `--type-fine`/`--type-control` | `--e-floating` | opens on hover *and* focus-within |
 | **palette** | `--r-surface` | `--type-control`, mono for the command | `--e-docked` | command mono, argument mono muted, description right-aligned and truncated |
 | **agent** | 58×46 avatar, tinted character | — | — | card on hover/focus/pinned, 260px, fixed-positioned on phones |
-| **toast** | pill, solid ink | `--type-control` | `--e-floating` ⚠️ currently black | z below an open dock panel |
+| **toast** | pill, solid ink | `--type-control` | `--e-floating` | z below an open dock panel |
 | **diff** | `--r-card` wells, mono | `--type-fine` | none | `--pass-*` added, `--fail-*` removed, per-file `<details>` |
 | **plan review** | `--r-panel`, `--veil-edge` border | `--type-body` | none | state badge is `--type-micro` uppercase in a pill |
 | **margin card** | `--r-panel`, `--measure-card` | `--type-fine` | `--e-lifted` | no ink fork: the derived ramp serves the bar (§2.5) |
 | **notice bubble** | the bubble on `--notice-bed`, `--veil-strong` border, `--ink-3` dot | `--type-read` | `--e-raised` | something was unreachable, not judged |
-| **platform panel** | `--r-surface`, `760px` | `--type-body` | `--e-dialog` | `::backdrop` is `--veil-edge` + `--blur-scrim` |
+| **platform panel** | `--r-surface`, `760px` | `--type-body` | `--e-dialog` | `::backdrop` is `--veil-press` + `--glass-scrim` |
 | **jump to latest** | pill | `--type-fine` | `--e-floating` | tracks `--feed-bottom` |
 | **day divider** | rule + label | `--type-meta` | none | 40px hairlines either side; at the top of a conversation with more above it, the label is a `load earlier` chip |
 
@@ -483,7 +484,7 @@ Nibbi drives most of its UI from `body` attributes and classes. The full set, be
 | `.rest` | idle timer | feed drops to `.38` opacity, restores on hover |
 | `.busy` | a turn running | composer border softens, send becomes a stop square |
 | `.busy.steer-ready` | steerable turn + text in field | send returns as steer |
-| `.glass` | Tauri shell only | translucent paper, darkened `--ink-3` |
+| `.glass` | Tauri shell only | translucent paper; the ink ramp is unchanged |
 | `.standalone` | PWA | safe-area insets on status and feed |
 | `.playtest` | playtest mode | labelled border on the composer |
 | `.link-fresh` | recent state change | same: set on `body`, styled by nothing since the status label went. Vestigial alongside `data-link` |
@@ -534,7 +535,7 @@ Already met, and worth stating so it stays met:
 | surface | differences |
 |---|---|
 | **browser** | the baseline |
-| **Tauri desktop** | `.glass` — translucent paper over Liquid Glass, `--ink-3` darkened to `#4f4b46`, `--blur-heavy`. The titlebar belongs to the traffic lights and an overlay title; do not put tabs there |
+| **Tauri desktop** | `.glass` — translucent paper over Liquid Glass, the ink ramp unchanged, `--glass-heavy`. The titlebar belongs to the traffic lights and an overlay title; do not put tabs there |
 | **PWA** | `.standalone` — safe-area insets |
 | **phone** | `≤640px`: shorter composer, 44px targets, thumbnails on their own row, fixed-position agent cards, status label hidden |
 

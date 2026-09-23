@@ -70,12 +70,14 @@ const HELPERS = () => {
 let page;
 try {
   // ---------- 1. The sweep: every option, every state, every size ----------
-  const overflow = [], semantics = [], targets = [], contrastBad = [];
+  const overflow = [], semantics = [], targets = [], contrastBad = [], tokenless = [];
   const perViewport = {};
   for (const vp of VIEWPORTS) {
     page = await browser.newPage({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
     collect(page);
     await page.goto(`${url}?scale=1&frame=${vp.width}x${vp.height}`);
+    // The app's CSS reads every value from tokens.css. Unlinked, each var() resolves to nothing and the sweep below still passes.
+    if (!(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--t2').trim()))) tokenless.push(vp.id);
     await page.waitForFunction(() => window.sidebarLab?.ready, null, { timeout: 30000 });
     await page.addScriptTag({ content: `(${HELPERS.toString()})()` });
     const ids = await page.evaluate(() => sidebarLab.options);
@@ -150,6 +152,8 @@ try {
     await page.close();
   }
   const dedupe = list => [...new Set(list)];
+  if (tokenless.length) fail('the lab renders on the app tokens', { viewports: tokenless, note: '--t2 is empty: public/tokens.css is not linked or not served' });
+  else check(`The app tokens are loaded: --t2 resolves at ${VIEWPORTS.length} sizes`);
   if (overflow.length) fail('no horizontal overflow', { examples: dedupe(overflow).slice(0, 10) });
   else check(`No horizontal overflow: ${STATES.length} states × ${VIEWPORTS.length} sizes`);
   if (semantics.length) fail('every state says what it should', { examples: dedupe(semantics).slice(0, 12) });

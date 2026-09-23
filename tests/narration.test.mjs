@@ -20,8 +20,23 @@ test('each authored line is pinned exactly', () => {
   assert.equal(narrate('brief', ctx).voice, 'Morning.');
   assert.equal(narrate('brief', { text: '**v2.3** is out on main. Nothing else moved.' }).voice, 'v2.3 is out on main.', 'decimals do not end a spoken sentence');
   assert.equal(narrate('checks-failed', { title: 't', number: 3 }).text, 'Checks failed on **t** (PR #3): a required check did not pass. The branch is intact. Want me to look at the failing job?');
-  assert.deepEqual([...narrationKinds].sort(), ['brief', 'checks-failed', 'draft-pr', 'merged', 'milestone', 'remote-changed', 'streak']);
+  assert.deepEqual([...narrationKinds].sort(), ['brief', 'checks-failed', 'draft-pr', 'interrupted', 'merged', 'milestone', 'remote-changed', 'stopped', 'streak', 'waiting']);
   assert.throws(() => narrate('reminder', {}), /Unknown narration kind/);
+});
+
+test('a stopped, interrupted or waiting build is said without a verdict', () => {
+  assert.equal(narrate('stopped', ctx).text, 'Stopped **Card data as JSON** on battalion. The work is kept; retry when you want.');
+  assert.equal(narrate('interrupted', ctx).text, '**Card data as JSON** on battalion was interrupted when the backend stopped. Work is kept; look before an explicit retry.');
+  assert.equal(narrate('waiting', ctx).text, '**Card data as JSON** on battalion is waiting on you.');
+  assert.equal(spoken('stopped'), 'Stopped Card data as JSON on battalion, and the work is kept.');
+  assert.equal(spoken('interrupted'), 'Card data as JSON on battalion was interrupted, but the work is kept.');
+  assert.equal(spoken('waiting'), 'Card data as JSON on battalion is waiting on you.');
+  for (const kind of ['stopped', 'interrupted', 'waiting']) {
+    const { text, voice } = narrate(kind, ctx);
+    assert.doesNotMatch(text + voice, /fail/i, `${kind} passes no judgement: ${text}`);
+    assert.ok(voice.length <= 120, `${kind} voice ${voice.length} chars`);
+    assert.equal(narrate(kind, { title: 'a_b', project: 'x*y' }).text.includes('a\\_b'), true, `${kind} escapes its title`);
+  }
 });
 
 test('interpolated values are markdown-escaped in text and kept plain in voice', () => {

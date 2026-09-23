@@ -554,8 +554,8 @@ const openDrawer = async page => {
   await page.waitForFunction(() => document.querySelector('#workspace-sidebar').getAttribute('aria-hidden') === 'false');
   await page.evaluate(() => Promise.all(document.querySelector('#workspace-sidebar').getAnimations().map(a => a.finished.catch(() => {}))));
 };
-/* A touch screen gets 44px targets. The thread gear was 40 wide, and the thread card's Save and
-   Archive and the Retry under an unreachable list followed the 32–36px pill rules. */
+/* A touch screen gets 44px targets. The thread gear was 40 wide, every card's × was 32, and the thread
+   card's Save and Archive and the Retry under an unreachable list followed the 32–36px pill rules. */
 async function touchTargetsOnTheNewControls() {
   const thread = fixture.createThread('Touch targets');
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -569,6 +569,7 @@ async function touchTargetsOnTheNewControls() {
   const card = page.locator('.margin-card:not([hidden])');
   await card.getByRole('button', { name: 'Archive', exact: true }).click();
   for (const [w, h] of await box('.margin-thread-card:not([hidden]) .margin-pill, .margin-thread-card:not([hidden]) input')) assert.ok(h >= 44, 'a thread card control is ' + w + 'x' + h);
+  for (const [w, h] of await box('.margin-card:not([hidden]) .margin-close')) assert.ok(w >= 44 && h >= 44, 'a card close is ' + w + 'x' + h);
   await page.screenshot({ path: out + 'thread-card-touch-390x844.png' });
   await page.close();
   page = await open(context, '/?nosw=1', { before: page => page.route('**/api/projects', route => route.abort()), expectFailed: /\/api\/projects$/ });

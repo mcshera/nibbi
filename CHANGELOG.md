@@ -105,6 +105,69 @@ Providers, its chip opens it, the tab checks your sign-in as it opens and puts i
 sign-in finishing elsewhere says "signed in". The wake greeting stops using a name nothing in the
 app knows.
 
+### Attention, liveness, and the harness
+
+**A stopped build is not a failed one.** A cancelled or interrupted build was announced with the
+failure sentence's shape, the happy face and the success sound. Each announced status is one row now
+— mood, sound, beat, notification — and a stop or an interruption is a notice that says the work is
+kept: no verdict colour, no sound, no splash.
+
+**Notifications arrive.** They were wired to a function nothing called. A build that is ready,
+failed, merged or waiting on you notifies when the window is hidden or not focused, and in a browser
+the click opens that build. In the desktop shell the click does nothing yet; that needs a handler in
+the shell and a window-focus capability, which is a shell release.
+
+**Waiting on you.** Nothing in the daemon reports `awaiting_input` yet, but a build that does now
+leads the Builds badge ("1 needs input" — the lobby's "waiting on you" already counts every build that
+wants a decision, so the badge says what it counts), joins the attention filter, counts on the dock
+badge and in the tab title, offers steer, stop and open build, and is named in the while-you-were-away
+line. A build that asks, is answered and asks again is announced both times. An interrupted build is
+counted as "1 interrupted", in ink: it shares the failed group, but nothing judged it.
+
+**The closed bar still speaks.** On a phone the bar is a closed drawer, so its toggle carries what the
+project wants from you, in words ("1 review", "2 failed"). It is still labelled "Open sidebar"; the
+words describe it. The project you are in is read with the bar closed, so the words are current. On a
+narrow phone they wrap to a second line before they reach the character in its talk pose, rather than
+painting the toggle over its face (measured at 320, 360 and 390).
+
+**A streamed reply counts as new.** The jump button counted only what nibbi said on its own, so
+scrolling up during a long reply always read "latest". Each block that finishes below you counts
+now, so it can say "3 new" while you read.
+
+**The Builds lobby stays live.** It held every read back behind "Show updates" whenever focus was
+anywhere inside it, so one click on a tab stopped the lobby updating. It waits now only while you
+type or decide — a field, a form, a confirmation, a GitHub review — or while focus is somewhere it
+cannot be given back. Focus on a tab, a filter, an action, Refresh, a build's row or anything inside
+an open log or diff comes back to the same control once the rows update; a link in a summary still
+holds the read behind "Show updates", as before. An open Log follows its build: each event joins the
+list on screen, the lobby's own reads leave an open log or diff as the node it was, and what arrives
+while the build is off screen is there when it is back. A reply that is still streaming locks only
+what writes into the composer (New build, Discuss plan, a New issue with nowhere to save it); stop,
+retry, discard, merge, play and the forms are commands to the daemon and no longer wait for it. The
+lobby's summary counts a build waiting on you as waiting, not building.
+
+**The harness.** The demo has a reply with a fence and a table (`show me the code`), and the
+streaming suite runs it at 1180×600, 390×844 and under glass: an open fence is code from its first
+line, the caret sits on the sentence being written, the table fits a phone, and glass changes the
+paper but not the ink. WebKit, the engine the app ships in, has a suite of its own —
+`npm run verify:webkit`: the bar, a streamed reply and the Builds lobby at two sizes — which CI runs
+after `npm run verify`. The sidebar lab renders on the real tokens again, and fails when it does not.
+
+**The manual suites run again.** Four tools that described a bar or an install that no longer
+exists are gone (`margin-polish-verify`, `margin-surface-verify`, `project-sections-verify`, and
+`webkit-bar-check`, which `webkit-verify` replaces). `margin-ui-verify`, `sidebar-verify` and
+`project-workflow-verify` point at this checkout and today's gestures; the shared project picker no
+longer waits forever on a turn's endless pulse; and `npm run verify:all` runs every manual suite in
+one go. The README and the sidebar doc say where Hey Nibbi lives: the composer's + panel.
+
+**Found by running the three together.** An interrupted build is ink in the lobby too, as it already
+was on the bar; failed keeps the verdict colour. A card's × and a project's gear are 44px on a phone
+and under touch — they were 32 and 40. On a phone the composer stays out of reach behind the open
+drawer: the drawer made the page inert and then asked for a layout, which handed the composer back.
+And switching the system's reduced motion always reaches the character: reading the setting between
+the switch and its change event swallowed the event, so Settings said "OS reduced motion" while the
+character kept moving.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which

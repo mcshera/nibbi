@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {progressLine} from '../public/lib/margin-ui.js';
+import {describeProjectSection} from '../public/lib/project-summary.js';
 
 // The bar is loaded into the page as a data: module, and a data: module cannot resolve a relative
 // import, so the one module margin-ui.js imports (./empty.js) is inlined into it the same way.
@@ -382,6 +383,58 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('#status').count(), 0);
     assert.equal(await page.locator('#workspace-sidebar').count(), 0);
     assert.equal(await page.locator('#outside').evaluate(el => el.inert), false);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+// On a phone the bar is a closed drawer, so what the project wants from you rides on the toggle, in words.
+test('the closed bar says on its toggle what is waiting, without renaming the toggle', {timeout: 60000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+    const errors = []; page.on('pageerror', err => errors.push(err.message));
+    await page.setContent('<meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav>');
+    await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
+    await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
+    const moduleURL = await marginModuleURL();
+    await page.evaluate(async url => {
+      const {installMarginUI} = await import(url);
+      window.ui = installMarginUI({onAction: () => {}});
+      window.model = {projects: [{id:'alpha', name:'Alpha', active:true, branch:'main', sections:{builds:{badge:'1 needs input', tone:'attention'}, issues:{badge:'No issues', tone:'quiet'}, plans:{badge:'No plan', tone:'quiet'}}}], activeProject:'alpha', settings:{}};
+      ui.update(model);
+    }, moduleURL);
+    const toggle = page.locator('#sidebar-toggle'), count = page.locator('#sidebar-toggle .sidebar-toggle-count');
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true', 'a phone starts with the bar closed');
+    assert.equal(await count.innerText(), '1 needs input', 'words, never a bare number');
+    assert.equal(await toggle.getAttribute('aria-label'), 'Open sidebar', 'the label is still what pressing it does');
+    assert.equal(await toggle.getAttribute('aria-describedby'), await count.getAttribute('id'), 'the count describes the toggle');
+    const box = await toggle.boundingBox();
+    assert.ok(box.width > 60 && box.height >= 40, 'the toggle grows to hold the words: ' + JSON.stringify(box));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'and stays on the page');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).fontVariantNumeric), 'tabular-nums');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).color), await count.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--ink-2)'; el.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }), 'attention is ink, not a verdict colour');
+    await page.evaluate(() => {model.projects[0].sections.builds = {badge:'2 failed', tone:'error'}; ui.update(model);});
+    assert.equal(await count.innerText(), '2 failed');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).color), await count.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--fail-text)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }), 'a failure is the verdict colour');
+    // An interruption, from the summary the bar really gets: counted as one, in ink, not as a failure.
+    const interrupted = describeProjectSection('builds', {status:'ready', counts:{total:1, failed:1, byStatus:{interrupted:1}}, runs:[{id:'r', status:'interrupted'}]});
+    await page.evaluate(builds => {model.projects[0].sections.builds = builds; ui.update(model);}, interrupted);
+    assert.equal(await count.innerText(), '1 interrupted');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).color), await count.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--ink-2)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }), 'an interruption is not a verdict');
+    // The talk pose sits top-centre with r >= 48: on a 320px phone the words wrap before its left edge.
+    await page.setViewportSize({width: 320, height: 568});
+    for (const badge of ['1 needs input', '14 need attention', '2 pull requests']) {
+      await page.evaluate(badge => {model.projects[0].sections.builds = {badge, tone:'attention'}; ui.update(model);}, badge);
+      const fit = await count.evaluate(el => ({right: el.closest('button').getBoundingClientRect().right, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)), clipped: el.scrollHeight > el.clientHeight + 1}));
+      assert.ok(fit.right <= 320 / 2 - 48, `"${badge}" ends at ${fit.right}px, left of the talk pose at 112px`);
+      assert.ok(fit.lines <= 2 && !fit.clipped, `"${badge}" in two lines at most, not clipped: ${JSON.stringify(fit)}`);
+    }
+    await page.setViewportSize({width: 390, height: 844});
+    await page.evaluate(() => {model.projects[0].sections.builds = {badge:'No builds', tone:'quiet'}; ui.update(model);});
+    assert.equal(await count.textContent(), '', 'nothing waiting, nothing said');
+    assert.equal(Math.round((await toggle.boundingBox()).width), 40, 'and the toggle is its own size again');
+    await toggle.click();
+    assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false');
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

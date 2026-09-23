@@ -172,3 +172,15 @@ test('stepSummaryLine with and without failures', () => {
   assert.equal(stepSummaryLine([]), '');
   assert.equal(stepSummaryLine(undefined), '');
 });
+
+test('eventToLogEntry gives a live event the shape a re-read log row has', async () => {
+  const { eventToLogEntry } = await import('../public/lib/transcript.js');
+  const at = Date.parse('2026-09-22T10:00:00Z');
+  assert.deepEqual(eventToLogEntry({ id: 9, type: 'tool.finished', at, runId: 'r1', payload: { name: 'edit_file', source: 'governed', ok: true, summary: 'Replaced 1 match', elapsedMs: 880, bytes: 4231, diff: '+x', attemptId: 'a1' } }),
+    { ts: '2026-09-22T10:00:00.000Z', kind: 'tool.finished', text: 'Replaced 1 match', name: 'edit_file', attemptId: 'a1', phase: 'finished', source: 'governed', input: undefined, ok: true, summary: 'Replaced 1 match', error: undefined, elapsedMs: 880, bytes: 4231, diff: '+x' });
+  assert.deepEqual(eventToLogEntry({ type: 'tool.started', at, payload: { name: 'read_file', input: { path: 'a.ts' } } }).phase, 'started');
+  assert.deepEqual(eventToLogEntry({ type: 'run.updated', at, runId: 'r1', payload: { run: { id: 'r1', status: 'superseded' } } }), { ts: '2026-09-22T10:00:00.000Z', kind: 'run.updated', text: 'superseded' }, 'a status change reads as its status, as runEvents has it');
+  assert.equal(eventToLogEntry({ type: 'process.output', at: 'not a time', payload: { text: 'npm test' } }).ts, '', 'no invented time');
+  assert.equal(eventToLogEntry({ type: 'process.output', at, payload: { text: 'npm test' } }).text, 'npm test');
+  for (const bad of [null, undefined, 'x', {}, { type: 3 }]) assert.equal(eventToLogEntry(bad), null);
+});

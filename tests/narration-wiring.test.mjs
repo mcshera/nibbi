@@ -78,7 +78,9 @@ test('runStatusChange announces a run status only when the record did not alread
   for (const status of ['queued', 'running', 'verifying', 'discarded', 'superseded', undefined]) assert.equal(runStatusChange(staged, { status }), null, `${status} is never announced`);
   assert.equal(runStatusChange(staged, undefined), null);
   assert.equal(runStatusChange(merged, { status: 'merged' }), null, 'a GitHub merge of a Build that already merged locally is not narrated twice');
-  for (const status of ['staged', 'failed', 'merged', 'interrupted', 'cancelled']) assert.equal(runStatusChange({ status: 'running' }, { status }), status);
+  for (const status of ['staged', 'failed', 'merged', 'interrupted', 'cancelled', 'awaiting_input']) assert.equal(runStatusChange({ status: 'running' }, { status }), status);
+  assert.equal(runStatusChange({ status: 'running' }, { status: 'awaiting_input' }), 'awaiting_input', 'a build that stops to ask is news');
+  assert.equal(runStatusChange({ status: 'awaiting_input' }, { status: 'awaiting_input' }), null, 'and asking again is not');
 });
 
 test('streakIncrease speaks only when a verified delivery extends a known streak', () => {

@@ -6,7 +6,7 @@ Round one's four bars are still here: `?only=_today,scope,peer,spine`.
 
 The ask, in the owner's words: *"chat is at the bottom when it should almost be a different tab on the projects bar like a dropdown."* Read [BRIEF.md](BRIEF.md) for the reasoning, the scorecard and the recommendation; [references.md](references.md) for what T3 Code, OpenCode, Claude Code desktop, Zed, Cursor and Warp do; [CONTRACT.md](CONTRACT.md) for what an option must satisfy.
 
-**No production file is changed.** The lab serves the app's real `styles.css`, `margins.css` and `project-workspace.css` read-only, so every design renders on the real tokens and the `Today` baseline is the real bar rather than a drawing of it.
+**No production file is changed.** The lab serves the app's real `tokens.css`, `styles.css`, `margins.css` and `project-workspace.css` read-only, so every design renders on the real tokens and the `Today` baseline is the real bar rather than a drawing of it.
 
 ## Preview
 

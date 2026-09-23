@@ -4,7 +4,7 @@ import {chooseProject,closeSwitcher,openProjectCard} from './choose-project.mjs'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
 import { chromium } from 'playwright';
-const ui = resolve(process.env.NIBBI_SIDEBAR_UI || '/private/tmp/nibbi-sidebar-preview');
+const ui = resolve(process.env.NIBBI_SIDEBAR_UI || 'dist/ui');   // the built UI of this checkout; a preview elsewhere via NIBBI_SIDEBAR_UI
 const out = resolve(process.env.NIBBI_SIDEBAR_OUTPUT || 'output/playwright/sidebar');
 mkdirSync(out,{recursive:true});
 const report={ui,checks:[],errors:[],mutations:[]};
@@ -72,13 +72,18 @@ try {
     await page.locator('#status').click();await page.locator('#st-voice').waitFor({state:'visible'});
     await bounds(page,'.margin-card:not([hidden])');await shot(page,`settings-${w}x${h}`);
     await page.keyboard.press('Escape');await page.locator('.sidebar-collapse').click();
-    assert.equal(await page.locator('#ask').inputValue(),'Keep this draft');assert.equal(await page.locator('#workspace-sidebar').evaluate(el=>el.inert),true);
+    // A draft belongs to the conversation it was typed in (per-thread drafts): observatory's home has its own, empty one.
+    assert.equal(await page.locator('#ask').inputValue(),'');assert.equal(await page.locator('#workspace-sidebar').evaluate(el=>el.inert),true);
     assert.equal(await page.evaluate(()=>document.activeElement.id),'sidebar-toggle');
     await page.locator('#sidebar-toggle').press('Space');await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);
     assert.equal(await page.locator('.margin-switch-trigger').getAttribute('data-current-project'),'observatory');
     if(w<900){assert.equal(await page.locator('#pill').evaluate(el=>el.inert),true);await page.locator('.sidebar-backdrop').click({position:{x:w-5,y:h/2}});assert.equal(await page.locator('#pill').evaluate(el=>el.inert),false);}
     else {const pill=await bounds(page,'#pill');assert(pill.x>=256);}
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    // ...and paper-garden's is still there when you go back to it.
+    if(w<900){await page.locator('#sidebar-toggle').click();await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);}
+    await chooseProject(page,'paper-garden');
+    assert.equal(await page.locator('#ask').inputValue(),'Keep this draft','the draft comes back with its conversation');
   });} finally {await context.close();}
  }
  const {page,context}=await fixture({width:1440,height:900});

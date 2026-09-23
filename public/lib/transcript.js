@@ -64,3 +64,18 @@ export function stepSummaryLine(steps, totalMs) {
   const failed = list.filter((s) => s?.ok === false).length;
   return list.length + (list.length === 1 ? ' step' : ' steps') + (ms > 0 ? ' in ' + elapsedLabel(ms) : '') + (failed ? ' · ' + failed + ' failed' : '');
 }
+
+/* An event from /api/events ({type, at, runId, payload}) as a Builds Log row — the shape the daemon's
+   runEvents (read-models.ts) gives /api/fixer-log, so a live row and a re-read row render the same. */
+export function eventToLogEntry(event) {
+  if (!event || typeof event !== 'object' || typeof event.type !== 'string') return null;
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const tool = event.type === 'tool.started' || event.type === 'tool.finished';
+  const at = typeof event.at === 'number' ? event.at : Date.parse(event.at);
+  return {
+    ts: Number.isFinite(at) ? new Date(at).toISOString() : '', kind: event.type,
+    text: String(payload.text ?? payload.summary ?? payload.name ?? payload.run?.status ?? ''),
+    ...(payload.name !== undefined ? { name: String(payload.name) } : {}), ...(payload.attemptId !== undefined ? { attemptId: String(payload.attemptId) } : {}),
+    ...(tool ? { phase: event.type === 'tool.finished' ? 'finished' : 'started', source: payload.source, input: payload.input, ok: payload.ok, summary: payload.summary, error: payload.error, elapsedMs: payload.elapsedMs, bytes: payload.bytes, diff: payload.diff } : {}),
+  };
+}

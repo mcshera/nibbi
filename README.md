@@ -52,7 +52,7 @@ Claude API billing is an explicit advanced option only: set `NIBBI_CLAUDE_AUTH=a
 
 ## Voice
 
-Click the mic once (or press ⌥ Space) to turn on local wake listening. Say **“Hey Nibbi”**; Nibbi replies **“What's up, Matty?”**, then listens for your message. Click again to turn the mic off. See [voice controls, privacy and limits](docs/VOICE-TOGGLE.md).
+Open the + panel and turn on Hey Nibbi (or press ⌥ Space) to start local wake listening. Say **“Hey Nibbi”**; Nibbi replies **“What's up, Matty?”**, then listens for your message. Turn it off the same way. See [voice controls, privacy and limits](docs/VOICE-TOGGLE.md).
 
 ## Phone
 

@@ -41,6 +41,19 @@ const lines = {
     const n = Number(days), line = `${num(days)} ${n === 1 ? 'day' : 'days'} running with something real merged.`;
     return { text: line, voice: line };
   },
+  // A stopped or interrupted build is not judged: the work is kept, and the line says so without a verdict colour.
+  stopped: ({ title, project }) => ({
+    text: `Stopped **${esc(title)}** on ${esc(project)}. The work is kept; retry when you want.`,
+    voice: `Stopped ${said(title)} on ${plain(project)}, and the work is kept.`,
+  }),
+  interrupted: ({ title, project }) => ({
+    text: `**${esc(title)}** on ${esc(project)} was interrupted when the backend stopped. Work is kept; look before an explicit retry.`,
+    voice: `${said(title)} on ${plain(project)} was interrupted, but the work is kept.`,
+  }),
+  waiting: ({ title, project }) => ({
+    text: `**${esc(title)}** on ${esc(project)} is waiting on you.`,
+    voice: `${said(title)} on ${plain(project)} is waiting on you.`,
+  }),
   brief: ({ text }) => {
     const body = String(text ?? '');
     const first = stripMd(body).match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] || stripMd(body);
@@ -102,7 +115,7 @@ export function streakIncrease(previous, next) {
 }
 
 // Run statuses the chat announces. Legacy records say 'done' where the app says 'staged'.
-const ANNOUNCED = new Set(['staged', 'failed', 'merged', 'interrupted', 'cancelled']);
+const ANNOUNCED = new Set(['staged', 'failed', 'merged', 'interrupted', 'cancelled', 'awaiting_input']);
 const runStatus = run => run && typeof run === 'object' ? (run.status === 'done' ? 'staged' : run.status) : undefined;
 /** runStatusChange(previous, next) → next's announced status when the previous record did not already carry it, else null.
     GitHub binding refreshes re-emit a run record with its current status every minute; only a change is news.
