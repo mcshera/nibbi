@@ -30,7 +30,14 @@ try {
         await page.locator('.margin-card:not([hidden])').waitFor();
         await page.waitForTimeout(250);
         await page.screenshot({ path: `${out}settings-${material}-${width}x${height}.png` });
+        await page.keyboard.press('Escape');
       }
+      // A section, opened from the bar: the character in its header pose, no fixers over the records,
+      // and the header × as the way back. Below 900 the drawer is already open from the shot above.
+      await page.locator('.margin-tab[data-margin-tab="builds"]').click();
+      await page.waitForFunction(() => !document.querySelector('#project-workspace').hidden && document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false');
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: `${out}section-${material}-${width}x${height}.png` });
       await context.close();
     }
   }

@@ -1,14 +1,5 @@
 /* Keep the live composer mounted so drafts, attachments and active work survive navigation. */
 body.project-view #pill { display: none; }
-.project-chat-launcher {
-  position: fixed; z-index: var(--z-dock);
-  right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom));
-  min-height: 48px; padding: 12px 20px; border-radius: var(--r-dock);
-  background: var(--pill-bg); border: 1px solid var(--line); color: var(--ink);
-  box-shadow: var(--e-highlight), var(--e-docked);
-  backdrop-filter: var(--glass); font: inherit; font-size: var(--type-body); cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.project-chat-launcher:hover { border-color: var(--ink-3); }
-.project-chat-launcher:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 3px; }
-body.project-view .agents { bottom: calc(80px + env(safe-area-inset-bottom)); }
+/* A section is a room: the fixers stay outside it. They floated over its records, and Builds already
+   carries every one of them with its own Active filter and Guide build. The header × is the way back. */
+body.project-view .agents { display: none; }
