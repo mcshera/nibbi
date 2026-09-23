@@ -171,7 +171,11 @@ body.native-mac .margin-card-right { top: auto; }
 .project-section { display: flex; align-items: center; text-align: left; border: 0; border-radius: var(--r-inline); background: none; color: var(--ink-2); font-size: var(--type-fine); }
 .project-section:hover { background: var(--veil-well); }
 .project-section[aria-current="page"] { background: var(--veil-hover); color: var(--ink); font-weight: 600; }
-@media (max-width: 899px) { .project-options { width: 40px; height: var(--touch); } }
+@media (max-width: 899px), (pointer: coarse) {
+  .project-options { width: var(--touch); height: var(--touch); }
+  /* 44px to press, same place to see: the negative margins keep the × on the padding edge and the head its height */
+  .margin-close { width: var(--touch); height: var(--touch); margin: -6px -12px -6px 0; }
+}
 /* Navigation explains the work waiting inside each project section. */
 .project-section { min-height: var(--touch); gap: 8px; padding: 7px 8px; }
 .project-section-copy { flex: 1; min-width: 0; }
