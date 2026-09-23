@@ -200,13 +200,23 @@ layout(true);
 const interactions = installPocketInteractions({ nibbi, canvas: fxCv,
   getContext: () => ({ busy: S.busy, mode: S.mode, mood: nibbi.mood() }), onInteract: () => activity() });
 let calmMotion = LS.get('pocketCalm', false) === true;
+let appliedSystemReduced = null;
 function syncMotionPreference() {
   const system = reducedMotion.matches, calm = system || calmMotion;
+  appliedSystemReduced = system;
   nibbi.setReducedMotion(calm); interactions.setReducedMotion(calm);
   body.classList.toggle('calm', calm);   // the CSS kill switch follows the preference, not only the system setting
   syncMargins();
 }
 reducedMotion.addEventListener('change', syncMotionPreference);
+/* Reading .matches re-evaluates the query, and Chromium then has no change left to report, so a read
+   between an OS switch and its 'change' event swallows the event. The bar reads it on every sync, so
+   whoever reads it applies what it sees; the event is no longer the only way the switch arrives. */
+function systemReducedMotion() {
+  const system = reducedMotion.matches;
+  if (appliedSystemReduced !== null && system !== appliedSystemReduced) queueMicrotask(syncMotionPreference);
+  return system;
+}
 
 function setMode(m) {
   if (S.mode === m) return;
@@ -245,7 +255,7 @@ function noteUnread(n) {
 }
 function scrollFeed(force) { if (!force && !S.stick) return; if (scrollRaf) return; scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; feed.scrollTop = feed.scrollHeight; }); }
 feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; if (atBottom) noteUnread(0); } }, { passive: true });
-jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: reducedMotion.matches || calmMotion ? 'auto' : 'smooth' }); };
+jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: systemReducedMotion() || calmMotion ? 'auto' : 'smooth' }); };
 new MutationObserver(() => scrollFeed(false)).observe(feed, { childList: true, subtree: true, characterData: true });
 new ResizeObserver(() => scrollFeed(false)).observe(feed);
 
@@ -1193,7 +1203,7 @@ function shotsRow(paths) {
 /* ------------------------------------------------------------------ sounds: three quiet ink plops, synthesised, off by default */
 let audioCtxS = null;
 function sound(kind) {
-  if (!LS.get('sounds', false) || reducedMotion.matches) return;
+  if (!LS.get('sounds', false) || systemReducedMotion()) return;
   try {
     audioCtxS = audioCtxS || new (window.AudioContext || window.webkitAudioContext)();
     const c = audioCtxS, t0 = c.currentTime, o = c.createOscillator(), g = c.createGain();
@@ -1929,7 +1939,7 @@ function syncMargins() {
     notificationsSupported: !!notificationApi(),
     notificationStatus: { granted: 'Notifications are allowed by the system or browser', denied: 'Notifications are blocked in system or browser settings', default: 'Notifications need your permission; turning them on asks for it', unavailable: 'Notifications aren’t available here' }[notificationPermission] || 'Notifications aren’t available here', notificationBlocked: notificationPermission === 'denied',   // every status names its subject: the card shows it with nothing beside it
     ...metadata,
-    demo: S.demo, calm: calmMotion, systemReduced: reducedMotion.matches,
+    demo: S.demo, calm: calmMotion, systemReduced: systemReducedMotion(),
     glass: glassOn, glassAvailable,
   } });
 }
@@ -2004,7 +2014,7 @@ async function handleMarginAction(action, id, value) {
       if (!S.voiceOn) stopSpeaking(); syncMargins(); toast(S.voiceOn ? 'spoken replies on' : 'spoken replies off — microphone unchanged'); return;
     case 'sounds': { const on = !LS.get('sounds', false); LS.set('sounds', on); syncMargins(); if (on) sound('send'); return; }
     case 'notifications': await toggleNotifications(); return;
-    case 'calm': if (!reducedMotion.matches) { calmMotion = !calmMotion; LS.set('pocketCalm', calmMotion); syncMotionPreference(); } return;
+    case 'calm': if (!systemReducedMotion()) { calmMotion = !calmMotion; LS.set('pocketCalm', calmMotion); syncMotionPreference(); } return;
     case 'glass': if (glassAvailable) { glassOn = !glassOn; LS.set('glass', glassOn); applyPaper(); syncMargins(); toast(glassOn ? 'glass window' : 'paper window'); } return;
     case 'demo': S.demo = !S.demo; syncMargins(); await refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); return;
     case 'thread': {
@@ -2297,7 +2307,7 @@ ask.addEventListener('focus', () => { layout(false); interactions.event('focus')
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
-  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: reducedMotion.matches || calmMotion ? 'auto' : 'smooth' }); }
+  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: systemReducedMotion() || calmMotion ? 'auto' : 'smooth' }); }
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   // Escape dismisses; it does not destroy. Clearing the whole conversation is a two-step action and
   // lives on the Settings card's Tidy conversation, next to what it affects.
