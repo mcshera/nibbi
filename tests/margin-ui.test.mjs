@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {progressLine} from '../public/lib/margin-ui.js';
+import {describeProjectSection} from '../public/lib/project-summary.js';
 
 test('progress line reports verified merges without proposing a next goal', () => {
   assert.equal(progressLine(undefined), 'Progress not available');
@@ -344,12 +345,12 @@ test('the closed bar says on its toggle what is waiting, without renaming the to
     await page.evaluate(async url => {
       const {installMarginUI} = await import(url);
       window.ui = installMarginUI({onAction: () => {}});
-      window.model = {projects: [{id:'alpha', name:'Alpha', active:true, branch:'main', sections:{builds:{badge:'1 waiting on you', tone:'attention'}, issues:{badge:'No issues', tone:'quiet'}, plans:{badge:'No plan', tone:'quiet'}}}], activeProject:'alpha', settings:{}};
+      window.model = {projects: [{id:'alpha', name:'Alpha', active:true, branch:'main', sections:{builds:{badge:'1 needs input', tone:'attention'}, issues:{badge:'No issues', tone:'quiet'}, plans:{badge:'No plan', tone:'quiet'}}}], activeProject:'alpha', settings:{}};
       ui.update(model);
     }, moduleURL);
     const toggle = page.locator('#sidebar-toggle'), count = page.locator('#sidebar-toggle .sidebar-toggle-count');
     assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true', 'a phone starts with the bar closed');
-    assert.equal(await count.innerText(), '1 waiting on you', 'words, never a bare number');
+    assert.equal(await count.innerText(), '1 needs input', 'words, never a bare number');
     assert.equal(await toggle.getAttribute('aria-label'), 'Open sidebar', 'the label is still what pressing it does');
     assert.equal(await toggle.getAttribute('aria-describedby'), await count.getAttribute('id'), 'the count describes the toggle');
     const box = await toggle.boundingBox();
@@ -360,6 +361,20 @@ test('the closed bar says on its toggle what is waiting, without renaming the to
     await page.evaluate(() => {model.projects[0].sections.builds = {badge:'2 failed', tone:'error'}; ui.update(model);});
     assert.equal(await count.innerText(), '2 failed');
     assert.equal(await count.evaluate(el => getComputedStyle(el).color), await count.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--fail-text)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }), 'a failure is the verdict colour');
+    // An interruption, from the summary the bar really gets: counted as one, in ink, not as a failure.
+    const interrupted = describeProjectSection('builds', {status:'ready', counts:{total:1, failed:1, byStatus:{interrupted:1}}, runs:[{id:'r', status:'interrupted'}]});
+    await page.evaluate(builds => {model.projects[0].sections.builds = builds; ui.update(model);}, interrupted);
+    assert.equal(await count.innerText(), '1 interrupted');
+    assert.equal(await count.evaluate(el => getComputedStyle(el).color), await count.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--ink-2)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }), 'an interruption is not a verdict');
+    // The talk pose sits top-centre with r >= 48: on a 320px phone the words wrap before its left edge.
+    await page.setViewportSize({width: 320, height: 568});
+    for (const badge of ['1 needs input', '14 need attention', '2 pull requests']) {
+      await page.evaluate(badge => {model.projects[0].sections.builds = {badge, tone:'attention'}; ui.update(model);}, badge);
+      const fit = await count.evaluate(el => ({right: el.closest('button').getBoundingClientRect().right, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)), clipped: el.scrollHeight > el.clientHeight + 1}));
+      assert.ok(fit.right <= 320 / 2 - 48, `"${badge}" ends at ${fit.right}px, left of the talk pose at 112px`);
+      assert.ok(fit.lines <= 2 && !fit.clipped, `"${badge}" in two lines at most, not clipped: ${JSON.stringify(fit)}`);
+    }
+    await page.setViewportSize({width: 390, height: 844});
     await page.evaluate(() => {model.projects[0].sections.builds = {badge:'No builds', tone:'quiet'}; ui.update(model);});
     assert.equal(await count.textContent(), '', 'nothing waiting, nothing said');
     assert.equal(Math.round((await toggle.boundingBox()).width), 40, 'and the toggle is its own size again');

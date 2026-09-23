@@ -1035,6 +1035,9 @@ async function notify(title, body, f) {
 async function setBadge(n) { try { const W = window.__TAURI__ && window.__TAURI__.window; if (W && W.getCurrentWindow) { const w = W.getCurrentWindow(); if (w.setBadgeCount) await w.setBadgeCount(n > 0 ? n : undefined); } } catch { /* unsupported */ } }
 // What is waiting on you: builds to review from the last week, and builds that stopped to ask you something.
 function refreshBadge() {
+  // A question is answered once its build moves on; the next time it stops to ask is news again.
+  // Every run record passes through here, so this is where an announced ask is forgotten.
+  for (const f of S.fixers || []) if (f.status !== 'awaiting_input' && bubbledRunStatus.get(f.id) === 'awaiting_input') bubbledRunStatus.delete(f.id);
   const n = (S.fixers || []).filter((f) => (f.status === 'staged' && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)) || f.status === 'awaiting_input').length;
   if (n === S.badge) return;
   S.badge = n; setBadge(n);
@@ -1162,7 +1165,7 @@ function postAwayBubble(evs) {
   const first = Math.min(...done.map((e) => e.ts)); const ago = Math.round((Date.now() - first) / 3600000);
   const grp = (st) => done.filter((e) => e.to === st);
   const parts = [];
-  if (grp('awaiting_input').length) parts.push(grp('awaiting_input').length + ' waiting on you (' + grp('awaiting_input').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
+  if (grp('awaiting_input').length) parts.push(grp('awaiting_input').length + (grp('awaiting_input').length === 1 ? ' needs' : ' need') + ' input (' + grp('awaiting_input').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('merged').length) parts.push(grp('merged').length + ' merged (' + grp('merged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('staged').length) parts.push(grp('staged').length + ' staged for review (' + grp('staged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('failed').length) parts.push(grp('failed').length + ' failed (' + grp('failed').map((e) => md.esc(e.title || e.id)).join(', ') + ')');

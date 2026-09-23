@@ -78,8 +78,21 @@ async function verdicts(browser) {
   await page.waitForFunction(() => / is waiting on you\.$/.test([...document.querySelectorAll('#feed .turn .said')].at(-1)?.innerText.trim() || ''));
   assert.deepEqual(await page.evaluate(() => [...[...document.querySelectorAll('#feed .turn')].at(-1).querySelectorAll('.chip')].map(c => c.textContent)), ['steer', 'stop', 'open build', 'ask nibbi']);
   await page.waitForFunction(() => document.title === '(2) Nibbi');
-  await page.waitForFunction(() => document.querySelector('.margin-tab[data-margin-tab="builds"]')?.getAttribute('aria-label') === 'Builds. 1 waiting on you', null, { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('.margin-tab[data-margin-tab="builds"]')?.getAttribute('aria-label') === 'Builds. 1 needs input', null, { timeout: 10000 });
   await page.screenshot({ path: out + 'verdict-waiting-1180x820.png' });
+
+  // Answered, then asked again: the second question is news as well, not a repeat of the first.
+  const asked = () => page.evaluate(() => [...document.querySelectorAll('#feed .turn .said')].filter(said => / is waiting on you\.$/.test(said.innerText.trim())).length);
+  assert.equal(await asked(), 1);
+  settle(asking, { status: 'running', endedAt: undefined });
+  await page.waitForFunction(() => document.title === '(1) Nibbi');
+  settle(asking, { status: 'awaiting_input', endedAt: undefined });
+  await page.waitForFunction(() => __qaMocks.notifications.length > 2);
+  assert.equal(await page.evaluate(() => __qaMocks.notifications[2].title), 'Needs your input');
+  await page.waitForFunction(() => [...document.querySelectorAll('#feed .turn .said')].filter(said => / is waiting on you\.$/.test(said.innerText.trim())).length === 2);
+  await page.waitForTimeout(600);
+  assert.equal(await asked(), 2, 'one line per question');
+  assert.equal(await page.evaluate(() => __qaMocks.notifications.length), 3, 'and one notification per question');
 
   // A notification is a way back to the build it is about.
   await page.evaluate(() => __qaMocks.notifications[0].onclick());
@@ -90,7 +103,7 @@ async function verdicts(browser) {
 
   // On a phone the closed bar says it on its toggle, and a focused window gets no notification.
   const phone = await open(browser, { width: 390, height: 844, mobile: true, init: () => { window.__qaMocks = { notifications: [] }; class N { static permission = 'granted'; static async requestPermission() { return 'granted'; } constructor(title) { __qaMocks.notifications.push(title); } } Object.defineProperty(window, 'Notification', { value: N, configurable: true }); document.hasFocus = () => true; } });
-  await phone.page.waitForFunction(() => document.querySelector('#sidebar-toggle .sidebar-toggle-count')?.textContent === '1 waiting on you', null, { timeout: 10000 });
+  await phone.page.waitForFunction(() => document.querySelector('#sidebar-toggle .sidebar-toggle-count')?.textContent === '1 needs input', null, { timeout: 10000 });
   assert.equal(await phone.page.locator('#sidebar-toggle').getAttribute('aria-label'), 'Open sidebar');
   assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'the wider toggle stays on the page');
   await phone.page.screenshot({ path: out + 'toggle-count-390x844.png' });
@@ -101,6 +114,29 @@ async function verdicts(browser) {
   await phone.page.waitForTimeout(1200);   // the character springs to its talk pose; shoot the settled room
   await phone.page.screenshot({ path: out + 'verdict-failed-390x844.png' });
   await phone.context.close();
+}
+
+// The toggle's words beside the character. In the talk pose it sits top-centre, and on a narrow phone the
+// words wrap before they reach it rather than painting the toggle over its face. Uses the build verdicts()
+// left asking, so the words are "1 needs input".
+async function toggleWords(browser) {
+  for (const [width, height] of [[320, 568], [360, 740], [390, 844]]) {
+    const { context, page } = await open(browser, { width, height, mobile: true });
+    await page.waitForFunction(() => document.querySelector('#sidebar-toggle .sidebar-toggle-count')?.textContent === '1 needs input', null, { timeout: 10000 });
+    await page.evaluate(() => window.nibbiApp.send('/help'));
+    await page.waitForFunction(() => document.body.dataset.mode === 'talk' && document.querySelectorAll('#feed .turn .nib').length > 0);
+    await page.waitForTimeout(1200);   // the character springs to its pose; measure and shoot the settled room
+    const fit = await page.evaluate(() => {
+      const toggle = document.querySelector('#sidebar-toggle').getBoundingClientRect(), count = document.querySelector('#sidebar-toggle-count'), pose = window.nibbi.state();
+      return { right: toggle.right, left: pose.tx - pose.tr, clipped: count.scrollHeight > count.clientHeight + 1 || count.scrollWidth > count.clientWidth + 1, lines: Math.round(count.getBoundingClientRect().height / parseFloat(getComputedStyle(count).lineHeight)) };
+    });
+    assert.ok(fit.right <= fit.left, `${width}x${height}: the toggle ends at ${fit.right}px, before the character at ${fit.left}px`);
+    assert.equal(fit.clipped, false, `${width}x${height}: the words fit`);
+    assert.ok(fit.lines <= 2, `${width}x${height}: in at most two lines (${fit.lines})`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: out + `toggle-talk-${width}x${height}.png` });
+    await context.close();
+  }
 }
 
 // The Builds lobby while builds change under you. Uses fixture-7..9; verdicts() owns 3..6.
@@ -147,7 +183,7 @@ async function lobby(browser) {
   await context.close();
 }
 
-const scenarios = [['fixer verdicts, notifications and what is waiting on you', verdicts], ['a Builds lobby that stays live under focus and an open log', lobby]];
+const scenarios = [['fixer verdicts, notifications and what is waiting on you', verdicts], ['the toggle\'s words stay clear of the character at 320, 360 and 390', toggleWords], ['a Builds lobby that stays live under focus and an open log', lobby]];
 let browser, failed = 0;
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });

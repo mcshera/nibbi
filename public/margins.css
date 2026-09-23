@@ -77,7 +77,10 @@ body.sidebar-open .workspace-sidebar { transform: none; visibility: visible; }
 .sidebar-toggle, .sidebar-collapse { display: grid; place-items: center; width: 40px; height: 40px; flex: none; color: var(--ink-2); background: transparent; border: 0; border-radius: var(--r-well); cursor: pointer; }
 .sidebar-toggle { position: fixed; left: 16px; top: 16px; z-index: var(--z-sheet-rail); background: rgba(245,242,236,.94); }
 .sidebar-toggle:has(.sidebar-toggle-count:not(:empty)) { width: auto; padding: 0 12px 0 8px; display: inline-flex; align-items: center; gap: 6px; }
-.sidebar-toggle-count { font-size: var(--type-meta); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+/* The words take only what the talk pose leaves them. That pose sits top-centre at r >= 48px (app.js
+   layout()), so on a phone its left edge is 50vw - 48px, and the toggle's own chrome is 62px (16 inset,
+   8 + 20 icon + 6 gap, 12). Past that the words wrap to a second line; a third is clipped. */
+.sidebar-toggle-count { font-size: var(--type-meta); line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: left; text-wrap: balance; max-width: calc(50vw - 111px); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .sidebar-toggle-count:empty { display: none; }
 .sidebar-toggle-count[data-tone="error"] { color: var(--fail-text); }
 .sidebar-toggle:hover, .sidebar-collapse:hover { background: var(--veil-hover); }

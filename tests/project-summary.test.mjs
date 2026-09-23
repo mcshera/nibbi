@@ -33,12 +33,28 @@ test('published open PRs remain actionable with shared overlapping filters and n
  assert.equal(describeProjectSection('builds',{status:'ready',runs:[runs[0]]}).badge,'1 pull request');
 });
 
+// "Input", as the build's status and its notification say. The lobby's "N waiting on you" counts every
+// build that wants a decision, a question included; the badge must not use those words for a smaller number.
 test('a build waiting on you outranks every count and joins the attention filter',()=>{
  const waiting={status:'ready',counts:{total:3,active:2,review:1,failed:0,history:0,byStatus:{awaiting_input:1,running:1,staged:1}}};
- const view=describeProjectSection('builds',waiting);assert.equal(view.badge,'1 waiting on you');assert.equal(view.tone,'attention');
+ const view=describeProjectSection('builds',waiting);assert.equal(view.badge,'1 needs input');assert.equal(view.tone,'attention');
+ assert.doesNotMatch(view.badge,/waiting on you/,'the lobby\'s words are the lobby\'s');
+ assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:2,byStatus:{awaiting_input:2}}}).badge,'2 need input');
  const runs=[{id:'ask',status:'awaiting_input'},{id:'run',status:'running'},{id:'bad',status:'failed'}];
- assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:3,byStatus:{awaiting_input:1,running:1,failed:1}},runs}).badge,'1 waiting on you','a failure elsewhere does not hide the question');
+ assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:3,byStatus:{awaiting_input:1,running:1,failed:1}},runs}).badge,'1 needs input','a failure elsewhere does not hide the question');
  assert.equal(buildMatchesFilter(runs[0],'attention'),true);assert.equal(buildMatchesFilter(runs[1],'attention'),false);assert.equal(projectBuildCounts(runs).attention,2);
  assert.equal(buildGroup('awaiting_input'),'active','it is still in flight');
  assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:1,active:1,byStatus:{running:1}}}).badge,'1 active','no question, no waiting badge');
+});
+
+// Interrupted shares the failed group (it needs a look), but the backend stopped under it: nothing was
+// judged, so it is said in its own words and never in the verdict colour.
+test('an interrupted build is counted as interrupted, not failed, and is not an error',()=>{
+ const one=describeProjectSection('builds',{status:'ready',counts:{total:1,failed:1,byStatus:{interrupted:1}},runs:[{id:'r',status:'interrupted'}]});
+ assert.equal(one.badge,'1 interrupted');assert.equal(one.tone,'attention');
+ assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:2,failed:2,byStatus:{interrupted:2}}}).badge,'2 interrupted','from the daemon\'s counts alone');
+ const both=describeProjectSection('builds',{status:'ready',runs:[{id:'r',status:'interrupted'},{id:'f',status:'failed'}]});
+ assert.equal(both.badge,'1 failed','a real failure still leads');assert.equal(both.tone,'error');
+ assert.equal(describeProjectSection('builds',{status:'ready',runs:[{id:'s',status:'staged'},{id:'r',status:'interrupted'}]}).detail,'1 interrupted','and the detail line keeps them apart');
+ assert.equal(describeProjectSection('builds',{status:'ready',counts:{total:3,active:1,review:1,failed:1,history:0}}).badge,'1 review','without per-status counts, failed stays failed');
 });

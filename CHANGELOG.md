@@ -15,12 +15,17 @@ the click opens that build. In the desktop shell the click does nothing yet; tha
 the shell and a window-focus capability, which is a shell release.
 
 **Waiting on you.** Nothing in the daemon reports `awaiting_input` yet, but a build that does now
-leads the Builds badge ("1 waiting on you"), joins the attention filter, counts on the dock badge and
-in the tab title, offers steer, stop and open build, and is named in the while-you-were-away line.
+leads the Builds badge ("1 needs input" — the lobby's "waiting on you" already counts every build that
+wants a decision, so the badge says what it counts), joins the attention filter, counts on the dock
+badge and in the tab title, offers steer, stop and open build, and is named in the while-you-were-away
+line. A build that asks, is answered and asks again is announced both times. An interrupted build is
+counted as "1 interrupted", in ink: it shares the failed group, but nothing judged it.
 
 **The closed bar still speaks.** On a phone the bar is a closed drawer, so its toggle carries what the
 project wants from you, in words ("1 review", "2 failed"). It is still labelled "Open sidebar"; the
-words describe it. The project you are in is read with the bar closed, so the words are current.
+words describe it. The project you are in is read with the bar closed, so the words are current. On a
+narrow phone they wrap to a second line before they reach the character in its talk pose, rather than
+painting the toggle over its face (measured at 320, 360 and 390).
 
 **A streamed reply counts as new.** The jump button counted only what nibbi said on its own, so
 scrolling up during a long reply always read "latest". Each block that finishes below you counts

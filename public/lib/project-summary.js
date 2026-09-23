@@ -31,18 +31,24 @@ export function describeProjectSection(section, data) {
   if (state !== 'error' && c && integer(c.total) !== null) {
     if (section === 'builds') {
       const n = key => integer(c[key]) ?? 0, waiting = integer(c.byStatus?.awaiting_input);
+      // An interrupted build shares the failed group (it needs a look) but was never judged: the backend
+      // stopped under it. So it is counted in its own words and never takes the verdict colour.
+      const interrupted = Math.min(n('failed'), Array.isArray(data.runs) ? data.runs.filter(run => run.status === 'interrupted').length : integer(c.byStatus?.interrupted) ?? 0), failed = n('failed') - interrupted;
       // A build that stopped to ask you something outranks every count: it goes nowhere until you answer.
-      if(waiting){badge=`${waiting} waiting on you`;tone='attention';}
+      // "Input", as its status and its notification say: the lobby's "waiting on you" counts every build
+      // that wants a decision, this one included, and the two must not be the same words for two numbers.
+      if(waiting){badge=`${waiting} ${waiting===1?'needs':'need'} input`;tone='attention';}
       else if(n('attention')&&(n('pullRequests')||n('toPush')||data.runs?.some(run=>run.github?.needsAttention))){badge=`${n('attention')} need attention`;tone='error';}
       else if(n('readyPR')){badge=`${n('readyPR')} PR ready`;tone='attention';}
       else if(n('toPush')){badge=`${n('toPush')} to push`;tone='attention';}
       else if(n('pullRequests')){badge=`${n('pullRequests')} pull request${n('pullRequests')===1?'':'s'}`;tone='attention';}
       else if (n('review')) { badge = `${n('review')} review`; tone = 'attention'; }
-      else if (n('failed')) { badge = `${n('failed')} failed`; tone = 'error'; }
+      else if (failed) { badge = `${failed} failed`; tone = 'error'; }
+      else if (interrupted) { badge = `${interrupted} interrupted`; tone = 'attention'; }
       else if (n('active')) { badge = `${n('active')} active`; tone = 'active'; }
       else badge = c.total ? `${n('history')} past` : 'No builds';
       const running = integer(c.byStatus?.running);
-      detail = [n('active') && (running ? `${running} running` : `${n('active')} active`), n('failed') && n('review') && `${n('failed')} failed`].filter(Boolean).join(' · ');
+      detail = [n('active') && (running ? `${running} running` : `${n('active')} active`), failed && n('review') && `${failed} failed`, interrupted && n('review') && `${interrupted} interrupted`].filter(Boolean).join(' · ');
       if (badge.endsWith('active')) detail = '';
     } else if (section === 'issues') {
       badge = c.total ? `${integer(c.open) ?? '—'} open` : data.hasNotes || data.markdown?.trim() ? 'Notes' : 'No issues';
