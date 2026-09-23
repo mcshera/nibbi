@@ -1063,6 +1063,7 @@ function connectEvents() {
     onOffline: () => { evReady = false; setLink('offline'); projectSummaries.markStale(); },
     onEvent: (event) => {
       if (/^(run\.updated|vault\.updated|roadmap\.|project\.|goal\.|github\.|build\.)/.test(event.type)) scheduleProjectRefresh(event.projectId || event.payload?.run?.game || event.payload?.project);
+      if (event.runId) projectWorkspace.noteRunEvent(event);   // an open Log follows its build live
       if (event.type === 'run.updated') {
         const run = event.payload.run; if (!run) return; if (run.status === 'done') run.status = 'staged';
         // A record without a GitHub summary keeps the last known one, so the next summary still compares against real history.
@@ -1085,7 +1086,7 @@ function connectEvents() {
       } else if (event.type === 'milestone.completed') {
         const p = event.payload || {}; if (!evReady || !p.name) return;
         postNarration('milestone', { milestone: p.name, project: p.project, total: p.total }, (p.project || '') + ':' + (p.milestoneId || p.name) + ':milestone');
-      } else if (event.type === 'process.output' || event.type === 'tool.started') {
+      } else if (event.type === 'process.output' || event.type === 'tool.started' || event.type === 'tool.finished') {
         const a = agentEls.get(event.runId); if (a) { const tail = a.card.querySelector('.tail'); if (tail) tail.textContent = String(event.payload.text || event.payload.name || '').slice(-400); }
         queueProjectActivity(event.projectId || S.fixers.find(run => run.id === event.runId)?.game);
       } else if (['brief', 'goal.updated', 'goal.completed', 'scheduler.error'].includes(event.type)) {
@@ -1826,7 +1827,8 @@ async function handleProjectAction(action, project, value) {
   // running is worth reaching while Nibbi is mid-turn, and neither call changes anything.
   if (action === 'previewStatus') return api.get('/api/preview?id=' + encodeURIComponent(value.id));
   if (action === 'openUrl') { openUrl(value.url); return true; }
-  if (S.busy) throw new Error('Nibbi is still working. You can keep browsing while it finishes.');
+  // Only what writes into the composer waits for the lead turn; a daemon command never contends with it.
+  if (S.busy && ['buildChanges','buildLog','newBuild','newIssue','newPlan','editPlan'].includes(action)) throw new Error('Nibbi is still working. You can keep browsing while it finishes.');
   if (S.demo && ['projectCommand','buildCommand','githubCommand'].includes(action)) throw new Error('Leave demo mode before changing project work.');
   selectMarginProject(project);
   if (action === 'githubCommand') {

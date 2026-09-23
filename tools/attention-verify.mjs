@@ -103,7 +103,51 @@ async function verdicts(browser) {
   await phone.context.close();
 }
 
-const scenarios = [['fixer verdicts, notifications and what is waiting on you', verdicts]];
+// The Builds lobby while builds change under you. Uses fixture-7..9; verdicts() owns 3..6.
+async function lobby(browser) {
+  const { context, page } = await open(browser);
+  const notices = () => page.getByRole('button', { name: 'Show updates', exact: true }).count();
+  await page.locator('.margin-tab[data-margin-tab="builds"]').click();
+  await page.locator('#project-workspace [data-build-id="fixture-0"].is-selected').waitFor();
+  const staged = page.locator('[data-build-id="fixture-0"]');
+  await staged.getByRole('button', { name: 'Log', exact: true }).click();
+  await staged.locator('.project-evidence-panel').getByText('No log entries have been reported.').waitFor();
+  await staged.getByRole('button', { name: 'Log', exact: true }).focus();
+
+  // A tab holds nothing back: the rows update, and focus comes back to the tab.
+  assert.match((await command('run.discard', { id: 'fixture-7' })).text || '', /discard/i);
+  await page.waitForFunction(() => document.querySelector('[data-build-id="fixture-7"] .project-build-status')?.textContent === 'Discarded', null, { timeout: 8000 });
+  assert.equal(await notices(), 0, 'no "Show updates" under a focused tab');
+  assert.deepEqual(await page.evaluate(() => ({ kind: document.activeElement.dataset.kind, build: document.activeElement.closest('[data-build-id]')?.dataset.buildId })), { kind: 'log', build: 'fixture-0' }, 'focus is back on the tab it was on');
+
+  // Typing does: with the search box focused a read waits behind a notice.
+  await page.locator('.margin-tab[data-margin-tab="issues"]').click();
+  await page.getByLabel('Search issues', { exact: true }).focus();
+  await command('run.discard', { id: 'fixture-8' });
+  await page.getByRole('button', { name: 'Show updates', exact: true }).waitFor({ timeout: 8000 });
+  await page.screenshot({ path: out + 'lobby-held-1180x820.png' });
+
+  // An open Log follows its build: the next event joins the list on screen, and the lobby's own read keeps it.
+  await page.locator('.margin-tab[data-margin-tab="builds"]').click();
+  await page.locator('[data-build-id="fixture-9"] > summary').click();
+  await page.locator('[data-build-id="fixture-9"].is-selected').waitFor();
+  settle('fixture-9', { summary: 'Fixture: an event for the log to start from.' });
+  await page.waitForTimeout(700);
+  const building = page.locator('[data-build-id="fixture-9"]');
+  await building.getByRole('button', { name: 'Log', exact: true }).click();
+  await building.locator('.project-log-entry').first().waitFor();
+  const before = await page.evaluate(() => { window.heldLog = document.querySelector('[data-build-id="fixture-9"] .project-log'); return window.heldLog.children.length; });
+  assert.match((await command('run.retry', { id: 'fixture-9' })).text || '', /Queued/);
+  await page.waitForFunction(n => window.heldLog.isConnected && window.heldLog.children.length > n, before, { timeout: 8000 });
+  assert.match(await page.evaluate(() => window.heldLog.lastElementChild.innerText), /superseded/, 'the new row is the status change');
+  await page.waitForTimeout(1200);   // the lobby's own read lands 400ms after the event
+  assert.equal(await page.evaluate(() => window.heldLog.isConnected), true, 'the lobby read did not rebuild the open log');
+  assert.equal(await page.evaluate(() => window.heldLog.children.length), before + 1, 'and did not add the row twice');
+  await page.screenshot({ path: out + 'lobby-log-tail-1180x820.png' });
+  await context.close();
+}
+
+const scenarios = [['fixer verdicts, notifications and what is waiting on you', verdicts], ['a Builds lobby that stays live under focus and an open log', lobby]];
 let browser, failed = 0;
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });

@@ -26,6 +26,16 @@ words describe it. The project you are in is read with the bar closed, so the wo
 scrolling up during a long reply always read "latest". Each block that finishes below you counts
 now, so it can say "3 new" while you read.
 
+**The Builds lobby stays live.** It held every read back behind "Show updates" whenever focus was
+anywhere inside it, so one click on a tab stopped the lobby updating. It waits now only while you
+type or decide — a field, a form, a confirmation, a GitHub review — and focus on a tab or a button
+comes back to the same control once the rows update. An open Log follows its build: each event
+joins the list on screen, and the lobby's own reads leave an open log or diff as the node it was. A
+reply that is still streaming locks only what writes into the composer (New build, Discuss plan, a
+New issue with nowhere to save it); stop, retry, discard, merge, play and the forms are commands to
+the daemon and no longer wait for it. The lobby's summary counts a build waiting on you as waiting,
+not building.
+
 **The harness.** The demo has a reply with a fence and a table (`show me the code`), and the
 streaming suite runs it at 1180×600, 390×844 and under glass: an open fence is code from its first
 line, the caret sits on the sentence being written, the table fits a phone, and glass changes the

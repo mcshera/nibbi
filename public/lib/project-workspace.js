@@ -1,7 +1,7 @@
 import { loadProjectSection } from './project-data.js';
 import { buildStatusLabel, verificationLabel, buildGroup as groupForStatus, buildMatchesFilter, buildListGroup } from './project-summary.js';
 import { createGithubPanel, githubDeliveryLabel } from './github-ui.js';
-import { describeToolEvent, inputLine } from './transcript.js';
+import { describeToolEvent, inputLine, eventToLogEntry } from './transcript.js';
 
 const issueColumns = [['backlog', 'Backlog'], ['in-progress', 'In progress'], ['done', 'Done']];
 const issueStatus = item => done(item) ? 'done' : item.boardStatus === 'in-progress' ? 'in-progress' : 'backlog';
@@ -70,6 +70,29 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     return view.githubPanels.get(key);
   }
   const isCurrent = view => current && sectionKey(current) === sectionKey(view.selection) && !el.hidden;
+  // A live read waits for someone typing or deciding: focus in a field, or anywhere inside a form, a
+  // confirmation or a GitHub review. Focus on a tab or a button does not hold the records back; the
+  // render puts that focus back on the same control (focusAnchor / restoreFocus).
+  const holdsFocus = () => {
+    const active = document.activeElement;
+    if (!active || !content.contains(active)) return false;
+    return active.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') || !!active.closest('.project-inline-form, .project-confirmation, .github-form, .github-review');
+  };
+  function focusAnchor(active = document.activeElement) {
+    if (!active || active === content || !content.contains(active)) return null;
+    const owner = active.closest('[data-build-id], [data-record-id]');
+    const scope = owner?.dataset.buildId ? `[data-build-id="${CSS.escape(owner.dataset.buildId)}"]` : owner?.dataset.recordId ? `[data-record-id="${CSS.escape(owner.dataset.recordId)}"]` : '';
+    const own = active.dataset.actionKey ? `[data-action-key="${CSS.escape(active.dataset.actionKey)}"]`
+      : active.dataset.filter ? `[data-filter="${CSS.escape(active.dataset.filter)}"]`
+      : active.dataset.kind && active.closest('.project-evidence-tabs') ? `.project-evidence-tabs [data-kind="${CSS.escape(active.dataset.kind)}"]`
+      : active.tagName === 'SUMMARY' && owner && active.parentElement === owner ? ':scope > summary' : '';
+    return own ? { scope, own } : null;
+  }
+  function restoreFocus(anchor) {
+    if (!anchor || (document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected)) return;
+    const root = anchor.scope ? content.querySelector(anchor.scope) : content;
+    root?.querySelector(anchor.own)?.focus({ preventScroll: true });
+  }
   const show = (view, text, kind = '') => { view.message = text; view.messageKind = kind; if (isCurrent(view)) renderNotice(view); };
   function renderNotice(view) {
     // Even a notice can move the pressed control before pointerup reaches it.
@@ -86,13 +109,15 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     if (view.state === 'stale' || view.state === 'error') notice.append(button('Try again', 'project-text-button', () => void refresh()));
   }
   function accept(view, data, force = false) {
-    if (!force && isCurrent(view) && view.data && (pointerActive || view.deferred || view.form || content.contains(document.activeElement))) {
+    if (!force && isCurrent(view) && view.data && (pointerActive || view.deferred || view.form || holdsFocus())) {
       view.pendingData = data; view.deferred = true; renderNotice(view); return;
     }
     view.pendingData = null;
     view.data = data; view.state = data.status || 'ready'; onData?.(view.selection, data);
   }
-  function action(label, perform, { primary = false, key = label, disabled = false, reason, mutating = true, refreshAfter = false } = {}) {
+  // composer: the control writes into the composer (New build, New issue without a document, Discuss
+  // plan), so it waits for the lead turn. Everything else is a daemon command, which never contends with it.
+  function action(label, perform, { primary = false, key = label, disabled = false, reason, composer = false, refreshAfter = false } = {}) {
     const view = getView();
     const b = button(label, 'project-action' + (primary ? ' primary' : ''), async () => {
       if (view.pending.has(key)) return;
@@ -103,7 +128,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       catch (error) { show(view, error?.message || 'Could not complete this action. Try again.', 'error'); }
       finally {
         view.pending.delete(key);
-        if (b.isConnected) { b.disabled = disabled || (mutating && busy); b.removeAttribute('aria-busy'); }
+        if (b.isConnected) { b.disabled = disabled || (composer && busy); b.removeAttribute('aria-busy'); }
         if (completed && refreshAfter && isCurrent(view)) {
           const refocus = document.activeElement === b;
           await refresh({ preserveMessage: true, force: true });
@@ -111,8 +136,8 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
         }
       }
     });
-    b.dataset.intrinsicDisabled = String(disabled); b.dataset.mutating = String(mutating); b.dataset.actionKey = key;
-    b.disabled = disabled || (mutating && busy) || view.pending.has(key);
+    b.dataset.intrinsicDisabled = String(disabled); b.dataset.composer = String(composer); b.dataset.actionKey = key;
+    b.disabled = disabled || (composer && busy) || view.pending.has(key);
     if (reason) b.title = reason;
     actions.add(b); return b;
   }
@@ -180,7 +205,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     const cancel = button('Cancel', 'project-action', () => { view.form = null; view.deferred = false; render(true); }); row.append(submit, cancel); form.append(row);
     let submitting = false;
     form.onsubmit = async event => {
-      event.preventDefault(); if (submitting || busy || !form.reportValidity()) return;
+      event.preventDefault(); if (submitting || !form.reportValidity()) return;
       const values = Object.fromEntries(Object.entries(fields).map(([name, input]) => [name, input.value.trim()]));
       submitting = true; if (view.form) view.form.submitting = true; submit.disabled = true; cancel.disabled = true; for (const input of Object.values(fields)) input.disabled = true; submit.textContent = spec.buildCommand ? 'Sending…' : 'Saving…'; error.hidden = true;
       try {
@@ -205,7 +230,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
           error.textContent += ' Your text is preserved. Cancel to review the latest records, then reapply your changes.';
           if (isCurrent(view)) void refresh({ preserveMessage: true });
         }
-      } finally { submitting = false; if (view.form) view.form.submitting = false; submit.disabled = busy; cancel.disabled = false; for (const input of Object.values(fields)) input.disabled = false; submit.textContent = spec.submit || 'Save'; }
+      } finally { submitting = false; if (view.form) view.form.submitting = false; submit.disabled = false; cancel.disabled = false; for (const input of Object.values(fields)) input.disabled = false; submit.textContent = spec.submit || 'Save'; }
     };
     view.form = { element: form, revision }; render(true); form.querySelector('input,textarea,select')?.focus(); form.scrollIntoView({ block: 'nearest' });
   }
@@ -263,7 +288,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     }
     summary.draggable = !!item.id && !!view.data.revision;
     summary.addEventListener('dragstart', event => {
-      if (busy || view.form || view.pending.size) { event.preventDefault(); return; }
+      if (view.form || view.pending.size) { event.preventDefault(); return; }
       view.dragIssue = { id: item.id, revision: view.data.revision };
       event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id);
     });
@@ -280,7 +305,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   function renderIssues() {
     const view = getView(), data = view.data, items = data.items || [], total = items.length, complete = items.filter(done).length;
     const canEdit = !!data.revision;
-    content.append(toolbar(data.counts ? `${data.counts.open} open · ${data.counts.done} completed` : total ? `${total - complete} open · ${complete} completed` : data.markdown?.trim() ? 'Issue notes' : 'Project issues', [action('New issue', () => canEdit ? editIssue() : onAction?.('newIssue', current.project), { primary: true })]), formHost());
+    content.append(toolbar(data.counts ? `${data.counts.open} open · ${data.counts.done} completed` : total ? `${total - complete} open · ${complete} completed` : data.markdown?.trim() ? 'Issue notes' : 'Project issues', [action('New issue', () => canEdit ? editIssue() : onAction?.('newIssue', current.project), { primary: true, composer: !canEdit })]), formHost());
     content.append(filters([['open', 'Open', total - complete], ['done', 'Completed', complete], ['all', 'All', total]], 'Issue status'));
     if (!total) {
       if (data.markdown?.trim()) { content.append(node('p', 'project-muted', 'These notes do not contain checklist issues yet. Add an issue to make it actionable.'), documentView(data.markdown)); }
@@ -307,10 +332,10 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       column.setAttribute('aria-labelledby', heading.id); column.append(heading);
       for (const item of records) column.append(issueRow(item));
       if (!records.length) column.append(node('p', 'project-kanban-empty', query ? 'No matching issues' : status === 'backlog' ? 'Nothing in the backlog.' : status === 'in-progress' ? 'Ready when you are.' : 'Completed issues land here.'));
-      column.addEventListener('dragover', event => { if (view.dragIssue && !busy) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; column.classList.add('drag-over'); } });
+      column.addEventListener('dragover', event => { if (view.dragIssue) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; column.classList.add('drag-over'); } });
       column.addEventListener('dragleave', event => { if (!column.contains(event.relatedTarget)) column.classList.remove('drag-over'); });
       column.addEventListener('drop', event => {
-        const moving = view.dragIssue; if (!moving || busy) return;
+        const moving = view.dragIssue; if (!moving) return;
         event.preventDefault(); event.stopPropagation(); view.dragIssue = null; column.classList.remove('drag-over');
         action('Move issue', v => moveIssue(v, moving.id, status, moving.revision), { key: `issue.move-${moving.id}` }).click();
       });
@@ -318,8 +343,8 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     }
   }
   /** The Log tab shows the run's event trail as rows: tool calls carry their friendly label, exact name, bounded input, verdict and diff (the chat transcript's shape); other events keep their text. */
-  function logList(entries) {
-    const list = node('ol', 'project-log'), inputs = new Map();   // a finished row borrows its started row's path for the diff card head
+  function logList(entries, inputs = new Map()) {
+    const list = node('ol', 'project-log');   // a finished row borrows its started row's path for the diff card head; a live tail passes the map it started
     for (const entry of entries) {
       if (entry == null) continue;
       const li = node('li', 'project-log-entry'), head = node('div', 'project-log-head');
@@ -361,9 +386,15 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   function buildEvidence(run, detail, { queue = [], index = 0, onSelectBuild } = {}) {
     const view = getView(), key = run.id, active = view.evidence.get(key) || { kind: 'summary' };
     const tabs = node('div', 'project-evidence-tabs'); tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', `Evidence for ${run.title || run.id}`);
-    const panel = node('div', 'project-evidence-panel'); panel.setAttribute('aria-live', 'polite');
+    // A read that lands while you are reading a log or a diff re-renders the lobby around it, not the
+    // evidence itself: fetched evidence depends only on what was fetched, so its panel is carried
+    // across renders as the same node (a selection, an open entry and the live tail survive).
+    view.panels ||= new Map();
+    const kept = view.panels.get(key), carried = kept && kept.evidence === active && ['log', 'changes'].includes(active.kind) && active.value && !active.loading && !active.error;
+    const panel = carried ? kept.panel : node('div', 'project-evidence-panel'); panel.setAttribute('aria-live', 'polite');
     const paint = () => {
-      const selected = view.evidence.get(key) || active; selected.repaint = paint; panel.replaceChildren();
+      const selected = view.evidence.get(key) || active; selected.repaint = paint; panel.replaceChildren(); selected.inputs = new Map();
+      view.panels.set(key, { panel, evidence: selected });
       for (const b of tabs.children) b.setAttribute('aria-pressed', String(b.dataset.kind === selected.kind));
       if (selected.loading) { panel.append(node('p', 'project-muted', `Loading ${selected.kind}…`)); return; }
       if (selected.error) { panel.append(node('p', 'project-form-error', selected.error), button('Try again', 'project-action', () => void select(selected.kind, true))); return; }
@@ -390,7 +421,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       } else {
         const entries = evidence.entries || evidence.data?.entries || evidence.log;
         if (typeof evidence === 'string' || typeof entries === 'string') panel.append(node('pre', 'project-evidence-code', typeof evidence === 'string' ? evidence : entries));
-        else if (Array.isArray(entries) && entries.length) panel.append(logList(entries));
+        else if (Array.isArray(entries) && entries.length) panel.append(logList(entries, selected.inputs));
         else panel.append(node('pre', 'project-evidence-code', evidence.text || 'No log entries have been reported.'));
       }
     };
@@ -408,7 +439,9 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     }
     const playArea = node('div', 'project-build-play-area');
     const cta = node('div', 'project-lobby-cta');
-    detail.append(playArea, cta, tabs, panel); paint();
+    detail.append(playArea, cta, tabs, panel);
+    if (carried) { active.repaint = paint; for (const b of tabs.children) b.setAttribute('aria-pressed', String(b.dataset.kind === active.kind)); }
+    else paint();
     const controls = node('div', 'project-toolbar-actions');
     const confirmation = node('div', 'project-confirmation'); confirmation.hidden = true;
     const executeBuild = async (v, command) => {
@@ -448,7 +481,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     const canPlaytest = allowed.includes('preview.start') || allowed.includes('preview.stop');
     const running = allowed.includes('preview.stop');
     const playLabel = running ? 'Open build' : 'Play build';
-    const playButton = action(playLabel, running ? openPlaytest : playtest, { primary: true, mutating: !running, disabled: !canPlaytest, refreshAfter: !running, key: `${run.id}-play` });
+    const playButton = action(playLabel, running ? openPlaytest : playtest, { primary: true, disabled: !canPlaytest, refreshAfter: !running, key: `${run.id}-play` });
     playButton.classList.add('project-build-play'); playButton.setAttribute('aria-label', playLabel);
     playButton.innerHTML = '<svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true"><path d="M17 10L38 24L17 38Z" fill="currentColor" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>';
     const playCopy = node('span', 'project-build-play-copy');
@@ -466,9 +499,9 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     }, { key: `${run.id}-preview.stop`, refreshAfter: true }));
     if (allowed.includes('run.merge')) cta.append(action('Approve & merge', v => { confirmBuild('run.merge'); show(v, 'Confirm this build action below.'); }, { primary: !canPlaytest, key: `${run.id}-run.merge` }));
     if (allowed.includes('run.discard')) cta.append(action('Discard', v => { confirmBuild('run.discard'); show(v, 'Confirm this build action below.'); }, { key: `${run.id}-run.discard` }));
-    if (queue.length > 1 && onSelectBuild) cta.append(action('Next build', () => onSelectBuild(queue[(index + 1) % queue.length].id), { mutating: false, key: `${run.id}-next` }));
+    if (queue.length > 1 && onSelectBuild) cta.append(action('Next build', () => onSelectBuild(queue[(index + 1) % queue.length].id), { key: `${run.id}-next` }));
     if (cta.children.length) cta.append(node('p', 'project-lobby-keys', 'j/k next · a approve · x discard · p play'));
-    controls.append(action(buildGroup(run) === 'review' ? 'Review changes' : buildGroup(run) === 'failed' ? 'Inspect failure' : buildGroup(run) === 'active' ? 'View activity' : 'View result', () => select(buildGroup(run) === 'failed' || buildGroup(run) === 'active' ? 'log' : 'changes'), { mutating: false }));
+    controls.append(action(buildGroup(run) === 'review' ? 'Review changes' : buildGroup(run) === 'failed' ? 'Inspect failure' : buildGroup(run) === 'active' ? 'View activity' : 'View result', () => select(buildGroup(run) === 'failed' || buildGroup(run) === 'active' ? 'log' : 'changes')));
     for (const command of allowed) if (commandLabels[command] && !STAGE_COMMANDS.includes(command)) controls.append(action(commandLabels[command], async v => {
       if (command === 'run.steer') {
         beginForm({ heading: `Guide build: ${run.title || run.id}`, fields: [{ name: 'text', label: 'Instruction', multiline: true, required: true }], buildCommand: true, payload: { id: run.id, command }, submit: 'Send instruction', success: 'Build instruction sent.' });
@@ -502,11 +535,14 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   }
   function renderBuilds() {
     const view = getView(), runs = view.data.runs || [], count = group => runs.filter(run => buildMatchesFilter(run, group)).length;
-    const waiting = runs.filter(run => ['review', 'toPush', 'pullRequests', 'attention'].includes(buildListGroup(run))).length;
+    // A build that stopped to ask you something is waiting on you, not building (the bar's badge says the same).
+    const asking = run => run.status === 'awaiting_input';
+    const waiting = runs.filter(run => asking(run) || ['review', 'toPush', 'pullRequests', 'attention'].includes(buildListGroup(run))).length;
+    const building = runs.filter(run => buildListGroup(run) === 'active' && !asking(run)).length;
     const summary = runs.length
-      ? [waiting ? `${waiting} waiting on you` : 'nothing waiting on you', count('active') ? `${count('active')} building` : '', `${runs.length} in all`].filter(Boolean).join(' · ')
+      ? [waiting ? `${waiting} waiting on you` : 'nothing waiting on you', building ? `${building} building` : '', `${runs.length} in all`].filter(Boolean).join(' · ')
       : 'No builds yet';
-    content.append(toolbar(summary, [action('Repository & GitHub', () => onNavigate?.(view.selection.project, 'repository'), { mutating: false }), action('New build', () => onAction?.('newBuild', current.project), { primary: true })]), formHost());
+    content.append(toolbar(summary, [action('Repository & GitHub', () => onNavigate?.(view.selection.project, 'repository')), action('New build', () => onAction?.('newBuild', current.project), { primary: true, composer: true })]), formHost());
     const extra = [['toPush', 'To push', count('toPush')], ['pullRequests', 'Pull requests', count('pullRequests')], ['attention', 'Needs attention', count('attention')]];
     content.append(filters([['all', 'All', runs.length], ['active', 'Active', count('active')], ['review', 'Review', count('review')], ...extra, ['history', 'History', count('history')]], 'Build status'));
     if (!runs.length) { content.append(empty('No builds yet', 'Start a build to give Nibbi something to work on for this project.')); return; }
@@ -568,7 +604,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     const hasPlan = !!data.markdown?.trim() || milestones.length > 0 || items.length > 0, canEdit = !!data.revision;
     const controls = [];
     if (canEdit) controls.push(action(hasPlan ? 'Add milestone' : 'Create milestone', () => editMilestone(), { primary: true }));
-    controls.push(action(hasPlan ? 'Discuss plan changes' : 'Discuss a plan', () => onAction?.(hasPlan ? 'editPlan' : 'newPlan', current.project)));
+    controls.push(action(hasPlan ? 'Discuss plan changes' : 'Discuss a plan', () => onAction?.(hasPlan ? 'editPlan' : 'newPlan', current.project), { composer: true }));
     content.append(toolbar(counts ? `${counts.done} of ${counts.total} tasks complete` : data.markdown?.trim() ? 'Written plan' : 'Project roadmap', controls), formHost());
     if (!hasPlan) { content.append(empty(data.status === 'partial' ? 'Plan is unavailable' : 'No plan yet', data.status === 'partial' ? 'Some plan information could not be read. Refresh to try again.' : 'Give the next milestone an outcome, then add the tasks that will get it there.')); return; }
     if (data.outcome) { const outcome = node('section', 'project-plan-outcome'); outcome.append(node('h2', '', 'Outcome'), documentView(data.outcome)); content.append(outcome); }
@@ -617,15 +653,15 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     if (!current) return;
     const view = getView();
     // Keep the actual focused node and any open form in place during live reads.
-    if (!force && (pointerActive || view.deferred || view.form || content.contains(document.activeElement))) { view.deferred = true; renderNotice(view); return; }
+    if (!force && (pointerActive || view.deferred || view.form || holdsFocus())) { view.deferred = true; renderNotice(view); return; }
     if (view.pendingData) accept(view, view.pendingData, true);
-    view.deferred = false; view.renderedRevision = view.data?.revision; const scroll = body.scrollTop;
+    view.deferred = false; view.renderedRevision = view.data?.revision; const scroll = body.scrollTop, anchor = focusAnchor();
     content.replaceChildren(); actions.clear();
     if (current.section === 'repository') { content.append(button('Back to builds','project-text-button',()=>onNavigate?.(current.project,'builds'))); const github=githubPanel(view);content.append(github.element);github.setBusy(busy); }
     else if (view.data) { if (current.section === 'builds') renderBuilds(); else if (current.section === 'issues') renderIssues(); else renderPlans(); }
     else if (view.state === 'error') content.append(empty(`Could not load ${labels[current.section].toLowerCase()}`, 'The records are unavailable. Try again when Nibbi is connected.'));
     else content.append(node('p', 'project-loading', `Loading ${labels[current.section].toLowerCase()}…`));
-    body.scrollTop = scroll; renderNotice(view);
+    body.scrollTop = scroll; renderNotice(view); restoreFocus(anchor);
   }
   // Applying deferred records is explicit. Blur can occur between pointerdown and
   // click, when activeElement is briefly body; replacing rows there drops clicks.
@@ -693,7 +729,22 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     },
     close() { if (current) getView().scroll = body.scrollTop; pointerActive = false; clearTimeout(pointerRelease); generation++; controller?.abort(); current = null; el.hidden = true; },
     refresh,
-    setBusy(value) { busy = !!value; for (const b of actions) b.disabled = b.dataset.intrinsicDisabled === 'true' || (busy && b.dataset.mutating === 'true') || !!(current && getView().pending.has(b.dataset.actionKey)); for (const view of views.values()) { const submit = view.form?.element.querySelector('[type="submit"]'); if (submit) submit.disabled = busy || !!view.form.submitting;for(const panel of view.githubPanels?.values()||[])panel.setBusy(busy); } },
+    /** A run event from the app's stream. With that build's Log open, the entry joins the log as it
+        happens — appended to the list already on screen, which is never rebuilt for it. */
+    noteRunEvent(event) {
+      if (!current || current.section !== 'builds' || el.hidden || !event?.runId) return;
+      const view = getView(), selected = view.evidence.get(event.runId);
+      if (selected?.kind !== 'log' || !selected.value || typeof selected.value !== 'object' || selected.loading || selected.error) return;
+      const entry = eventToLogEntry(event); if (!entry) return;
+      const value = selected.value, entries = Array.isArray(value.entries) ? value.entries : Array.isArray(value.data?.entries) ? value.data.entries : (value.entries = []);
+      entries.push(entry);
+      const kept = view.panels?.get(event.runId);
+      if (kept?.evidence !== selected || !kept.panel.isConnected) return;
+      const log = kept.panel.querySelector(':scope > .project-log');
+      if (log) log.append(logList([entry], selected.inputs).firstChild);
+      else selected.repaint?.();   // the first entry replaces "No log entries have been reported."
+    },
+    setBusy(value) { busy = !!value; for (const b of actions) b.disabled = b.dataset.intrinsicDisabled === 'true' || (busy && b.dataset.composer === 'true') || !!(current && getView().pending.has(b.dataset.actionKey)); for (const view of views.values()) for(const panel of view.githubPanels?.values()||[])panel.setBusy(busy); },
     snapshot() { return current ? { ...current, state: getView().state, filter: getView().filter, hasDraft: !!getView().form||[...(getView().githubPanels?.values()||[])].some(panel=>panel.snapshot().hasDraft||panel.snapshot().reviewing) } : null; },
     destroy() { generation++; controller?.abort(); clearTimeout(pointerRelease); document.removeEventListener('pointerup', finishPointer, true); document.removeEventListener('pointercancel', finishPointer, true); for(const view of views.values())for(const panel of view.githubPanels?.values()||[])panel.destroy();views.clear(); el.remove(); },
   };

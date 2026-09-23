@@ -314,3 +314,42 @@ test('large play control starts the selected version, reopens it, and reports un
     }
   } finally { await browser.close(); }
 });
+
+// Liveness: a read lands while you look at the lobby. It waits only for typing or deciding; focus on a
+// tab comes back to the same tab; an open Log takes new entries without being rebuilt; and a lead turn
+// that is still answering holds back only what writes into the composer.
+test('the lobby stays live under focus, keeps an open log, and locks only composer controls', async () => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
+  const { page, context, errors, open } = await harness(browser, { width: 1180, height: 712 });
+  try {
+    await open('builds');
+    const stage = page.locator('[data-build-id="run-review"]');
+    await stage.getByRole('button', { name: 'Log', exact: true }).click();
+    await stage.locator('.project-log-entry').first().waitFor();
+    await stage.getByRole('button', { name: 'Log', exact: true }).focus();
+    await page.evaluate(() => { window.heldLog = document.querySelector('[data-build-id="run-review"] .project-log'); sections.builds.runs[1].title = 'A concurrently renamed palette'; return workspace.refresh(); });
+    assert.match(await page.locator('[data-build-id="run-active"]').innerText(), /A concurrently renamed palette/, 'the rows update under a focused tab');
+    assert.equal(await page.getByRole('button', { name: 'Show updates', exact: true }).count(), 0, 'with no "Show updates" in the way');
+    assert.deepEqual(await page.evaluate(() => ({ kind: document.activeElement.dataset.kind, build: document.activeElement.closest('[data-build-id]')?.dataset.buildId })), { kind: 'log', build: 'run-review' }, 'focus is back on the same tab');
+    assert.equal(await page.evaluate(() => window.heldLog.isConnected), true, 'and the open log is the same node');
+
+    await page.evaluate(() => workspace.noteRunEvent({ id: 40, type: 'tool.finished', at: Date.now(), runId: 'run-review', payload: { name: 'edit_file', source: 'governed', ok: true, summary: 'Replaced 1 match' } }));
+    assert.equal(await page.evaluate(() => window.heldLog.querySelectorAll('.project-log-entry').length), 2, 'a live event joins the list on screen');
+    assert.match(await page.evaluate(() => window.heldLog.lastElementChild.innerText), /editing[\s\S]*ok/);
+    await page.evaluate(() => workspace.noteRunEvent({ id: 41, type: 'tool.started', at: Date.now(), runId: 'run-active', payload: { name: 'read_file' } }));
+    assert.equal(await page.evaluate(() => window.heldLog.querySelectorAll('.project-log-entry').length), 2, 'another build\'s event stays out of this log');
+    await page.evaluate(() => workspace.refresh());
+    assert.equal(await page.evaluate(() => window.heldLog.isConnected && window.heldLog.querySelectorAll('.project-log-entry').length), 2, 'a later read keeps the tail it was given');
+
+    await page.evaluate(() => workspace.setBusy(true));
+    assert.equal(await page.getByRole('button', { name: 'New build', exact: true }).isDisabled(), true, 'New build writes into the composer, so it waits');
+    for (const name of ['Discard', 'Approve & merge', 'Verify', 'Refresh']) assert.equal(await stage.getByRole('button', { name, exact: true }).or(page.getByRole('button', { name, exact: true })).first().isDisabled(), false, `${name} is a daemon command and does not wait`);
+    await page.evaluate(() => workspace.setBusy(false));
+
+    await open('issues');
+    await page.getByLabel('Search issues', { exact: true }).focus();
+    await page.evaluate(() => { sections.issues.items[1].text = 'A concurrently updated issue'; return workspace.refresh(); });
+    assert.equal(await page.getByRole('button', { name: 'Show updates', exact: true }).isVisible(), true, 'typing still holds the records back');
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); await browser.close(); }
+});
