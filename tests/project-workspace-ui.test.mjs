@@ -343,13 +343,82 @@ test('the lobby stays live under focus, keeps an open log, and locks only compos
 
     await page.evaluate(() => workspace.setBusy(true));
     assert.equal(await page.getByRole('button', { name: 'New build', exact: true }).isDisabled(), true, 'New build writes into the composer, so it waits');
-    for (const name of ['Discard', 'Approve & merge', 'Verify', 'Refresh']) assert.equal(await stage.getByRole('button', { name, exact: true }).or(page.getByRole('button', { name, exact: true })).first().isDisabled(), false, `${name} is a daemon command and does not wait`);
+    for (const name of ['Discard', 'Approve & merge', 'Verify']) assert.equal(await stage.getByRole('button', { name, exact: true }).isDisabled(), false, `${name} is a daemon command and does not wait`);
+    // Rendered while the turn is busy, too: another build's controls are built enabled.
+    await page.locator('[data-build-id="run-active"] > summary').click();
+    const active = page.locator('[data-build-id="run-active"]');
+    for (const name of ['Stop build', 'Guide build']) assert.equal(await active.getByRole('button', { name, exact: true }).isDisabled(), false, `${name} is a daemon command and does not wait`);
     await page.evaluate(() => workspace.setBusy(false));
+    await page.locator('[data-build-id="run-review"] > summary').click();
 
     await open('issues');
     await page.getByLabel('Search issues', { exact: true }).focus();
     await page.evaluate(() => { sections.issues.items[1].text = 'A concurrently updated issue'; return workspace.refresh(); });
     assert.equal(await page.getByRole('button', { name: 'Show updates', exact: true }).isVisible(), true, 'typing still holds the records back');
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); await browser.close(); }
+});
+
+// Focus the render can put back comes back, as the same node where the node itself is carried; focus it
+// cannot put back holds the read, as it always did. An open Log that goes off screen keeps what arrived.
+test('a live read gives back focus it can and waits for focus it cannot, and an off-screen log keeps its tail', async () => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
+  const { page, context, errors, open } = await harness(browser, { width: 1180, height: 712 });
+  const where = () => page.evaluate(() => { const a = document.activeElement; return { tag: a.tagName, text: (a.textContent || '').trim().slice(0, 30), build: a.closest('[data-build-id]')?.dataset.buildId || null }; });
+  const updates = () => page.getByRole('button', { name: 'Show updates', exact: true }).count();
+  try {
+    await page.evaluate(() => { window.logEntries = [{ kind: 'tool.finished', name: 'edit_file', ok: true, summary: 'Replaced 1 match', phase: 'finished', ts: new Date().toISOString() }]; });
+    await open('builds');
+    const stage = page.locator('[data-build-id="run-review"]');
+    await stage.getByRole('button', { name: 'Log', exact: true }).click();
+    await stage.locator('.project-log-entry').first().waitFor();
+
+    // Inside an open log: the panel is carried, so the very node gets focus back.
+    const detail = stage.locator('.project-log-detail > summary').first();
+    await detail.focus();
+    await page.evaluate(() => { window.focusedDetail = document.activeElement; sections.builds.runs[1].title = 'Renamed under a focused log row'; return workspace.refresh(); });
+    assert.match(await page.locator('[data-build-id="run-active"]').innerText(), /Renamed under a focused log row/, 'the rows update');
+    assert.equal(await updates(), 0);
+    assert.equal(await page.evaluate(() => document.activeElement === window.focusedDetail && window.focusedDetail.isConnected), true, 'focus is on the same log row');
+
+    // The toolbar's Refresh, pressed from the keyboard, keeps focus.
+    await page.getByRole('button', { name: 'Refresh', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false');
+    await page.waitForTimeout(100);
+    assert.equal(await updates(), 0, 'its read was applied, not held');
+    assert.deepEqual(await where(), { tag: 'BUTTON', text: 'Refresh', build: null }, 'and Refresh has focus after it');
+
+    // Focus that cannot be put back (a GitHub control in Checks) holds the read, and stays.
+    await page.evaluate(() => { sections.builds.runs[0].github = { mode: 'github', checks: { status: 'in_progress' } }; return workspace.refresh(); });
+    await stage.getByRole('button', { name: 'Checks', exact: true }).click();
+    const inspect = stage.getByRole('button', { name: 'Inspect GitHub checks', exact: true });
+    await inspect.focus();
+    await page.evaluate(() => { window.focusedInspect = document.activeElement; sections.builds.runs[1].title = 'Held behind a notice'; return workspace.refresh(); });
+    assert.equal(await updates(), 1, 'the read waits behind "Show updates"');
+    assert.equal(await page.evaluate(() => document.activeElement === window.focusedInspect), true, 'and focus did not move');
+    assert.doesNotMatch(await page.locator('[data-build-id="run-active"]').innerText(), /Held behind a notice/);
+    await page.getByRole('button', { name: 'Show updates', exact: true }).click();
+    await page.locator('[data-build-id="run-active"]').getByText('Held behind a notice').waitFor();
+
+    // An open Log that goes off screen: its build is deselected, then the section is closed. Both times
+    // what arrived meanwhile is on screen when the build is back, without clicking Log again.
+    await stage.getByRole('button', { name: 'Log', exact: true }).click();
+    await stage.locator('.project-log-entry').first().waitFor();
+    const rows = () => stage.locator('.project-log-entry').count();
+    const start = await rows();
+    await page.locator('[data-build-id="run-active"] > summary').click();
+    await page.evaluate(() => { workspace.noteRunEvent({ id: 50, type: 'process.output', at: Date.now(), runId: 'run-review', payload: { text: 'npm test: 8 passing' } }); workspace.noteRunEvent({ id: 51, type: 'process.output', at: Date.now(), runId: 'run-review', payload: { text: 'done' } }); });
+    await page.locator('[data-build-id="run-review"] > summary').click();
+    await stage.locator('.project-log-entry').nth(start + 1).waitFor();
+    assert.equal(await rows(), start + 2, 'rows that arrived while another build was selected');
+    assert.equal(await stage.locator('.project-evidence-tabs [data-kind="log"]').getAttribute('aria-pressed'), 'true');
+    await open('issues');
+    await page.evaluate(() => workspace.noteRunEvent({ id: 52, type: 'process.output', at: Date.now(), runId: 'run-review', payload: { text: 'while the section was closed' } }));
+    await open('builds');
+    await stage.locator('.project-log-entry').nth(start + 2).waitFor();
+    assert.equal(await rows(), start + 3, 'and the row that arrived while the section was closed');
+    assert.match(await stage.locator('.project-log-entry').last().innerText(), /while the section was closed/);
     assert.deepEqual(errors, []);
   } finally { await context.close(); await browser.close(); }
 });

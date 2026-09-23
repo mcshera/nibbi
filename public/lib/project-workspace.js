@@ -71,17 +71,26 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   }
   const isCurrent = view => current && sectionKey(current) === sectionKey(view.selection) && !el.hidden;
   // A live read waits for someone typing or deciding: focus in a field, or anywhere inside a form, a
-  // confirmation or a GitHub review. Focus on a tab or a button does not hold the records back; the
-  // render puts that focus back on the same control (focusAnchor / restoreFocus).
+  // confirmation or a GitHub review. Otherwise it waits only for focus the render cannot put back: a
+  // tab, a filter, an action, a build's row and anything inside an open log or diff come back as the
+  // same control (focusAnchor / restoreFocus); a link in a summary, say, still holds the read.
   const holdsFocus = () => {
     const active = document.activeElement;
     if (!active || !content.contains(active)) return false;
-    return active.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') || !!active.closest('.project-inline-form, .project-confirmation, .github-form, .github-review');
+    if (active.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') || active.closest('.project-inline-form, .project-confirmation, .github-form, .github-review')) return true;
+    return !focusAnchor(active);
   };
+  // A fetched log or diff is carried across renders as the same node while it is what its tab shows.
+  function carriedPanel(view, key) {
+    const kept = view.panels?.get(key), shown = view.evidence.get(key);
+    return kept && shown && kept.evidence === shown && ['log', 'changes'].includes(shown.kind) && shown.value && !shown.loading && !shown.error ? kept : null;
+  }
   function focusAnchor(active = document.activeElement) {
     if (!active || active === content || !content.contains(active)) return null;
     const owner = active.closest('[data-build-id], [data-record-id]');
     const scope = owner?.dataset.buildId ? `[data-build-id="${CSS.escape(owner.dataset.buildId)}"]` : owner?.dataset.recordId ? `[data-record-id="${CSS.escape(owner.dataset.recordId)}"]` : '';
+    const panel = owner?.dataset.buildId && active.closest('.project-evidence-panel');
+    if (panel && current && carriedPanel(getView(), owner.dataset.buildId)?.panel === panel) return { node: active, scope, own: '' };
     const own = active.dataset.actionKey ? `[data-action-key="${CSS.escape(active.dataset.actionKey)}"]`
       : active.dataset.filter ? `[data-filter="${CSS.escape(active.dataset.filter)}"]`
       : active.dataset.kind && active.closest('.project-evidence-tabs') ? `.project-evidence-tabs [data-kind="${CSS.escape(active.dataset.kind)}"]`
@@ -90,6 +99,8 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   }
   function restoreFocus(anchor) {
     if (!anchor || (document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected)) return;
+    // The carried panel is back in the document, and the node in it is the one that had focus.
+    if (anchor.node) { if (anchor.node.isConnected) anchor.node.focus({ preventScroll: true }); return; }
     const root = anchor.scope ? content.querySelector(anchor.scope) : content;
     root?.querySelector(anchor.own)?.focus({ preventScroll: true });
   }
@@ -154,7 +165,8 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   }
   function toolbar(summary, controls = []) {
     const row = node('div', 'project-toolbar'); row.append(node('p', 'project-summary', summary));
-    const group = node('div', 'project-toolbar-actions'); group.append(button('Refresh', 'project-text-button', () => void refresh()), ...controls); row.append(group); return row;
+    const again = button('Refresh', 'project-text-button', () => void refresh()); again.dataset.actionKey = 'refresh';   // an anchor, so a read gives focus back to it
+    const group = node('div', 'project-toolbar-actions'); group.append(again, ...controls); row.append(group); return row;
   }
   function documentView(markdown) {
     const doc = node('div', 'project-document said');
@@ -390,7 +402,7 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     // evidence itself: fetched evidence depends only on what was fetched, so its panel is carried
     // across renders as the same node (a selection, an open entry and the live tail survive).
     view.panels ||= new Map();
-    const kept = view.panels.get(key), carried = kept && kept.evidence === active && ['log', 'changes'].includes(active.kind) && active.value && !active.loading && !active.error;
+    const kept = carriedPanel(view, key), carried = !!kept;
     const panel = carried ? kept.panel : node('div', 'project-evidence-panel'); panel.setAttribute('aria-live', 'polite');
     const paint = () => {
       const selected = view.evidence.get(key) || active; selected.repaint = paint; panel.replaceChildren(); selected.inputs = new Map();
@@ -732,17 +744,26 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
     /** A run event from the app's stream. With that build's Log open, the entry joins the log as it
         happens — appended to the list already on screen, which is never rebuilt for it. */
     noteRunEvent(event) {
-      if (!current || current.section !== 'builds' || el.hidden || !event?.runId) return;
-      const view = getView(), selected = view.evidence.get(event.runId);
-      if (selected?.kind !== 'log' || !selected.value || typeof selected.value !== 'object' || selected.loading || selected.error) return;
-      const entry = eventToLogEntry(event); if (!entry) return;
-      const value = selected.value, entries = Array.isArray(value.entries) ? value.entries : Array.isArray(value.data?.entries) ? value.data.entries : (value.entries = []);
-      entries.push(entry);
-      const kept = view.panels?.get(event.runId);
-      if (kept?.evidence !== selected || !kept.panel.isConnected) return;
-      const log = kept.panel.querySelector(':scope > .project-log');
-      if (log) log.append(logList([entry], selected.inputs).firstChild);
-      else selected.repaint?.();   // the first entry replaces "No log entries have been reported."
+      if (!event?.runId) return;
+      let entry;
+      // Every Builds view that has this build's Log open, on screen or not: the entry is kept either way.
+      for (const view of views.values()) {
+        if (view.selection.section !== 'builds') continue;
+        const selected = view.evidence.get(event.runId), value = selected?.value;
+        if (selected?.kind !== 'log' || !value || typeof value !== 'object' || selected.loading || selected.error) continue;
+        if ([value.entries, value.data?.entries, value.log].some(text => typeof text === 'string')) continue;   // a text log is not a list to add to
+        entry ??= eventToLogEntry(event); if (!entry) return;
+        const entries = Array.isArray(value.entries) ? value.entries : Array.isArray(value.data?.entries) ? value.data.entries : (value.entries = []);
+        entries.push(entry);
+        const kept = view.panels?.get(event.runId);
+        if (kept?.evidence !== selected) continue;
+        // Off screen (another build selected, a filter hiding it, the section closed): the carried panel
+        // no longer matches its entries, so the next render paints the log from them instead of reusing it.
+        if (!kept.panel.isConnected || !isCurrent(view)) { view.panels.delete(event.runId); continue; }
+        const log = kept.panel.querySelector(':scope > .project-log');
+        if (log) log.append(logList([entry], selected.inputs).firstChild);
+        else selected.repaint?.();   // the first entry replaces "No log entries have been reported."
+      }
     },
     setBusy(value) { busy = !!value; for (const b of actions) b.disabled = b.dataset.intrinsicDisabled === 'true' || (busy && b.dataset.composer === 'true') || !!(current && getView().pending.has(b.dataset.actionKey)); for (const view of views.values()) for(const panel of view.githubPanels?.values()||[])panel.setBusy(busy); },
     snapshot() { return current ? { ...current, state: getView().state, filter: getView().filter, hasDraft: !!getView().form||[...(getView().githubPanels?.values()||[])].some(panel=>panel.snapshot().hasDraft||panel.snapshot().reviewing) } : null; },
