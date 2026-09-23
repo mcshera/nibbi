@@ -209,6 +209,34 @@ test('section controls and inline evidence fit narrow and short reading windows'
   } finally { await browser.close(); }
 });
 
+test('one verdict wears one colour at every width, and a notice without a kind is ink', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    for (const viewport of [{ width: 1180, height: 712 }, { width: 390, height: 844 }]) {
+      const { page, context, errors, open } = await harness(browser, viewport);
+      try {
+        await open('builds');
+        // The desktop queue (the rail) and the phone list render the same row; they used to disagree.
+        const seen = await page.evaluate(() => {
+          const probe = name => { const el = document.createElement('span'); el.style.color = `var(${name})`; document.body.append(el); const colour = getComputedStyle(el).color; el.remove(); return colour; };
+          const status = document.querySelector('.project-build-status[data-status="failed"]');
+          return { fail: probe('--fail-text'), ink: probe('--ink-2'), visible: !!status?.getClientRects().length, failed: status ? getComputedStyle(status).color : '', inRail: !!status?.closest('.project-build-rail') };
+        });
+        assert.equal(seen.visible, true, `the failed build is on screen at ${viewport.width}`);
+        assert.equal(seen.inRail, viewport.width >= 900, 'desktop shows it in the queue beside the staged build');
+        assert.equal(seen.failed, seen.fail, `Failed is --fail-text at ${viewport.width}, was ${seen.failed}`);
+        if (viewport.width < 900) await page.locator('[data-build-id="run-review"] > summary').click();
+        await page.locator('[data-build-id="run-review"]').getByRole('button', { name: 'Approve & merge', exact: true }).click();
+        const notice = page.locator('.project-notice');
+        await notice.waitFor();
+        assert.match(await notice.innerText(), /Confirm this build action below/);
+        assert.deepEqual(await notice.evaluate(el => [el.dataset.kind, getComputedStyle(el).color]), ['', seen.ink], 'information is not painted as a failure');
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    }
+  } finally { await browser.close(); }
+});
+
 test('Builds Log tab renders the event trail as rows: tool labels, exact names, verdicts and a diff card', async () => {
   const browser = await chromium.launch({ channel: 'chrome' });
   try {

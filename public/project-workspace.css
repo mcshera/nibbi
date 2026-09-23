@@ -32,7 +32,8 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-action:active:not(:disabled) { transform: translateY(1px); }
 .project-text-button { color: var(--ink-3); min-height: var(--touch); padding: 7px 0; border: 0; background: none; white-space: nowrap; font-size: var(--type-fine) !important; }
 .project-text-button:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-.project-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 0; padding: 10px 12px; color: var(--fail-text); font-size: var(--type-control); background: var(--notice-bed); border-radius: var(--r-well); }
+/* A notice is information ("Saved.", "Confirm this build action below."); only data-kind="error" is a verdict. */
+.project-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 0; padding: 10px 12px; color: var(--ink-2); font-size: var(--type-control); background: var(--notice-bed); border-radius: var(--r-well); }
 .project-notice[data-kind="error"] { color: var(--fail-text); background: var(--fail-wash-warm); }
 .project-notice[data-kind="success"] { color: var(--pass-text); background: var(--pass-wash-warm); }
 .project-notice > span { flex: 1; min-width: 180px; }
@@ -51,7 +52,9 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-record-summary > strong, .project-milestone-summary > strong { flex: 1; }
 .project-muted { color: var(--ink-3); font-size: var(--type-fine); font-variant-numeric: tabular-nums; }
 .project-build-status, .project-record-status { font-size: var(--type-fine); color: var(--ink-2); white-space: nowrap; }
-.project-build-status[data-status="failed"], .project-build-status[data-status="interrupted"] { color: var(--fail-text); }
+/* A verdict wears one colour wherever it is shown. Scoped to the workspace so it outranks the rail's
+   quiet status (.project-build-rail .project-build-status) — they were equal, and the later one won. */
+.project-workspace .project-build-status:is([data-status="failed"], [data-status="interrupted"]) { color: var(--fail-text); }
 .project-build-detail, .project-record-detail { padding: 0 0 20px; overflow-wrap: anywhere; }
 .project-build-detail p, .project-record-detail p { margin: 0 0 12px; }
 .project-filters, .project-evidence-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }

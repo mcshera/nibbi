@@ -204,6 +204,7 @@ let calmMotion = LS.get('pocketCalm', false) === true;
 function syncMotionPreference() {
   const system = reducedMotion.matches, calm = system || calmMotion;
   nibbi.setReducedMotion(calm); interactions.setReducedMotion(calm);
+  body.classList.toggle('calm', calm);   // the CSS kill switch follows the preference, not only the system setting
   syncMargins();
 }
 reducedMotion.addEventListener('change', syncMotionPreference);

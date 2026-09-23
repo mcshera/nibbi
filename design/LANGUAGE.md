@@ -153,6 +153,8 @@ Proposed ramp — one per verdict, three roles each:
 
 **Rule.** There is no warning colour and no info colour. A warning is a `--fail-edge` border with ink text (`.chip.warn`, `.planr .prwarn` already do this). Info is ink. Adding an amber or a blue would break principle 1.
 
+**Default.** A workspace notice with no kind is ink — `--ink-2` on `--notice-bed` — because "Confirm this build action below." is information, not a verdict; only `data-kind="error"` wears `--fail-text`. (`data-kind="success"` keeps `--pass-text` for now: "Saved." is not a verdict either, and that one is the owner's call.) A verdict wears one colour everywhere it is shown: Failed is `--fail-text` in the desktop queue and in the phone list alike.
+
 ### 2.4 Agent tint
 
 The character accepts a tint (`u_tint`, `u_tintAmt` in `public/nibbi.js`) to render companion fixers as coloured ink. This is the **only** place chromatic colour is licensed, because it is identity, not status. Tints are assigned per fixer and carry no meaning beyond "which one".
@@ -408,6 +410,8 @@ Three durations, one curve, applied consistently across every file. **This is th
 
 Global kill switch at `styles.css:211` (`1ms !important` on everything), plus JS-side handling in `nibbi.js` and `pocket-motion.js` (`reduced=true` returns a *spatially static pose*, not a frozen frame). The character contract requires a reduced expression per action that is identical for every `t` — this is better than most shipped products and should be held to for anything new.
 
+The kill switch also sets `animation-iteration-count: 1`: at 1ms an infinite `think` or `pulse` does not stand still, it flickers, so every loop now plays once and lands on its base frame. The same block applies under `body.calm`, which `syncMotionPreference` sets whenever the system asks for reduced motion or Calm motion is on — the in-app preference used to reach only the character.
+
 ### 7.5 Where to take motion next
 
 The curve `cubic-bezier(.2,.7,.2,1)` was chosen once and never compared. [Easing Wizard](https://easingwizard.com/) generates and diffs spring-derived curves; [Devouring Details](https://devouringdetails.com/) is the closest published work to the standard `pocket-motion.js` already holds. Neither implies adopting a library — `pocket-motion.js` is analytic, dependency-free, and better than what a library would give.
@@ -438,7 +442,7 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 
 | part | shape | type | elevation | rule |
 |---|---|---|---|---|
-| **bubble** | `18px`/`10px` TL, 6px ink dot | `--type-read` | `--e-raised` | never gets an avatar |
+| **bubble** | `18px`/`10px` TL, 6px ink dot | `--type-read` | `--e-raised` | never gets an avatar; a page-width block card at every length, so it never changes width mid-reply — your message is the one that shrink-wraps. The caret takes a line of its own under a trailing fence, quote, table or rule |
 | **your message** | `18 18 6 18`, `--veil-hover` | `--type-body` | none | right-aligned, max 78% |
 | **chip** | pill, `--veil-hairline` border | `--type-control` | none, `--blur-light` | hover inverts to solid ink; `.warn` takes `--fail-edge` |
 | **step** | row, 7px dot | `--type-fine` | none | dot state: live=ink+pulse, done=`--ink-3` at `scale(.75)`, fail=`--fail-mark` |
@@ -482,6 +486,7 @@ Nibbi drives most of its UI from `body` attributes and classes. The full set, be
 | `.standalone` | PWA | safe-area insets on status and feed |
 | `.playtest` | playtest mode | labelled border on the composer |
 | `.link-fresh` | recent state change | same: set on `body`, styled by nothing since the status label went. Vestigial alongside `data-link` |
+| `.calm` | `syncMotionPreference` (system reduced motion or Calm motion) | the reduced-motion kill switch of §7.4, so the in-app preference reaches the CSS and not only the character |
 
 **Rule.** New state goes on `body` as an attribute when it has 3+ values, a class when it is binary. Never a JS-set inline style — `.glass` is applied by `app.js` precisely so browsers and the PWA are untouched, and that separation is what keeps the contrast budget honest.
 
@@ -508,7 +513,7 @@ Already met, and worth stating so it stays met:
 | touch targets | 44px minimum at `≤640px` and `pointer: coarse` |
 | reduced motion | global 1ms override + per-surface + character-level static poses |
 | screen reader | `.sr` clip pattern, `aria-expanded` on the `+`, `aria-pressed` on toggles, `aria-describedby` on the field |
-| hover-only content | every hover reveal also fires on `:focus-within` |
+| hover-only content | every hover reveal also fires on `:focus-within` — the agent card too, which holds a textarea, so `:focus-visible` on the agent dropped the card the moment focus went inside it |
 | colour alone | no state is carried by colour alone — dots also change size, borders also change weight |
 | contrast | §2.5 |
 

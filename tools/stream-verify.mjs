@@ -30,6 +30,14 @@ try {
     await page.evaluate(() => { window.__transcriptWrites = 0; window.nibbiApp.send('fix the lock bug'); });
     const live = page.locator('.bubble.live');
     await live.waitFor({ timeout: 20_000 });
+    // The reply is a page-width card from its first frame. Shrink-wrapped, it opened at the width of
+    // its steps and jumped to the full measure at the first word.
+    const opened = await page.evaluate(() => {
+      const bubble = document.querySelector('.bubble.live'), said = bubble.querySelector('.said');
+      return { bubble: bubble.getBoundingClientRect().width, body: bubble.closest('.nibbody').getBoundingClientRect().width, stepLive: !!bubble.querySelector('.step.live'), dots: getComputedStyle(said, '::after').display };
+    });
+    assert.ok(opened.bubble > 0 && opened.bubble === opened.body, 'the live reply is as wide as its column, was ' + JSON.stringify(opened));
+    if (!opened.stepLive) assert.notEqual(opened.dots, 'none', 'before any step runs, the dots say the turn is working');
 
     // Thinking is shown while it happens: a reasoning model that says nothing for ten seconds must
     // not look hung. The step counts, shows the end of what it is thinking, and closes into a verdict.
@@ -37,11 +45,20 @@ try {
     const thinking = await page.waitForFunction(() => {
       const step = document.querySelector('.step.think');
       const tail = step?.querySelector('.tail')?.textContent ?? '';
-      return tail.trim() ? { label: step.querySelector('.l').textContent, tail, live: step.classList.contains('live') } : null;
+      const said = step?.closest('.bubble')?.querySelector('.said');
+      return tail.trim() ? { label: step.querySelector('.l').textContent, tail, live: step.classList.contains('live'), dots: said ? getComputedStyle(said, '::after').display : '', saidEmpty: said ? !said.textContent : null, iterations: getComputedStyle(step.querySelector('.b')).animationIterationCount, timings: document.getAnimations().map(a => a.effect.getTiming().iterations) } : null;
     }, null, { timeout: 20_000 }).then(handle => handle.jsonValue());
     assert.equal(thinking.label, 'thinking', 'the live step says what it is doing');
     assert.equal(thinking.live, true);
     assert.ok(thinking.tail.trim().length, 'and shows the end of what is being thought');
+    // One working mark at a time: a running step is it, so the dots under it stand down.
+    assert.equal(thinking.saidEmpty, true, 'nothing has been said yet');
+    assert.equal(thinking.dots, 'none', 'the dots stand down while a step is live');
+    if (reducedMotion === 'reduce') {
+      // At 1ms an infinite loop does not stand still, it flickers: every animation plays once.
+      assert.equal(thinking.iterations, '1', 'the live step dot plays once under reduced motion');
+      assert.ok(thinking.timings.every(n => n === 1), 'every running animation plays once, was ' + JSON.stringify(thinking.timings));
+    } else assert.equal(thinking.iterations, 'infinite', 'and beats while motion is allowed');
     if (reducedMotion === 'no-preference') await page.screenshot({ path: out + 'thinking-1180x820.png' });
 
     // The tail is the only part still being rendered; everything above it is finished.
@@ -97,8 +114,12 @@ try {
         thought: turn.querySelector('.step.think')?.className ?? '',
         thoughtLabel: turn.querySelector('.step.think .l')?.textContent ?? '',
         thoughtTime: turn.querySelector('.step.think .t')?.textContent ?? '',
+        width: turn.querySelector('.bubble').getBoundingClientRect().width,
+        bodyWidth: turn.querySelector('.nibbody').getBoundingClientRect().width,
       };
     });
+    assert.equal(settled.width, settled.bodyWidth, 'the settled reply is still as wide as its column');
+    assert.equal(settled.width, opened.bubble, 'and the card never changed width between its first frame and its last');
     assert.equal(settled.tails, 0, 'the tail is unwrapped when the reply settles');
     assert.equal(settled.liveBubbles, 0, 'the settled reply is no longer live');
     assert.equal(settled.items, 2, 'both list items are in the finished reply');
@@ -129,6 +150,16 @@ try {
     assert.equal(restored.items, 2, 'its list came back');
     assert.equal(restored.tails, 0, 'a restored reply has no live tail');
 
+    if (reducedMotion === 'no-preference') {
+      // Calm motion is the same kill switch as the system setting, carried as a class on body.
+      const calm = await page.evaluate(() => {
+        document.querySelector('#st-motion').click();
+        const turn = document.querySelector('.turn');
+        return { on: document.body.classList.contains('calm'), duration: getComputedStyle(turn).animationDuration, iterations: getComputedStyle(turn).animationIterationCount };
+      });
+      assert.deepEqual(calm, { on: true, duration: '0.001s', iterations: '1' }, 'Calm motion turns on body.calm and the reduced-motion rules with it');
+      assert.equal(await page.evaluate(() => { document.querySelector('#st-motion').click(); return document.body.classList.contains('calm'); }), false, 'and turning it off takes them away');
+    }
     assert.deepEqual(errors, [], 'No unexpected browser errors (' + reducedMotion + ')');
     await context.close();
   }

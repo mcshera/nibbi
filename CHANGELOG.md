@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.1 — Unreleased
+
+### Composition and surfaces
+
+**The reply card.** A reply was shrink-wrapped, so it opened at the width of its steps and jumped
+to the full measure at the first word. It is a page-width card from its first frame now, and it does
+not change width between the first step and the settle. The dots stand down while a step is running
+— one working mark, not two — and a reply that ends in a fence or a table keeps its caret, on a line
+of its own under the block.
+
+**Colour means a verdict.** Failed was red in the phone list and grey in the desktop queue: the same
+row, two rules of equal weight, and the later one won. It is red in both. A workspace notice with no
+kind ("Confirm this build action below.") was painted in the failure red; it is ink.
+
+**Motion.** Reduced motion cut every animation to a millisecond but left the loops looping, so the
+thinking dot and the plan badge flickered instead of standing still. Every animation plays once now,
+and Calm motion, which only ever reached the character, reaches the CSS as `body.calm`.
+
+**Also.** The toast is a live region and sits above the fixers instead of on them. An agent's card
+stays open while you type in it. On a phone the jump button and a toast's action are 44px, the code
+block's copy button has a hit area larger than the pill it paints, and all four take the focus ring.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which
