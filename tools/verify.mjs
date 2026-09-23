@@ -15,6 +15,7 @@ try {
   page.on('console', message => { if (message.type() === 'error' && !(message.location().url.endsWith('/api/commands') && message.text().includes('400'))) errors.push(message.text() + ' @ ' + message.location().url); });
   await page.goto(fixture.base + '/?nosw=1');
   await page.waitForFunction(() => window.nibbiApp && document.body.dataset.link === 'live');
+  assert.ok(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--t2').trim()), 'tokens.css is linked: --t2 resolves');
   assert.equal((await (await fetch(fixture.base + '/api/fixers')).json()).length, 15, 'No twelve-run truncation');
   await page.screenshot({ path: out + 'desktop.png' });
   await page.evaluate(() => { document.querySelector('#st-platform').click(); });
