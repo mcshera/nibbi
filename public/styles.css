@@ -306,6 +306,9 @@ body.playtest .pill::before { content: "playtest"; position: absolute; top: -9px
 .jump:hover { background: var(--ink); color: var(--ink-inverse); border-color: transparent; }
 .when { text-align: center; font-size: var(--type-meta); letter-spacing: .04em; color: var(--ink-3); margin: 6px 0 16px; }
 .when::before, .when::after { content: ''; display: inline-block; width: 40px; height: 1px; background: var(--line); vertical-align: middle; margin: 0 10px; }
+.when .earlier { font-size: var(--type-meta); padding: 4px 12px; vertical-align: middle; }   /* the top of a conversation that has more above it: a divider you can press */
+.when .earlier:disabled { cursor: default; }
+@media (max-width: 640px), (pointer: coarse) { .when .earlier { min-height: var(--touch); } }
 
 /* review mode */
 .turn.review .bubble { border-color: var(--veil-strong); }

@@ -186,6 +186,17 @@ body.glass .margin-new { background: var(--wash-faint); }
 .project-thread[aria-current="true"] .project-section-copy { font-weight: 600; }
 .project-thread-new .project-section-copy { color: var(--ink-3); }
 .project-thread-new:hover .project-section-copy { color: var(--ink-2); }
+/* A thread's gear sits beside its row and shows when the row is in hand: hovered, focused, open, or
+   the one you are in. With no hover to reveal it, it is always there. */
+.project-thread-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.project-thread-row > .project-thread { flex: 1; min-width: 0; }
+.margin-body .project-thread-row > .project-section { width: auto; }
+.project-thread-row .project-options { opacity: 0; }
+.project-thread-row:hover .project-options, .project-thread-row:focus-within .project-options, .project-thread-row:has(> [aria-current="true"]) .project-options, .project-thread-row .project-options[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .project-thread-row .project-options { opacity: 1; } }
+@media (pointer: coarse) { .project-thread-row .project-options { width: 40px; height: var(--touch); } }
+.margin-rename { grid-template-columns: 1fr auto; padding-top: 0; margin-top: 0; border-top: 0; }
+.margin-rename label { grid-column: 1 / -1; }
 
 /* ---------- the bar: one project at a time ----------
    A switcher names the project you are in and opens a list of the rest. Under it a strip of four

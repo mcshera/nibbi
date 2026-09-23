@@ -121,6 +121,36 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     const longRow = page.locator('[data-thread-id="long"]');
     assert.equal(await longRow.getAttribute('title'), await page.evaluate(() => window.longTitle), 'the whole name is reachable even though the row shows one line of it');
     assert.ok(await longRow.locator('.project-section-copy').evaluate(el => el.scrollWidth > el.clientWidth), 'and it really is clipped, so the title is not decoration');
+    // A thread is renamed or put away from its own row. Home is every message with no thread, so it
+    // has no name to change and cannot be archived: no gear.
+    assert.equal(await page.locator('.project-thread-row:has([data-thread-id="home"])').count(), 0, 'home has no gear');
+    assert.equal(await page.locator('.project-thread-row:has([data-thread-id="long"]) .project-options').count(), 1, 'a thread does');
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 1, 'no thread card exists until one is asked for');
+    const threadGear = page.locator('.project-thread-row:has([data-thread-id="long"]) .project-options');
+    const callsBeforeThread = await page.evaluate(() => calls.length);
+    await threadGear.click();
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 2, 'opening one builds its card');
+    assert.equal(await card.locator('h2').innerText(), await page.evaluate(() => window.longTitle), 'titled with the thread');
+    assert.equal(await threadGear.getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.evaluate(() => calls.length), callsBeforeThread, 'opening it dispatches nothing');
+    await card.locator('input[type="text"]').fill('Turn lock');
+    await card.getByRole('button', {name: 'Save', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'renameThread', id: 'long', value: {project: 'alpha', title: 'Turn lock'}});
+    await card.getByRole('button', {name: 'Archive', exact: true}).click();
+    assert.equal(await page.evaluate(() => calls.filter(c => c.action === 'archiveThread').length), 0, 'Archive asks first');
+    assert.match(await card.locator('.margin-confirm').innerText(), /Archive this conversation\? It stays in the log\./);
+    await card.locator('.margin-confirm').getByRole('button', {name: 'Cancel', exact: true}).click();
+    assert.equal(await page.evaluate(() => calls.filter(c => c.action === 'archiveThread').length), 0, 'and Cancel means no');
+    await page.keyboard.press('Escape');
+    assert.equal(await card.count(), 0);
+    assert.equal(await threadGear.evaluate(el => el === document.activeElement), true, 'Escape returns to the gear');
+    await threadGear.click();
+    await card.getByRole('button', {name: 'Archive', exact: true}).click();
+    await card.locator('.margin-confirm').getByRole('button', {name: 'Archive', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'archiveThread', id: 'long', value: {project: 'alpha'}});
+    assert.equal(await card.count(), 0, 'a confirmed archive closes the card');
+    await page.evaluate(() => {model.projects[0].threads = [{id: 'home', title: 'Home', active: true}]; ui.update(model);});
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 1, 'and the card goes when its thread leaves the list');
 
     // Escape belongs to whatever you are actually in. Docked, the bar is open all day; swallowing
     // every Escape meant the composer and the palette never saw one.

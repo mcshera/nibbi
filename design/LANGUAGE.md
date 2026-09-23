@@ -456,7 +456,7 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 | **notice bubble** | the bubble on `--notice-bed`, `--veil-strong` border, `--ink-3` dot | `--type-read` | `--e-raised` | something was unreachable, not judged |
 | **platform panel** | `--r-surface`, `760px` | `--type-body` | `--e-dialog` | `::backdrop` is `--veil-edge` + `--blur-scrim` |
 | **jump to latest** | pill | `--type-fine` | `--e-floating` | tracks `--feed-bottom` |
-| **day divider** | rule + label | `--type-meta` | none | 40px hairlines either side |
+| **day divider** | rule + label | `--type-meta` | none | 40px hairlines either side; at the top of a conversation with more above it, the label is a `load earlier` chip |
 
 ### Missing parts
 

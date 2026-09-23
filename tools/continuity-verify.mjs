@@ -181,6 +181,90 @@ async function attachmentsSayWhy() {
   await context.close();
 }
 
+/* Rename and archive live on the row, through the real daemon commands. No delete. */
+async function renameAndArchiveFromTheRow() {
+  const thread = fixture.createThread('Old ideas');
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  const row = page.locator(`[data-thread-id="${thread.id}"]`);
+  await row.waitFor({ timeout: 10_000 });
+  await row.click();
+  await page.waitForFunction(title => document.querySelector('#ask').placeholder === title, placeholderFor('Old ideas'));
+  await page.locator(`.project-thread-row:has([data-thread-id="${thread.id}"]) .project-options`).click();
+  const card = page.locator('.margin-card:not([hidden])');
+  assert.equal(await card.locator('h2').innerText(), 'Old ideas');
+  await card.locator('input[type="text"]').fill('Salvage odds');
+  await card.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.waitForFunction(id => document.querySelector(`[data-thread-id="${id}"]`)?.title === 'Salvage odds', thread.id);
+  assert.equal(await card.locator('h2').innerText(), 'Salvage odds', 'the card follows the new name');
+  assert.equal(await page.locator('#ask').getAttribute('placeholder'), placeholderFor('Salvage odds'), 'and so does the composer');
+  await page.screenshot({ path: out + 'thread-card-1180x820.png' });
+  await card.getByRole('button', { name: 'Archive', exact: true }).click();
+  await card.locator('.margin-confirm').getByRole('button', { name: 'Archive', exact: true }).click();
+  await row.waitFor({ state: 'detached', timeout: 10_000 });
+  await page.waitForFunction(() => window.nibbiApp.state().thread.id === 'home', null, { timeout: 5_000 });
+  assert.equal(await page.locator('#toast').innerText(), 'archived — it stays in the log');
+  const { threads } = await (await fetch(fixture.base + '/api/threads?project=fixture')).json();
+  assert.deepEqual(threads.filter(t => t.id === thread.id).map(t => [t.title, t.archived]), [['Salvage odds', true]], 'archived, not deleted');
+  await context.close();
+}
+
+/* The first read brings the last sixty messages. There was no way to reach the rest. Loading them
+   must not move what you were reading. */
+async function loadEarlierKeepsYourPlace() {
+  const thread = fixture.createThread('Long history');
+  fixture.seedChat(Array.from({ length: 70 }, (_, i) => ({ role: i % 2 ? 'oracle' : 'user', text: (i % 2 ? 'Reply ' : 'Message ') + i, threadId: thread.id })));
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  await page.locator(`[data-thread-id="${thread.id}"]`).click();
+  const earlier = page.locator('#feed .earlier');
+  await earlier.waitFor({ timeout: 10_000 });
+  const first = await page.evaluate(() => ({ turns: document.querySelectorAll('#feed .turn').length, top: document.querySelector('#feed .turn .you')?.textContent }));
+  assert.deepEqual(first, { turns: 30, top: 'Message 10' }, 'sixty rows are thirty turns');
+  // Scroll to the top the way a reader would, until it holds: while the feed is still settling into
+  // talk mode it re-pins the latest on every resize.
+  await page.waitForFunction(() => { const f = document.querySelector('#feed'); if (f.scrollTop) f.scrollTop = 0; return f.scrollTop === 0 && !window.nibbiApp.state().stick; }, null, { polling: 100, timeout: 5_000 });
+  await page.waitForTimeout(300);
+  const anchor = await page.evaluate(() => { window.__anchor = document.querySelector('#feed .turn'); return window.__anchor.getBoundingClientRect().top; });
+  await page.screenshot({ path: out + 'load-earlier-1180x820.png' });
+  await earlier.click();
+  await page.waitForFunction(n => document.querySelectorAll('#feed .turn').length > n, first.turns, { timeout: 10_000 });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const after = await page.evaluate(() => ({ turns: document.querySelectorAll('#feed .turn').length, scrollTop: document.querySelector('#feed').scrollTop, anchor: window.__anchor.getBoundingClientRect().top, earlier: document.querySelectorAll('#feed .earlier').length, top: document.querySelector('#feed .turn .you')?.textContent }));
+  assert.equal(after.turns, 35, 'the ten rows before them came back');
+  assert.equal(after.top, 'Message 0');
+  assert.ok(after.scrollTop > 0, 'the view moved down by what was added above it');
+  assert.ok(Math.abs(after.anchor - anchor) <= 2, 'so the turn you were reading stayed put: ' + anchor + ' → ' + after.anchor);
+  assert.equal(after.earlier, 0, 'and with nothing older there is nothing to press');
+  await context.close();
+}
+
+/* Three quick clicks used to land the second thread's history in the third. A read that arrives
+   after its thread was left is dropped, and read again when you return. */
+async function aReadThatLandsLateIsDropped() {
+  const [a, b, c] = ['Alpha notes', 'Beta notes', 'Gamma notes'].map(title => fixture.createThread(title));
+  for (const [thread, tag] of [[a, 'A'], [b, 'B'], [c, 'C']]) fixture.seedChat([{ role: 'user', text: tag + ': first', threadId: thread.id }, { role: 'oracle', text: tag + ' reply', threadId: thread.id }]);
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  const page = await open(context);
+  let release; const held = new Promise(resolve => { release = resolve; });
+  await page.route(url => url.pathname === '/api/history', async route => {
+    const id = new URL(route.request().url()).searchParams.get('threadId');
+    if (id === a.id || id === b.id) await held;
+    await route.continue();
+  });
+  for (const thread of [a, b, c]) await page.locator(`[data-thread-id="${thread.id}"]`).waitFor({ timeout: 10_000 });
+  for (const thread of [a, b, c]) await page.locator(`[data-thread-id="${thread.id}"]`).click();
+  await page.waitForFunction(id => window.nibbiApp.state().thread.id === id && [...document.querySelectorAll('#feed .you')].some(el => el.textContent === 'C: first'), c.id, { timeout: 10_000 });
+  release();
+  await page.waitForTimeout(600);
+  const yours = await page.evaluate(() => [...document.querySelectorAll('#feed .you')].map(el => el.textContent));
+  assert.deepEqual(yours, ['C: first'], 'every message on screen belongs to the thread that is open');
+  await page.unroute(url => url.pathname === '/api/history');
+  await page.locator(`[data-thread-id="${a.id}"]`).click();
+  await page.waitForFunction(() => [...document.querySelectorAll('#feed .you')].map(el => el.textContent).join() === 'A: first', null, { timeout: 10_000 });
+  await context.close();
+}
+
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
   await homeHistoryOnFirstBoot();
@@ -189,6 +273,9 @@ try {
   await returningToTheAnsweringThread();
   await draftsBelongToTheirThread();
   await attachmentsSayWhy();
+  await renameAndArchiveFromTheRow();
+  await loadEarlierKeepsYourPlace();
+  await aReadThatLandsLateIsDropped();
   assert.deepEqual(errors, [], 'No unexpected browser errors');
-  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, the Chat tab returns to a reply in progress, drafts belong to their thread, and attachments say why they were refused.');
+  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, the Chat tab returns to a reply in progress, drafts belong to their thread, attachments say why they were refused, a thread is renamed and archived from its row, earlier history loads without moving the reader, and a late read is dropped.');
 } finally { await browser?.close(); await fixture.close(); }

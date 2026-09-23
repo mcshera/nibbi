@@ -517,6 +517,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     fresh.disabled = !!model.busy;   // rebuilt each time it changes, so it is not bound: bindings are for lasting elements
     fresh.append(icon('newThread'), node('span', 'project-section-copy', 'New thread'));
     fresh.title = model.busy ? 'Not while nibbi is answering' : 'Start a new conversation';
+    pruneThreadCards();
     const threads = node('div', 'project-threads');
     threads.append(...(Array.isArray(data.threads) ? data.threads : []).map(thread => {
       const el = button('', 'project-section project-thread', () => void dispatch('thread', data.id, thread.id));
@@ -527,11 +528,73 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       el.title = text(thread.title, 'Thread');   // the copy is one clipped line; the whole name has to be reachable
       paintWhen(el);
       if (thread.active) el.setAttribute('aria-current', 'true');
-      return el;
+      if (thread.id === 'home') return el;   // home is every message with no thread: it has no name to change and cannot be put away
+      // The same gear a project row has, beside the row rather than inside it: a button inside a button is not a button.
+      const row = node('div', 'project-thread-row');
+      const gear = button('', 'project-options', () => { const card = threadCardFor(data.id, thread); paintThreadCard(card, thread); disclose(gear, card); open(card, gear); });
+      gear.append(icon('settings'));
+      gear.setAttribute('aria-haspopup', 'dialog'); gear.setAttribute('aria-expanded', 'false');
+      gear.setAttribute('aria-label', `Thread settings for ${text(thread.title, 'Thread')}`); gear.title = 'Rename or archive';
+      const known = threadCards.get(threadCardKey(data.id, thread.id));
+      if (known) {
+        disclose(gear, known); paintThreadCard(known, thread);
+        if (opened === known) { gear.setAttribute('aria-expanded', 'true'); cardTrigger = gear; }   // the list re-rendered under an open card
+      }
+      row.append(el, gear);
+      return row;
     }));
     // New thread leads the conversations: it is the thing you reach for, not the thing you scroll past.
     parts.push(fresh, threads);
     return parts;
+  }
+  /* A thread's card: its name, and a way to put it away. Built the first time its gear is used, like
+     a project's, and dropped when the thread leaves the model. There is no delete: an archived
+     conversation stays in the log, where history search still finds it. */
+  const threadCards = new Map();
+  const threadCardKey = (project, id) => JSON.stringify([project, id]);
+  function threadCardFor(project, thread) {
+    const key = threadCardKey(project, thread.id);
+    if (threadCards.has(key)) return threadCards.get(key);
+    const card = makeCard(text(thread.title, 'Thread'));
+    const form = node('form', 'margin-cap margin-rename');
+    const label = node('label', '', 'Name'), field = node('input');
+    field.type = 'text'; field.maxLength = 60; field.autocomplete = 'off'; field.spellcheck = false;
+    field.id = `margin-thread-${++serial}`; label.htmlFor = field.id;
+    field.addEventListener('input', () => { card.dirty = true; });
+    const save = button('Save', 'margin-pill'); save.type = 'submit';
+    form.append(label, field, save);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const title = field.value.trim(); if (!title) { field.focus(); return; }
+      void dispatch('renameThread', card.thread.id, {project, title}, card.error).then(ok => { if (ok) card.dirty = false; });
+    });
+    const archive = button('Archive', 'margin-pill', () => { confirm.hidden = false; confirmArchive.focus(); });
+    const confirm = node('div', 'margin-confirm'); confirm.hidden = true;
+    confirm.append(node('p', '', 'Archive this conversation? It stays in the log.'));
+    const confirmArchive = button('Archive', 'margin-pill margin-primary', () => void dispatch('archiveThread', card.thread.id, {project}, card.error).then(ok => {
+      if (!ok) return;
+      close();
+      body.querySelector('[data-thread-id="home"]')?.focus({preventScroll: true});   // its row is gone; Home is where the conversation went
+    }));
+    confirm.append(confirmArchive, button('Cancel', 'margin-pill', () => { confirm.hidden = true; archive.focus(); }));
+    const actions = node('div', 'margin-actions'); actions.append(archive);
+    card.body.append(form, actions, confirm);
+    Object.assign(card, {confirm, field, thread, dirty: false});
+    threadCards.set(key, card);
+    return card;
+  }
+  function paintThreadCard(card, thread) {
+    card.thread = thread;
+    card.heading.textContent = text(thread.title, 'Thread');
+    if (!card.dirty && document.activeElement !== card.field) card.field.value = text(thread.title, '');
+    return card;
+  }
+  function pruneThreadCards() {
+    const live = new Set((model.projects || []).flatMap(p => (Array.isArray(p.threads) ? p.threads : []).map(t => threadCardKey(String(p.id), t.id))));
+    for (const [key, card] of threadCards) if (!live.has(key)) {
+      if (opened === card) close();
+      card.el.remove(); cards.delete(card); threadCards.delete(key);
+    }
   }
   /** "4m" is only true for a minute. The row keeps when it last spoke, and the clock rewrites the
       label in place, so an open bar does not go on saying "just now" about this morning. */

@@ -611,8 +611,40 @@ async function hydrateThread(project, id) {
   catch { if (state.gen === gen) state.hydrated = false; return; }
   if (state.gen !== gen) return;   // a newer read owns this thread
   if (activeThreadKey() !== key) { state.hydrated = false; return; }   // left before it landed: read again on return
-  if (!renderHistory(rows)) return;
+  const shown = renderHistory(rows);
+  noteEarlier(project, id, rows, shown);
+  if (!shown) return;
   S.stick = true; scrollFeed(true);
+}
+/* The daemon keeps every message; the first read brings the last sixty. When there is more, the top
+   of the conversation says so, as a divider you can press. It is a feed child, so it leaves and comes
+   back with the conversation. */
+function noteEarlier(project, id, rows, shown) {
+  const state = threadState(threadKey(project, id));
+  state.oldest = shown?.oldest ?? rows?.[0]?.ts ?? state.oldest;
+  state.more = (rows || []).length === 60 || !!shown?.more;
+  if (!state.more || !state.oldest) return;
+  const row = document.createElement('div'); row.className = 'when';
+  const more = document.createElement('button'); more.type = 'button'; more.className = 'chip in earlier'; more.textContent = 'load earlier';
+  more.onclick = () => loadEarlier(project, id, row, more);
+  row.append(more); feed.prepend(row);
+}
+async function loadEarlier(project, id, row, more) {
+  const key = threadKey(project, id), state = threadState(key);
+  if (more.disabled || activeThreadKey() !== key) return;
+  more.disabled = true; more.setAttribute('aria-busy', 'true');
+  let rows;
+  try { rows = await api.get(historyUrl(project, id, state.oldest)); }
+  catch { more.disabled = false; more.removeAttribute('aria-busy'); toast('couldn’t reach the earlier messages — try again', 3200); return; }
+  if (activeThreadKey() !== key || !row.isConnected) return;
+  // Whatever you were reading stays where it was: the older block goes in above it and the scroll
+  // position moves down by exactly its height.
+  const before = feed.scrollHeight, had = more === document.activeElement;
+  row.remove();
+  const shown = renderHistory(rows);
+  noteEarlier(project, id, rows, shown);
+  feed.scrollTop += feed.scrollHeight - before;
+  if (had) feed.querySelector('.earlier')?.focus({ preventScroll: true });   // keyboard: on to the next page, if there is one
 }
 /** Switching threads swaps the whole conversation. A turn that is still streaming keeps its
     own (now detached) nodes, so it finishes correctly in the thread it belongs to. */
@@ -628,7 +660,7 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
     if (focus) focusComposer();
     // The open conversation was never read (a reload whose saved copy had expired): read it now
     // rather than leave the owner looking at a blank page they asked for.
-    if (!threadState(target).hydrated && !S.busy) { await hydrateThread(project, id); if (activeThreadKey() === target) setMode(S.turns.length ? 'talk' : 'idle'); }
+    if (!threadState(target).hydrated && !S.busy) void settleThread(project, id);
     return;
   }
   const current = threadState(activeThreadKey());
@@ -647,6 +679,13 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   setMode(S.turns.length ? 'talk' : 'idle');
   ask.placeholder = placeholderText(); syncSendButton(); syncMargins();
   if (focus) focusComposer();
+  void settleThread(project, id);
+}
+/* The conversation is read behind the swap rather than before it returns. Awaited, it held the bar's
+   pending click for as long as the daemon took, and a click on the next thread was dropped; now a read
+   that lands after you have moved on is simply discarded (hydrateThread). */
+async function settleThread(project, id) {
+  const target = threadKey(project, id);
   await hydrateThread(project, id);
   if (activeThreadKey() === target) setMode(S.turns.length ? 'talk' : 'idle');
 }
@@ -1859,6 +1898,21 @@ async function handleMarginAction(action, id, value) {
       if (S.busy) throw busyNotice();
       margins.close(); await newThread(id); return;
     }
+    case 'renameThread': {
+      const renamed = await api.command('thread.rename', { id, title: String(value?.title || '') }, value?.project);
+      mergeThread(renamed); return;   // the event says the same thing a moment later; merging twice is harmless
+    }
+    case 'archiveThread': {
+      const project = value?.project;
+      if (S.busy && threadKey(project, id) === liveKey()) throw busyNotice();
+      await api.command('thread.archive', { id }, project);
+      const wasOpen = threadKey(project, id) === activeThreadKey();
+      await loadThreads(project);
+      if (wasOpen) await openThread(project, 'home', { focus: false });
+      const draft = 'draft:' + (project || 'vault') + ':' + id;   // after the swap, which saves the field under the thread it leaves
+      draftImages.delete(draft); try { localStorage.removeItem('nibbi.' + draft); } catch { /* private mode */ }
+      toast('archived — it stays in the log', 2600); return;
+    }
     case 'tidy': margins.close(); tidy(); return;
     default: throw new Error('This control is not available.');
   }
@@ -2038,7 +2092,7 @@ async function bootThread() {
   await loadThreads(project);
   const remembered = LS.get('thread:' + project, 'home');
   if (!typed && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) await openThread(project, remembered, { focus: false, closeView: false });
-  else if (!S.turns.length) { await hydrateThread(project, 'home'); if (activeThreadKey() === home) setMode(S.turns.length ? 'talk' : 'idle'); }
+  else if (!S.turns.length) await settleThread(project, 'home');
   ask.placeholder = placeholderText(); syncMargins();
 }
 (async () => { await refreshProjects(); await bootThread(); })().catch((e) => clientLog('error', 'threads: ' + e.message));

@@ -25,6 +25,14 @@ replacing it. A file that cannot be attached says why, with the number, instead 
 drop of six no longer attaches all six, because the four-image check now counts files still loading;
 the daemon refused the whole message. A file pasted into a workspace field is that field's.
 
+**A thread you can name, put away, and scroll back through.** The daemon could rename and archive a
+thread and nothing in the app could ask it to. A thread's row has the gear a project's has, and its
+card renames it or archives it after a confirm — it stays in the log, and nothing deletes. The first
+read of a conversation brings its last sixty messages and there was no way past them; the top of a
+longer conversation is now a "load earlier" divider, and pressing it puts the older page above what
+you were reading without moving it. Quick clicks between threads used to be dropped while the first
+one loaded; the read now happens behind the switch, and one that lands late is thrown away.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which
