@@ -55,7 +55,7 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-build-status, .project-record-status { font-size: var(--type-fine); color: var(--ink-2); white-space: nowrap; }
 /* A verdict wears one colour wherever it is shown. Scoped to the workspace so it outranks the rail's
    quiet status (.project-build-rail .project-build-status) — they were equal, and the later one won. */
-.project-workspace .project-build-status:is([data-status="failed"], [data-status="interrupted"]) { color: var(--fail-text); }
+.project-workspace .project-build-status[data-status="failed"] { color: var(--fail-text); }   /* interrupted is not here: the backend stopped, nothing judged the work (it reads "1 interrupted" in ink on the bar too) */
 .project-build-detail, .project-record-detail { padding: 0 0 20px; overflow-wrap: anywhere; }
 .project-build-detail p, .project-record-detail p { margin: 0 0 12px; }
 .project-filters, .project-evidence-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }

@@ -233,11 +233,15 @@ test('one verdict wears one colour at every width, and a notice without a kind i
         const seen = await page.evaluate(() => {
           const probe = name => { const el = document.createElement('span'); el.style.color = `var(${name})`; document.body.append(el); const colour = getComputedStyle(el).color; el.remove(); return colour; };
           const status = document.querySelector('.project-build-status[data-status="failed"]');
-          return { fail: probe('--fail-text'), ink: probe('--ink-2'), visible: !!status?.getClientRects().length, failed: status ? getComputedStyle(status).color : '', inRail: !!status?.closest('.project-build-rail') };
+          // An interrupted build sits in the same group, but nothing judged it: same place, not the verdict colour.
+          const interrupted = status?.cloneNode(true); if (interrupted) { interrupted.dataset.status = 'interrupted'; status.after(interrupted); }
+          const result = { fail: probe('--fail-text'), ink: probe('--ink-2'), visible: !!status?.getClientRects().length, failed: status ? getComputedStyle(status).color : '', interrupted: interrupted ? getComputedStyle(interrupted).color : '', inRail: !!status?.closest('.project-build-rail') };
+          interrupted?.remove(); return result;
         });
         assert.equal(seen.visible, true, `the failed build is on screen at ${viewport.width}`);
         assert.equal(seen.inRail, viewport.width >= 900, 'desktop shows it in the queue beside the staged build');
         assert.equal(seen.failed, seen.fail, `Failed is --fail-text at ${viewport.width}, was ${seen.failed}`);
+        assert.notEqual(seen.interrupted, seen.fail, `Interrupted is not --fail-text at ${viewport.width}`);
         if (viewport.width < 900) await page.locator('[data-build-id="run-review"] > summary').click();
         await page.locator('[data-build-id="run-review"]').getByRole('button', { name: 'Approve & merge', exact: true }).click();
         const notice = page.locator('.project-notice');
