@@ -19,6 +19,15 @@ CI=1 npm run verify
 
 Nibbi's confined Build worker runs `npm run typecheck && npm run build` locally. The full test suite includes security fixtures that intentionally create protected files and start their own sandbox, so run that suite from a trusted development checkout or GitHub CI. The required GitHub job still runs the full commands above before merge.
 
+WebKit is the engine the desktop app ships in, and `verify` runs Chromium. Run the WebKit suite too; CI does, after `verify`:
+
+```sh
+npx playwright install webkit   # once
+npm run verify:webkit
+```
+
+Before a release, or after a change to the bar, the Builds lobby, voice or the phone, run the manual suites as well. `npm run verify:all` runs `verify`, `verify:webkit` and the browser suites that are too slow or too environment-bound for every commit (Kanban, build play, margin UI, sidebar, harness, project workflow, web, MCP client, voice, pocket). Prefix it with `PATH="$HOME/.nibbi/bin:$PATH"` where `rg` is not on the sandbox PATH; build play's preview needs it too. `github-workflow-verify`, `stream-perf`, `bar-shots`, the `*-shots` tools, `continuity-*` and `provider-smoke` stay separate: they are perf, evidence or live-provider tools, not gates.
+
 GitHub's `verify` workflow reports the `local-platform` job for the current pull request commit. A green result for an older commit does not verify a later revision. The workflow runs for pushes, pull requests and merge groups.
 
 ## Merge and deliver

@@ -13,7 +13,8 @@ const out = new URL('../output/webkit/', import.meta.url).pathname; mkdirSync(ou
 const errors = [];
 let browser, failed = 0;
 const hiddenBar = page => page.locator('#workspace-sidebar').getAttribute('aria-hidden');
-const settle = page => page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))));
+// Finite animations only: a live turn's pulse runs forever.
+const settle = page => page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
 
 async function size(width, height) {
   const tag = `${width}x${height}`, phone = width < 900;

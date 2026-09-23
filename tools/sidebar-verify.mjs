@@ -4,7 +4,7 @@ import {chooseProject,closeSwitcher,openProjectCard} from './choose-project.mjs'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
 import { chromium } from 'playwright';
-const ui = resolve(process.env.NIBBI_SIDEBAR_UI || '/private/tmp/nibbi-sidebar-preview');
+const ui = resolve(process.env.NIBBI_SIDEBAR_UI || 'dist/ui');   // the built UI of this checkout; a preview elsewhere via NIBBI_SIDEBAR_UI
 const out = resolve(process.env.NIBBI_SIDEBAR_OUTPUT || 'output/playwright/sidebar');
 mkdirSync(out,{recursive:true});
 const report={ui,checks:[],errors:[],mutations:[]};

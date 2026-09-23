@@ -19,6 +19,8 @@ Run only against the parent's frozen `dist/ui`:
 node tools/margin-surface-verify.mjs
 ```
 
+Retired 2026-09-22: the tool read frozen source pins from `output/margin-surface/source-pins.json` and counted five preference rows; neither survives the current bar. `tools/margin-ui-verify.mjs` covers the surface now.
+
 The tool serves static files on a fresh loopback port. It imports no backend, daemon, native bridge, or build script. Playwright routes every API read to a known fixture. Unknown API reads, external requests, and action writes are blocked and fail the audit. Passive state/log writes receive mock acknowledgements. No ship confirmation is clicked; real mouse-down tests `:active`, then releases outside the button. Audio and notification effects are mocked.
 
 Sixteen checks cover:

@@ -4,7 +4,8 @@ import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {chromium} from 'playwright';
 import {projectWorkflowFixture} from './project-workflow-fixture.mjs';
-const candidate=process.env.NIBBI_WORKFLOW_CANDIDATE||JSON.parse(readFileSync('output/project-workflow-install/candidate-preparation.json')).sourceCopy;
+// This checkout by default; a prepared install candidate via NIBBI_WORKFLOW_CANDIDATE.
+const candidate=process.env.NIBBI_WORKFLOW_CANDIDATE||'.';
 const root=resolve(candidate),ui=join(root,'dist/ui'),daemon=join(root,'daemon/dist');
 const out=resolve(process.env.NIBBI_WORKFLOW_OUTPUT||'output/playwright/project-workflow');mkdirSync(out,{recursive:true});
 const report={candidate:root,scope:process.env.NIBBI_WORKFLOW_ONLY||'all',checks:[],errors:[],fixture:'Actual HTTP routes, temporary SQLite/vault/Git repositories, both providers replaced with deterministic test implementations.'};

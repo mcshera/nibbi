@@ -23,7 +23,7 @@ try{
    const dialog=await openTab(page,'MCP');assert.match(await dialog.innerText(),/No external MCP servers yet/);
    await dialog.getByLabel('Server name (lowercase slug)',{exact:true}).fill('fixture');await dialog.getByLabel('Transport',{exact:true}).selectOption('stdio');
    await dialog.getByLabel('Command (stdio): executable only',{exact:true}).fill(process.execPath);await dialog.getByLabel('Arguments (stdio, space separated)',{exact:true}).fill(fixtureServer+' stdio');
-   await dialog.getByLabel('Secret environment names (stdio, comma separated)',{exact:true}).fill('FIXTURE_SECRET');await dialog.getByLabel('paper-garden',{exact:true}).check();
+   await dialog.getByLabel('Secret environment names (stdio, comma separated)',{exact:true}).fill('FIXTURE_SECRET');await dialog.getByRole('group',{name:'Projects that may use it'}).getByLabel('paper-garden',{exact:true}).check();
    await dialog.getByRole('button',{name:'Save server',exact:true}).click();await dialog.locator('fieldset.platform-mcp-server legend',{hasText:'fixture'}).waitFor();
    const stored=await fetch(fixture.base+'/api/mcp').then(r=>r.json());assert.equal(stored.servers[0].name,'fixture');assert.deepEqual(stored.servers[0].projects,['paper-garden']);assert.deepEqual(stored.servers[0].secretEnv,['FIXTURE_SECRET']);assert.equal(stored.servers[0].enabled,false);
    assert.equal(await dialog.getByRole('button',{name:'Store FIXTURE_SECRET',exact:true}).count(),1,'secret prompt offered per declared name');

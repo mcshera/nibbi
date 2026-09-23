@@ -14,6 +14,7 @@
     "shot": "node tools/shot.mjs",
     "verify": "node tools/contrast-verify.mjs && node tools/verify.mjs && node tools/attention-verify.mjs && node tools/review-verify.mjs && node tools/stream-verify.mjs",
     "verify:webkit": "node tools/webkit-verify.mjs",
+    "verify:all": "npm run verify && npm run verify:webkit && node tools/kanban-verify.mjs && node tools/build-play-verify.mjs && node tools/margin-ui-verify.mjs && node tools/sidebar-verify.mjs && node tools/harness-verify.mjs && node tools/project-workflow-verify.mjs && NIBBI_WEB_CANDIDATE=. node tools/web-verify.mjs && NIBBI_MCP_CANDIDATE=. node tools/mcp-client-verify.mjs && node tools/voice-verify.mjs && node tools/pocket-verify.mjs",
     "fixture": "node tools/test-backend.mjs",
     "test": "npm run build -w @nibbi/contracts && npm run test:unit && npm test -w @nibbi/daemon",
     "deploy": "bash scripts/deploy-app.sh",

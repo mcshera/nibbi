@@ -43,6 +43,13 @@ paper but not the ink. WebKit, the engine the app ships in, has a suite of its o
 `npm run verify:webkit`: the bar, a streamed reply and the Builds lobby at two sizes — which CI runs
 after `npm run verify`. The sidebar lab renders on the real tokens again, and fails when it does not.
 
+**The manual suites run again.** Four tools that described a bar or an install that no longer
+exists are gone (`margin-polish-verify`, `margin-surface-verify`, `project-sections-verify`, and
+`webkit-bar-check`, which `webkit-verify` replaces). `margin-ui-verify`, `sidebar-verify` and
+`project-workflow-verify` point at this checkout and today's gestures; the shared project picker no
+longer waits forever on a turn's endless pulse; and `npm run verify:all` runs every manual suite in
+one go. The README and the sidebar doc say where Hey Nibbi lives: the composer's + panel.
+
 ## 0.8.0 — 2026-09-22 — how it streams, and the left bar
 
 **Streaming.** A reply used to be re-parsed and rebuilt from scratch sixteen times a second, which

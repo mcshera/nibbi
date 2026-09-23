@@ -1,12 +1,12 @@
 # Projects sidebar and composer wake toggle
 
-Nibbi keeps its paper surface and Velvet pool character. Project navigation now lives in a single collapsible left column, with Settings at the bottom. The composer includes a visible Hey Nibbi toggle immediately before Send.
+Nibbi keeps its paper surface and Velvet pool character. Project navigation now lives in a single collapsible left column, with Settings at the bottom. The Hey Nibbi toggle lives in the composer's options panel: the + button left of the field opens it (`public/index.html` `#dock-menu`).
 
 The desktop column is 256px wide. The conversation, character, command suggestions, and composer share the remaining workspace center. The desktop open/closed preference persists locally. Below 900px the column becomes a drawer, initially closed, with a backdrop, keyboard focus containment, and Escape dismissal. Project and Settings details remain available within the viewport, including short windows. Escape closes details before the sidebar.
 
 Project selection, live progress, automation confirmation, spend caps, and existing preference actions retain their original authority. Project rows update in place so polling does not erase focused fields or unsaved spending drafts. Closing the sidebar preserves the conversation and composer draft.
 
-Hey Nibbi uses the existing microphone control and wake pipeline. Its label remains visible in both states; the switch reflects the actual microphone state. On small screens, typing occupies the first row and Hey Nibbi and Send sit together below. Permission cancellation, Alt+Space, wake filtering, follow-up capture, Send-to-finish, and microphone-off-on-reload behavior remain intact. Spoken replies stays a separate setting.
+Hey Nibbi uses the existing microphone control and wake pipeline. Its label remains visible in both states; the switch reflects the actual microphone state. It is the first row of the options panel at every width; the field and Send keep the composer to themselves. Permission cancellation, Alt+Space, wake filtering, follow-up capture, Send-to-finish, and microphone-off-on-reload behavior remain intact. Spoken replies stays a separate setting.
 
 Implementation: `public/lib/margin-ui.js`, `public/margins.css`, `public/index.html`, `public/voice.css`, and the workspace layout, keyboard ownership, and microphone title in `public/app.js`.
 
