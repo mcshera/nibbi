@@ -501,6 +501,7 @@ Governed by `docs/PERSONALITY.md`, which is more thorough than most product voic
 - **Chips come from meaning or from state, never from a regex.** This is the hardest-won rule in the project (`docs/IMPROVEMENT-PLAN.md` §A) and it is a design rule as much as a model rule: an action that appears must be an action that exists.
 - **Labels are lowercase sentence case.** `new thread`, `jump to latest`, `plan first`. Uppercase appears only at `--type-micro` with tracking, for machine categories (`TOOL`, `EXECUTED`).
 - **Numbers, not adjectives.** `4 files · +82 −14`, not "several changes".
+- **A state line says one fact once.** A section tab's headline is its badge; the lines under it add only what the badge lacks, as lowercase fragments with no period (`2 in flight · 1 staged`, `nothing queued`), and nothing at all when it has nothing to add. A status shown on its own names its subject: `Notifications are blocked in system or browser settings`, not `Blocked in system or browser settings`.
 - **A truncated string always carries a `title`.** Taken from the sidebar lab's reading of Cursor's live complaint about untitled truncated repo names.
 
 ---

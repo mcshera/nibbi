@@ -51,7 +51,7 @@
 .margin-cap label { color: var(--margin-muted); font-size: var(--type-meta); }
 .margin-cap input { width: 100%; min-width: 0; padding: 5px 7px; border: 1px solid var(--margin-line); background: var(--wash-field); color: var(--margin-ink); border-radius: var(--r-well); }
 .margin-metadata { margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--margin-line); }
-.margin-data-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 4px 0; }
+.margin-data-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 16px; padding: 4px 0; }   /* a long value takes its own line rather than squeezing the label */
 .margin-data-row dt { flex: none; color: var(--margin-muted); font-size: var(--type-meta); }
 .margin-data-row dd { margin: 0; color: var(--ink-2, #383633); text-align: right; overflow-wrap: anywhere; min-width: 0; font-variant-numeric: tabular-nums; }
 .margin-pref { width: 100%; min-height: 36px; border: 0; border-bottom: 1px solid var(--veil-hover); background: transparent; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; text-align: left; }
@@ -239,7 +239,7 @@ body.glass .margin-new { background: var(--wash-faint); }
 .margin-section-headline { margin: 0 0 4px; font-size: var(--type-body); font-weight: 600; letter-spacing: -.01em; }
 .margin-section-headline[data-tone="error"] { color: var(--fail-text); }
 .margin-section-line { margin: 0 0 4px; color: var(--ink-2); font-size: var(--type-fine); }
-.margin-section-hint { margin: 8px 0 12px; color: var(--margin-muted); font-size: var(--type-meta); }
+.margin-section > .margin-pill { margin-top: 8px; }
 /* The foot: what is true about the projects you are not looking at, held against the bottom so the
    conversations above it can take whatever room there is. */
 .margin-foot { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 8px 12px 10px; }

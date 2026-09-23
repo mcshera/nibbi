@@ -27,6 +27,14 @@ its own and its controls in one row under it; the filters scroll sideways instea
 push and Pull requests appear only for a project that delivers through GitHub; and a phone is not
 shown keyboard shortcuts.
 
+**The bar says one thing once.** A section tab said "2 open" and then "2 open." under it, and "The
+full list is open beside the bar." on every section — untrue in the phone drawer, where nothing is
+beside it. The badge is the fact now, and a line under it adds only what the badge lacks: what is in
+flight and staged for Builds, the goal for Plans, nothing for Issues. In Settings, "Blocked in system
+or browser settings" sat under the microphone row with no subject; every status names notifications
+now, and a denied permission reads Blocked rather than Off. Session reads `$1.00 · 7 turns` on one
+line — the row's label already says whose numbers they are.
+
 **Copy copies what you read.** The code block's button stripped a trailing "copy" from the block's
 text, but a capped block ends in "show all (18 lines)", so the label came along; it copies the code
 itself now. A reply's copy took the raw text with its `»acts:` lines, and both said "copied" whether

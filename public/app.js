@@ -1730,7 +1730,7 @@ function syncMargins() {
     voice: S.voiceOn, sounds: LS.get('sounds', false) === true,
     notifications: LS.get('notifications', true) === true && notificationPermission === 'granted',
     notificationsSupported: !!notificationApi(),
-    notificationStatus: { granted: 'System permission granted', denied: 'Blocked in system or browser settings', default: 'Permission is needed to enable notifications', unavailable: 'Permission is not available here' }[notificationPermission] || 'Permission is not available here',
+    notificationStatus: { granted: 'Notifications are allowed by the system or browser', denied: 'Notifications are blocked in system or browser settings', default: 'Notifications need your permission; turning them on asks for it', unavailable: 'Notifications aren’t available here' }[notificationPermission] || 'Notifications aren’t available here', notificationBlocked: notificationPermission === 'denied',   // every status names its subject: the card shows it with nothing beside it
     ...metadata,
     demo: S.demo, calm: calmMotion, systemReduced: reducedMotion.matches,
     glass: glassOn, glassAvailable,

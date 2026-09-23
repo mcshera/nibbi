@@ -330,3 +330,55 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+
+// A section tab in the bar says one thing once: the badge is the fact, and a line under it only adds
+// what the badge lacks. Every Settings status names its subject, since it is shown with nothing beside it.
+test('a section says its fact once, and a blocked permission says so', {timeout: 60000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+    const errors = []; page.on('pageerror', err => errors.push(err.message));
+    await page.setContent('<style>*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav>');
+    await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
+    await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
+    const moduleURL = 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/margin-ui.js', import.meta.url))).toString('base64');
+    await page.evaluate(async url => {
+      const {installMarginUI} = await import(url);
+      window.calls = [];
+      window.ui = installMarginUI({onAction: (action, id, value) => { calls.push({action, id, value}); }});
+      window.model = {projects: [
+        {id: 'alpha', name: 'Alpha', active: true, branch: 'main', goal: 'A real goal', mode: 'stage', inFlight: 2, pending: 1, staged: 3, done: 2, total: 7, planAvailable: true,
+          sections: {builds: {badge: '3 review', tone: 'attention'}, issues: {badge: '2 open', tone: 'quiet'}, plans: {badge: '2/7 tasks', detail: 'First shoots', tone: 'quiet'}}},
+      ], activeProject: 'alpha', busy: false, view: {project: 'alpha', section: 'issues'},
+      settings: {notifications: false, notificationsSupported: true, notificationBlocked: true, notificationStatus: 'Notifications are blocked in system or browser settings', session: 'abc · $1.00 · 7 turns', calm: false, systemReduced: false}};
+      ui.update(model);
+    }, moduleURL);
+    const section = () => page.locator('.margin-section').innerText();
+    const issues = await section();
+    assert.equal(issues.split('2 open').length - 1, 1, '"2 open" is said once, was ' + JSON.stringify(issues));
+    assert.doesNotMatch(issues, /full list|beside the bar/i, 'no hint that is untrue in the drawer');
+    assert.doesNotMatch(issues, /\.\s*$/m, 'state lines are fragments, not sentences');
+    await page.evaluate(() => { model.view = {project: 'alpha', section: 'builds'}; ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['3 review', '2 in flight · 3 staged · 1 pending'], 'builds add what is moving, which the badge does not say');
+    await page.evaluate(() => { Object.assign(model.projects[0], {inFlight: 0, pending: 0, staged: 0}); ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['3 review', 'nothing queued']);
+    await page.evaluate(() => { model.view = {project: 'alpha', section: 'plans'}; ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['2/7 tasks', 'First shoots', 'A real goal'], 'plans add the goal, not the count again');
+    await page.evaluate(() => { model.projects[0].goal = ''; ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['2/7 tasks', 'First shoots'], 'and nothing when there is no goal');
+    assert.equal(await page.locator('#st-notifications .margin-pref-value').innerText(), 'Blocked', 'a denied permission reads Blocked, not Off');
+    const note = await page.locator('.margin-pref-note').filter({hasText: /blocked/}).innerText();
+    assert.match(note, /^Notifications /, 'and its note names what is blocked');
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('every notification status the app reports names its subject', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const map = app.match(/notificationStatus: \{([^}]*)\}\[notificationPermission\] \|\| '([^']*)'/);
+  assert.ok(map, 'the status map is where the Settings card reads it');
+  const values = [...map[1].matchAll(/(\w+): '([^']*)'/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(values.map(([key]) => key), ['granted', 'denied', 'default', 'unavailable']);
+  for (const [key, value] of [...values, ['fallback', map[2]]]) assert.match(value, /^Notifications /, key + ': ' + value);
+  assert.match(app, /notificationBlocked: notificationPermission === 'denied'/);
+});
