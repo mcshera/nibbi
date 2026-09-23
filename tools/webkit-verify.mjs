@@ -13,20 +13,30 @@ const out = new URL('../output/webkit/', import.meta.url).pathname; mkdirSync(ou
 const errors = [];
 let browser, failed = 0;
 const hiddenBar = page => page.locator('#workspace-sidebar').getAttribute('aria-hidden');
-// Finite animations only: a live turn's pulse runs forever.
-const settle = page => page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
+// Nothing here may wait forever. page.evaluate has no timeout, and headless WebKit on a GPU-less CI
+// runner can stop advancing animations: an unbounded settle hung the whole job for 15 minutes with
+// no output. Every wait is bounded, and the last step reached is named when one runs out.
+let reached = 'launch';
+const mark = step => { reached = step; };
+const bounded = (promise, ms, what) => { let timer; return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} did not finish in ${ms}ms (last step: ${reached})`)), ms); timer.unref?.(); })]).finally(() => clearTimeout(timer)); };
+// Finite animations only: a live turn's pulse runs forever. At most 2s in the page, 10s from here.
+const settle = page => bounded(page.evaluate(() => Promise.race([
+  Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))),
+  new Promise(resolve => setTimeout(resolve, 2000)),
+])), 10_000, 'settle');
 
 async function size(width, height) {
   const tag = `${width}x${height}`, phone = width < 900;
   const context = await browser.newContext({ viewport: { width, height }, hasTouch: phone });
   const page = await context.newPage(); page.setDefaultTimeout(15_000);
   page.on('pageerror', error => errors.push(`${tag}: ${error.message}`));
-  await page.goto(fixture.base + '/?demo=1&nosw=1');
+  mark(`${tag} boot`); await page.goto(fixture.base + '/?demo=1&nosw=1');
   await page.waitForFunction(() => window.nibbiApp && window.nibbi);
   assert.ok(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--t2').trim()), `${tag}: tokens.css is linked`);
   const renderer = await page.evaluate(() => { const n = window.nibbi.state(); return n.backend + (n.fallbackReason ? ` (${n.fallbackReason})` : ''); });
 
   // The bar: a drawer that starts closed on a phone, docked and open on a desktop.
+  mark(`${tag} bar`);
   if (phone) {
     assert.equal(await hiddenBar(page), 'true', `${tag}: the drawer starts closed`);
     await page.locator('#sidebar-toggle').click(); await settle(page);
@@ -54,6 +64,7 @@ async function size(width, height) {
   if (phone) { await page.locator('.sidebar-collapse').click(); await settle(page); assert.equal(await hiddenBar(page), 'true', `${tag}: collapse closes the drawer`); }
 
   // A streamed reply: a live tail while it arrives, nothing of it left once it settles.
+  mark(`${tag} stream`);
   await page.evaluate(() => { void window.nibbiApp.send('fix the lock bug'); });
   await page.locator('.bubble.live .said-tail').waitFor({ timeout: 20_000 });
   await page.screenshot({ path: out + `stream-${tag}.png` });
@@ -64,6 +75,7 @@ async function size(width, height) {
   assert.match(reply.text, /ship it straight to/, `${tag}: the whole reply is there`);
 
   // The Builds lobby, on the fixture's builds.
+  mark(`${tag} builds`);
   if (phone) { await page.locator('#sidebar-toggle').click(); await settle(page); }
   await page.locator('.margin-tab[data-margin-tab="builds"]').click();
   await page.locator('#project-workspace:not([hidden])').waitFor();
@@ -71,7 +83,7 @@ async function size(width, height) {
   await settle(page);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${tag}: no horizontal page overflow`);
   await page.screenshot({ path: out + `builds-${tag}.png` });
-  await context.close();
+  await bounded(context.close(), 15_000, 'context close');
   return { tag, renderer };
 }
 
@@ -79,10 +91,10 @@ try {
   browser = await webkit.launch();
   const seen = [];
   for (const [width, height] of [[1180, 820], [390, 844]]) {
-    try { seen.push(await size(width, height)); console.log('PASS', `webkit ${width}x${height}`); }
+    try { seen.push(await bounded(size(width, height), 180_000, `webkit ${width}x${height}`)); console.log('PASS', `webkit ${width}x${height}`); }
     catch (error) { failed++; console.error('FAIL', `webkit ${width}x${height}`, '\n', error.stack || error.message); }
   }
   if (errors.length) { failed++; console.error('FAIL no page errors in WebKit', errors); }
   if (!failed) console.log(`WebKit checks passed (${browser.version()}): the bar, a streamed reply and the Builds lobby at 1180x820 and 390x844. Renderer: ${seen.map(s => s.tag + ' ' + s.renderer).join('; ')}.`);
-} finally { await browser?.close(); await fixture.close(); }
+} finally { await bounded(browser?.close() ?? Promise.resolve(), 20_000, 'browser close').catch(error => { failed++; console.error('FAIL', error.message); }); await fixture.close(); }
 process.exitCode = failed ? 1 : 0;

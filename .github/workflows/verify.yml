@@ -25,6 +25,7 @@ jobs:
         env: { CI: '1' }
       - run: npx playwright install webkit
       - run: npm run verify:webkit
+        timeout-minutes: 8   # a stalled engine fails this step, not the whole job
         env: { CI: '1' }
       - run: node tools/github-workflow-verify.mjs
         env: { CI: '1' }
