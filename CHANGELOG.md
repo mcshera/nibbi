@@ -2,6 +2,64 @@
 
 ## 0.8.1 — Unreleased
 
+### Composition and surfaces
+
+**The reply card.** A reply was shrink-wrapped, so it opened at the width of its steps and jumped
+to the full measure at the first word. It is a page-width card from its first frame now, and it does
+not change width between the first step and the settle. The dots stand down while a step is running
+— one working mark, not two — and a reply that ends in a fence or a table keeps its caret, on a line
+of its own under the block.
+
+**Colour means a verdict.** Failed was red in the phone list and grey in the desktop queue: the same
+row, two rules of equal weight, and the later one won. It is red in both. A workspace notice with no
+kind ("Confirm this build action below.") was painted in the failure red; it is ink.
+
+**Motion.** Reduced motion cut every animation to a millisecond but left the loops looping, so the
+thinking dot and the plan badge flickered instead of standing still. Every animation plays once now,
+and Calm motion, which only ever reached the character, reaches the CSS as `body.calm`.
+
+**A section is a room.** Opened from idle, the 164px character used to shrink through the section's
+header for 600ms while the section arrived in 220; it snaps to its header pose now, the way first
+paint does. The fixers no longer float over a section's records, and the floating "Chat with Nibbi"
+button is gone — it duplicated the Chat tab and covered a card's status on a phone. The header × has
+always been the way back, and it never scrolls away. At 390 the header puts its summary on a line of
+its own and its controls in one row under it; the filters scroll sideways instead of wrapping; To
+push and Pull requests appear only for a project that delivers through GitHub, or when one of them
+has something in it; and a phone is not shown keyboard shortcuts.
+
+**The bar says one thing once.** A section tab said "2 open" and then "2 open." under it, and "The
+full list is open beside the bar." on every section — untrue in the phone drawer, where nothing is
+beside it. The badge is the fact now, and a line under it adds only what the badge lacks: what is in
+flight and staged for Builds, the goal for Plans, nothing for Issues. In Settings, "Blocked in system
+or browser settings" sat under the microphone row with no subject; every status names notifications
+now, and a denied permission reads Blocked rather than Off. Session reads `$1.00 · 7 turns` on one
+line — the row's label already says whose numbers they are.
+
+**One rule, one check.** Two resets at (0,1,1) outranked every control's own class in the bar and
+the workspace, and twenty-seven `!important` flags were holding the line; the resets are under
+`:where()` and the flags are gone. Six disabled opacities are one `--dim-disabled`, every focus ring is one
+`--focus-ring` (or its inverse on ink, where an ink ring cannot be seen), and `tools/style-verify.mjs`,
+first in `npm run verify`, fails a new flag, a new dimming,
+a hand-drawn ring or verdict colour on something that is not a verdict. Measured across 260 visible
+controls at 1180 and 390, two things changed: the section's × is the 21px it always declared, and a
+disabled pill dims to .45 instead of .42.
+
+**Copy copies what you read.** The code block's button stripped a trailing "copy" from the block's
+text, but a capped block ends in "show all (18 lines)", so the label came along; it copies the code
+itself now. A reply's copy took the raw text with its `»acts:` lines, and both said "copied" whether
+or not the clipboard took it. The fold ("5 steps in 9s — show") opened the steps and vanished, taking
+focus with it; it is a toggle now, above the steps it opens, that stays where it is. An event turn no longer offers "ask again"
+with nothing to ask.
+
+**One of everything.** A running step counts in whole seconds and a long one reads `1m 05s`, not
+`1.1m` — the thinking step's format. A failed turn restored from history, or stored by the daemon
+already put into words, wears the same notice or failure mark it wore live. Reduced motion and Calm
+motion scroll the feed without smoothing.
+
+**Also.** The toast is a live region and sits above the fixers instead of on them. An agent's card
+stays open while you type in it. On a phone the jump button and a toast's action are 44px, the code
+block's copy button has a 44px hit area around the smaller pill it paints, and all four take the focus ring.
+
 ### Conversation continuity and first run
 
 **Where a reload lands.** The conversation was chosen before the app knew which project it was in,

@@ -631,7 +631,9 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     el.setAttribute('aria-label', `${el.title} thread in ${el.dataset.projectName}${when ? ', last message ' + when : ''}`);
   }
   const clock = setInterval(() => { for (const el of body.querySelectorAll('.project-thread[data-last-at]')) paintWhen(el); }, 60000);
-  /** A section tab shows what is waiting, in a sentence. The records themselves fill the workspace. */
+  /** A section tab says what is waiting, once. The headline (the badge) is the fact; the lines under it
+      add only what the badge lacks. The records themselves fill the workspace, so there is no hint
+      pointing at them — it said "beside the bar" in the drawer too, where they are not. */
   function sectionBody(data, section) {
     const info = data.sections?.[section] || {};
     const wrap = node('div', 'margin-section');
@@ -639,8 +641,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     headline.dataset.tone = info.tone || 'quiet';
     wrap.append(headline);
     if (info.detail) wrap.append(node('p', 'margin-section-line', info.detail));
-    wrap.append(node('p', 'margin-section-line', waitingLine(data, section)));
-    wrap.append(node('p', 'margin-section-hint', 'The full list is open beside the bar.'));
+    const line = waitingLine(data, section);
+    if (line && !headline.textContent.startsWith(line)) wrap.append(node('p', 'margin-section-line', line));
     const [action, label] = {builds: ['review', 'Review'], issues: ['repository', 'Repository & GitHub'], plans: ['plan', 'Plan']}[section] || [];
     if (!action) return [wrap];
     const go = button(label, 'margin-pill', () => void dispatch(action, data.id, undefined, globalError));
@@ -648,24 +650,18 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     wrap.append(go);
     return [wrap];
   }
+  /** Lowercase fragments, no period: a state line, not a sentence. Issues add nothing (the badge says
+      "2 open") and plans only the goal (the badge says "1/3 tasks"). */
   function waitingLine(data, section) {
     if (section === 'builds') {
       const bits = [];
       if (count(data.inFlight)) bits.push(`${count(data.inFlight)} in flight`);
       if (count(data.staged)) bits.push(`${count(data.staged)} staged`);
       if (count(data.pending)) bits.push(`${count(data.pending)} pending`);
-      return bits.length ? bits.join(' · ') : 'Nothing is queued.';
+      return bits.length ? bits.join(' · ') : 'nothing queued';
     }
-    if (section === 'issues') {
-      const open = String(data.sections?.issues?.badge || '').match(/^(\d+) open/);
-      return open ? `${open[1]} open.` : 'Nothing is open.';
-    }
-    const done = count(data.done), total = count(data.total);
-    if (done !== null && total !== null && total > 0) {
-      const left = Math.max(0, total - done);
-      return left ? `${left} task${left === 1 ? '' : 's'} left.` : 'Every task is done.';
-    }
-    return text(data.goal, 'No plan written yet.');
+    if (section === 'issues') return '';
+    return text(data.goal, '');
   }
   function renderProject(entry, data) {
     entry.data = data;
@@ -735,7 +731,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     for (const [action, pref] of Object.entries(prefs)) {
       const on = action === 'calm' ? !!(s.calm || s.systemReduced) : !!s[action];
       if (action === 'glass') pref.el.hidden = s.glassAvailable === false;   // browsers have no translucent window to show
-      pref.el.setAttribute('aria-pressed', String(on)); pref.value.textContent = action === 'calm' && s.systemReduced ? 'OS reduced motion' : action === 'microphone' && on ? ({ starting: 'Allow mic', armed: 'Ready', listening: 'Listening', paused: 'Paused', greeting: 'Responding', transcribing: 'Processing', sending: 'Answering' }[s.microphonePhase] || 'On') : on ? 'On' : 'Off';
+      pref.el.setAttribute('aria-pressed', String(on)); pref.value.textContent = action === 'calm' && s.systemReduced ? 'OS reduced motion' : action === 'notifications' && s.notificationBlocked ? 'Blocked' : action === 'microphone' && on ? ({ starting: 'Allow mic', armed: 'Ready', listening: 'Listening', paused: 'Paused', greeting: 'Responding', transcribing: 'Processing', sending: 'Answering' }[s.microphonePhase] || 'On') : on ? 'On' : 'Off';
     }
     notificationNote.textContent = s.notificationsSupported === false ? 'Notifications are not supported here.' : text(s.notificationStatus, '');
     notificationNote.hidden = !notificationNote.textContent;

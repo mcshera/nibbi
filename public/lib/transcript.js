@@ -24,9 +24,12 @@ export function inputLine(input) {
   try { return oneLine(JSON.stringify(input)); } catch { return ''; }
 }
 
-export function elapsedLabel(ms) {
+/* One format for a duration. A settled one keeps a tenth under ten seconds (0.4s); a live one — a step
+   still running, thinking still counting — ticks in whole seconds, since a tenth that changes ten times
+   a second is noise. Both read 1m 05s past a minute. */
+export function elapsedLabel(ms, { live = false } = {}) {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '';
-  if (ms < 9_950) return (ms / 1000).toFixed(1) + 's';
+  if (ms < 9_950 && !live) return (ms / 1000).toFixed(1) + 's';
   const secs = Math.round(ms / 1000);
   if (secs < 60) return secs + 's';
   return Math.floor(secs / 60) + 'm ' + String(secs % 60).padStart(2, '0') + 's';

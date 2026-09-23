@@ -120,6 +120,18 @@ test('elapsed formatting boundaries', () => {
   assert.equal(elapsedLabel(60_000), '1m 00s');
   assert.equal(elapsedLabel(125_000), '2m 05s');
   assert.equal(elapsedLabel(3_600_000), '60m 00s');
+  // a live duration (a step still running, thinking still counting) ticks in whole seconds, then minutes
+  assert.equal(elapsedLabel(0, { live: true }), '0s');
+  assert.equal(elapsedLabel(400, { live: true }), '0s');
+  assert.equal(elapsedLabel(1_400, { live: true }), '1s');
+  assert.equal(elapsedLabel(3_000, { live: true }), '3s');
+  assert.equal(elapsedLabel(9_949, { live: true }), '10s');
+  assert.equal(elapsedLabel(59_499, { live: true }), '59s');
+  assert.equal(elapsedLabel(59_500, { live: true }), '1m 00s');
+  assert.equal(elapsedLabel(65_000, { live: true }), '1m 05s');
+  assert.equal(elapsedLabel(-1, { live: true }), '');
+  assert.equal(elapsedLabel(NaN, { live: true }), '');
+  assert.equal(elapsedLabel(65_000, { live: false }), elapsedLabel(65_000), 'past ten seconds the two formats agree');
   // started events never carry an elapsed label
   assert.equal(describeToolEvent({ name: 'Read', phase: 'started', elapsedMs: 5000 }).elapsedLabel, '');
   assert.equal(describeToolEvent({ name: 'Read', phase: 'started', elapsedMs: 5000 }).elapsedMs, null);

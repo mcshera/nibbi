@@ -2,7 +2,7 @@
 
 Read 2026-09-21 out of the shipped surface, not invented over it. Every rule below is either **observed** (the code already does this consistently — the rule just names it) or **proposed** (the code is inconsistent here — the rule picks the winner and says what it costs to adopt). Nothing is aspirational. Where a rule came from outside, the source is linked.
 
-Companion file: **`public/tokens.css`** — the same system as custom properties, 124 of them, linked ahead of `styles.css` in `public/index.html` and therefore live. The drift register in §15 has been applied: every literal in `public/*.css` that the register named now reads a token.
+Companion file: **`public/tokens.css`** — the same system as custom properties, 127 of them, linked ahead of `styles.css` in `public/index.html` and therefore live. The drift register in §15 has been applied: every literal in `public/*.css` that the register named now reads a token.
 
 **A caution this document earned.** Several claims in the first draft were read out of the CSS without checking what the running app actually renders, and three of them were wrong: the "missing" empty states exist, the "missing" pending states exist, and the touch-reachability gap was one control rather than several. Worse, a whole section of CSS — `.status`, `.project`, `.pmenu`, `.plabel`, 45 lines — described a shell that the workspace rail replaced and that nothing constructs any more; this document had been documenting it as live. Those entries are corrected below and the dead CSS is deleted. **Check a claim against the DOM before writing it down here.**
 
@@ -28,7 +28,7 @@ Measured before and after applying §15:
 | ink-veil alphas | 25 distinct | **1** (a zero-size shadow that draws nothing) | tokens only |
 | z-index literals | 12 anonymous | **2** (both in a local stacking context, deliberately) | named rungs only |
 | backdrop blur literals | 6 distinct | **0** | tokens only |
-| custom properties declared | 16 | **124** | — |
+| custom properties declared | 16 | **127** | — |
 | dead pre-rail CSS | 45 lines | **0** | — |
 
 The five surviving hexes are all legitimate: `#151413`, `#383633` and `#5f5c57` as `var(--ink, …)` fallbacks (kept in step with the ramp), `#000` inside a `mask-image` gradient — a mask channel, not a colour — and `#fff` once on the QR code, which must be true white to scan.
@@ -153,6 +153,8 @@ Proposed ramp — one per verdict, three roles each:
 
 **Rule.** There is no warning colour and no info colour. A warning is a `--fail-edge` border with ink text (`.chip.warn`, `.planr .prwarn` already do this). Info is ink. Adding an amber or a blue would break principle 1.
 The bar's `.margin-error` follows it: a refusal that means "not now" — switching away while nibbi is answering — carries `data-kind="notice"` and is `--ink-2`; only an action that failed is `--fail-text`.
+
+**Default.** A workspace notice with no kind is ink — `--ink-2` on `--notice-bed` — because "Confirm this build action below." is information, not a verdict; only `data-kind="error"` wears `--fail-text`. (`data-kind="success"` keeps `--pass-text` for now: "Saved." is not a verdict either, and that one is the owner's call.) A verdict wears one colour everywhere it is shown: Failed is `--fail-text` in the desktop queue and in the phone list alike.
 
 ### 2.4 Agent tint
 
@@ -409,6 +411,8 @@ Three durations, one curve, applied consistently across every file. **This is th
 
 Global kill switch at `styles.css:211` (`1ms !important` on everything), plus JS-side handling in `nibbi.js` and `pocket-motion.js` (`reduced=true` returns a *spatially static pose*, not a frozen frame). The character contract requires a reduced expression per action that is identical for every `t` — this is better than most shipped products and should be held to for anything new.
 
+The kill switch also sets `animation-iteration-count: 1`: at 1ms an infinite `think` or `pulse` does not stand still, it flickers, so every loop now plays once and lands on its base frame. The same block applies under `body.calm`, which `syncMotionPreference` sets whenever the system asks for reduced motion or Calm motion is on — the in-app preference used to reach only the character.
+
 ### 7.5 Where to take motion next
 
 The curve `cubic-bezier(.2,.7,.2,1)` was chosen once and never compared. [Easing Wizard](https://easingwizard.com/) generates and diffs spring-derived curves; [Devouring Details](https://devouringdetails.com/) is the closest published work to the standard `pocket-motion.js` already holds. Neither implies adopting a library — `pocket-motion.js` is analytic, dependency-free, and better than what a library would give.
@@ -439,11 +443,11 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 
 | part | shape | type | elevation | rule |
 |---|---|---|---|---|
-| **bubble** | `18px`/`10px` TL, 6px ink dot | `--type-read` | `--e-raised` | never gets an avatar |
+| **bubble** | `18px`/`10px` TL, 6px ink dot | `--type-read` | `--e-raised` | never gets an avatar; a page-width block card at every length, so it never changes width mid-reply — your message is the one that shrink-wraps. The caret takes a line of its own under a trailing fence, quote, table or rule |
 | **your message** | `18 18 6 18`, `--veil-hover` | `--type-body` | none | right-aligned, max 78% |
 | **chip** | pill, `--veil-hairline` border | `--type-control` | none, `--blur-light` | hover inverts to solid ink; `.warn` takes `--fail-edge` |
 | **step** | row, 7px dot | `--type-fine` | none | dot state: live=ink+pulse, done=`--ink-3` at `scale(.75)`, fail=`--fail-mark` |
-| **steps fold** | one row | `--type-fine` | none | replaces the whole list when complete |
+| **steps fold** | one row | `--type-fine` | none | folds the whole list when complete and moves above it; a toggle (`— show` / `— hide`, `aria-expanded`) that stays in place while the list opens under it, so focus never leaves it. It changes attributes only (CSS picks the word): a text change re-pins the feed and moves it. An older transcript's summary-only row is a plain line |
 | **composer (pill)** | `--r-dock` | `--type-field` | `--e-docked` + `--e-highlight` | `+` left, send squircle right; both drop to the last line when tall |
 | **dock panel** | `--r-surface` | `--type-control` | `--e-docked` | rows are 44px minimum |
 | **menu** (switch, dock) | `--r-surface` | `--type-fine`/`--type-control` | `--e-floating` | opens on hover *and* focus-within |
@@ -483,6 +487,9 @@ Nibbi drives most of its UI from `body` attributes and classes. The full set, be
 | `.standalone` | PWA | safe-area insets on status and feed |
 | `.playtest` | playtest mode | labelled border on the composer |
 | `.link-fresh` | recent state change | same: set on `body`, styled by nothing since the status label went. Vestigial alongside `data-link` |
+| `.calm` | `syncMotionPreference` (system reduced motion or Calm motion) | the reduced-motion kill switch of §7.4, so the in-app preference reaches the CSS and not only the character |
+| `.project-view` | `openProjectSection` / `closeProjectView` | a section is a room: the feed, chips, jump, composer and fixers stand down (the composer stays mounted and `inert`, so a draft survives); the header `×` is the way back |
+| `.has-agents` | `renderAgents` | the fixers are perched on the composer, so `--feed-bottom` rises 52px to keep the feed clear of them |
 
 **Rule.** New state goes on `body` as an attribute when it has 3+ values, a class when it is binary. Never a JS-set inline style — `.glass` is applied by `app.js` precisely so browsers and the PWA are untouched, and that separation is what keeps the contrast budget honest.
 
@@ -495,6 +502,7 @@ Governed by `docs/PERSONALITY.md`, which is more thorough than most product voic
 - **Chips come from meaning or from state, never from a regex.** This is the hardest-won rule in the project (`docs/IMPROVEMENT-PLAN.md` §A) and it is a design rule as much as a model rule: an action that appears must be an action that exists.
 - **Labels are lowercase sentence case.** `new thread`, `jump to latest`, `plan first`. Uppercase appears only at `--type-micro` with tracking, for machine categories (`TOOL`, `EXECUTED`).
 - **Numbers, not adjectives.** `4 files · +82 −14`, not "several changes".
+- **A state line says one fact once.** A section tab's headline is its badge; the lines under it add only what the badge lacks, as lowercase fragments with no period (`2 in flight · 1 staged`, `nothing queued`), and nothing at all when it has nothing to add. A status shown on its own names its subject: `Notifications are blocked in system or browser settings`, not `Blocked in system or browser settings`.
 - **A truncated string always carries a `title`.** Taken from the sidebar lab's reading of Cursor's live complaint about untitled truncated repo names.
 - **Drafts are per conversation.** A half-written message stays with the thread it was written in, survives a reload, and a quote is added under it, never over it. A file that cannot be attached says why, with the number (`4 images is the most per message`).
 
@@ -506,11 +514,12 @@ Already met, and worth stating so it stays met:
 
 | requirement | implementation |
 |---|---|
-| focus visible | `2px solid var(--ink)`, `offset: 3px` (2px inside dense panels), on every interactive element |
+| focus visible | `outline: var(--focus-ring)` (`2px solid var(--ink)`), `offset: 3px` (2px inside dense panels), on every interactive element; on ink (a toast's action, a code block's copy) `var(--focus-ring-inverse)`, the same ring in `--ink-inverse`, since the ink ring cannot be seen there; `tools/style-verify.mjs` fails any other ring |
+| disabled | `opacity: var(--dim-disabled)` (`.45`), everywhere; a control that must not dim says `opacity: 1` and shows it another way (the outlined Settings badge) |
 | touch targets | 44px minimum at `≤640px` and `pointer: coarse` |
 | reduced motion | global 1ms override + per-surface + character-level static poses |
 | screen reader | `.sr` clip pattern, `aria-expanded` on the `+`, `aria-pressed` on toggles, `aria-describedby` on the field |
-| hover-only content | every hover reveal also fires on `:focus-within` |
+| hover-only content | every hover reveal also fires on keyboard focus. The agent card opens on `:focus-visible` on the agent or inside the card (`:has(.card :focus-visible)`), so focus in its guide box keeps it open; not on `:focus-within`, which a click also satisfies, and which held an unpinned card open over the hero |
 | colour alone | no state is carried by colour alone — dots also change size, borders also change weight |
 | contrast | §2.5 |
 
@@ -569,6 +578,10 @@ Everything found that was the same intent rendered two ways. **All 12 rows are a
 | 12 | `margins.css` wrote `220ms` literally instead of `--t2` | uses the token | ✅ |
 
 Two families were found while applying the register and are now documented rather than left loose: the opaque interaction beds (§2.2b, eight near-identical warm greys across two files) and the elevation ladder's one horizontal shadow, `--e-rail`.
+
+Round 2 (0.8.1) closed two more of the same kind. Builds showed `To push 0` and `Pull requests 0` on every project, GitHub or not: those two now hide as a group when no run delivers through GitHub (`github.mode` or `workflowMode` is `github`) and neither counts anything (a local merge on a GitHub-connected project is mode `local` and still to push), while `Needs attention` stays, because that is where a local project's failed builds are.
+
+Three tokens joined the file, `--dim-disabled`, `--focus-ring` and `--focus-ring-inverse` (the same ring on ink, where the ink one cannot be seen), replacing six disabled opacities (`.35`, `.4`, `.42`, `.45`, `.45`, `.5`) and every hand-drawn ring (`--ink-2` in the workspace and `--margin-muted` on the card's scroller among them). `--track-micro` is adopted at its two exact sites. 28 `!important` flags are retired — 16 in `margins.css` and 11 in `project-workspace.css`, where the button resets sat at (0,1,1) and outranked every control's own class (they are under `:where()` now), and the palette's one, which a `max-width` does without. What remains is `[hidden]` and the reduced-motion kill switch (7 in `styles.css`, 3 in `margins.css`), and `tools/style-verify.mjs`, first in `npm run verify`, holds each file to that budget. Two things came back once the resets stopped winning: the section's `×` renders at its declared `--type-title` (21px, as the card's close does; it was 16), and a disabled Settings preference keeps full opacity with its outlined badge, as §12's shape-not-colour rule always asked.
 
 ## 16. References
 
