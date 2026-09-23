@@ -4,7 +4,7 @@
 
 1. Click either microphone button once (side rail or composer), use Settings → Hey Nibbi microphone, or press ⌥ Space. These all toggle the same wake listener. Allow microphone access if asked.
 2. The dark mic and **Say “Hey Nibbi”** status mean wake listening is on.
-3. Say **“Hey Nibbi”**. Nibbi says **“What's up, Matty?”** and shows **Listening — go ahead**.
+3. Say **“Hey Nibbi”**. Nibbi says **“What's up?”** and shows **Listening — go ahead**.
 4. Say your message. After about 0.9 seconds of quiet, Nibbi finishes the recording and sends it once. **Processing speech · mic paused** means recording has ended and transcription is running. It returns to waiting for “Hey Nibbi” after the reply. While speaking, you can also press **Send** or Enter to finish immediately.
 5. Click the mic again to turn it fully off. Holding/releasing the shortcut is not push-to-talk.
 

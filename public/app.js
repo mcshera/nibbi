@@ -3,10 +3,11 @@ import './margins.css';
 import './voice.css';
 import './project-workspace.css';
 import './project-composer.css';
-import { createWakeVoice } from './lib/wake-voice.js';
+import { createWakeVoice, WAKE_GREETING } from './lib/wake-voice.js';
 import { createMicCapture } from './lib/mic-capture.js';
 import { createVoicePlayer } from './lib/voice-player.js';
 import { installMarginUI } from './lib/margin-ui.js';
+import { emptyLine } from './lib/empty.js';
 import { installProjectWorkspace } from './lib/project-workspace.js';
 import { projectCommand, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { createProjectSummaryStore, describeProjectSection } from './lib/project-summary.js';
@@ -83,10 +84,7 @@ let visibleProjectIds = [];
 const projectSummaries = createProjectSummaryStore({ onChange: () => syncMargins() });
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
 const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: () => closeProjectView(), onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
-const chatLauncher = document.createElement('button');
-chatLauncher.type = 'button'; chatLauncher.id = 'project-chat-launcher'; chatLauncher.className = 'project-chat-launcher';
-chatLauncher.textContent = 'Chat with Nibbi'; chatLauncher.hidden = true; chatLauncher.setAttribute('aria-controls', 'pill');
-chatLauncher.onclick = () => focusComposer(); document.body.append(chatLauncher);
+// A section's way back to the conversation is its own header ×, which never scrolls away and exists at every width.
 function focusComposer() { closeProjectView(false); ask.focus(); }
 /* "Plan first": the next message becomes a reviewable plan (numbered steps → approve → builds) instead of a chat turn */
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
@@ -165,7 +163,6 @@ function watchProjectSummaries() {
 }
 const threadsRead = new Set();
 function syncProjectComposer() {
-  chatLauncher.hidden = !S.projectView;
   pill.inert = !!S.projectView;
 }
 
@@ -173,8 +170,7 @@ function syncProjectComposer() {
 function workspaceLeft() { return parseFloat(getComputedStyle(body).getPropertyValue('--workspace-left')) || 0; }
 function idleRadius() { return Math.max(70, Math.min(185, Math.min(innerWidth - workspaceLeft(), innerHeight) * 0.20)); }
 function layout(snap) {
-  // Initialization runs before the attachment state is declared.
-  if (typeof chatLauncher !== 'undefined') syncProjectComposer();
+  syncProjectComposer();
   const W = innerWidth, H = innerHeight, r0 = idleRadius();
   const center = (W + workspaceLeft()) / 2;
   const pillTop = pill.getBoundingClientRect().top || (H - 124);
@@ -191,7 +187,7 @@ function layout(snap) {
     pose = { x: center, y: H * (focused ? 0.47 : 0.49) - (H < 600 ? 20 : 0), r: r0 };
   }
   const hasAgents = body.classList.contains('has-agents');
-  document.documentElement.style.setProperty('--agents-bottom', Math.round(S.projectView ? 80 : H - pillTop - 3) + 'px');   // perched on the pill's top edge
+  document.documentElement.style.setProperty('--agents-bottom', Math.round(H - pillTop - 3) + 'px');   // perched on the pill's top edge; a section hides them
   document.documentElement.style.setProperty('--feed-bottom', Math.round(H - pillTop + 18 + (hasAgents ? 52 : 0)) + 'px');
   if (snap) nibbi.snapTarget(pose); else nibbi.setTarget(pose);
 }
@@ -204,6 +200,7 @@ let calmMotion = LS.get('pocketCalm', false) === true;
 function syncMotionPreference() {
   const system = reducedMotion.matches, calm = system || calmMotion;
   nibbi.setReducedMotion(calm); interactions.setReducedMotion(calm);
+  body.classList.toggle('calm', calm);   // the CSS kill switch follows the preference, not only the system setting
   syncMargins();
 }
 reducedMotion.addEventListener('change', syncMotionPreference);
@@ -245,7 +242,7 @@ function noteUnread(n) {
 }
 function scrollFeed(force) { if (!force && !S.stick) return; if (scrollRaf) return; scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; feed.scrollTop = feed.scrollHeight; }); }
 feed.addEventListener('scroll', () => { const gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight; const atBottom = gap < 80; if (atBottom !== S.stick) { S.stick = atBottom; jumpBtn.hidden = atBottom || S.mode !== 'talk'; if (atBottom) noteUnread(0); } }, { passive: true });
-jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); };
+jumpBtn.onclick = () => { S.stick = true; jumpBtn.hidden = true; unread = 0; jumpLabel.textContent = 'latest'; feed.scrollTo({ top: feed.scrollHeight, behavior: reducedMotion.matches || calmMotion ? 'auto' : 'smooth' }); };
 new MutationObserver(() => scrollFeed(false)).observe(feed, { childList: true, subtree: true, characterData: true });
 new ResizeObserver(() => scrollFeed(false)).observe(feed);
 
@@ -273,7 +270,8 @@ function decoratePre(root) {
   for (const pre of root.querySelectorAll('pre')) {
     if (pre.querySelector('.copycode')) continue;
     const b = document.createElement('button'); b.type = 'button'; b.className = 'copycode'; b.textContent = 'copy';
-    b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/copy$/, '').replace(/show all \(\d+ lines\)$/, '')); toast('copied'); };
+    // marked writes <pre><code>, and the buttons are the code's siblings, so the code is exactly what was written
+    b.onclick = () => copyText((pre.querySelector('code') || pre).textContent);
     pre.appendChild(b);
     const n = (pre.textContent.match(/\n/g) || []).length;
     if (n > 16) { pre.classList.add('capped'); const x = document.createElement('button'); x.type = 'button'; x.className = 'expand'; x.textContent = 'show all (' + n + ' lines)'; x.onclick = () => { pre.classList.remove('capped'); x.remove(); }; pre.appendChild(x); }
@@ -281,12 +279,42 @@ function decoratePre(root) {
   return root;
 }
 function renderMd(src) { const frag = mdFragment(src); decoratePre(frag); return frag; }
+/* The clipboard only exists on a secure page, and a write can be refused; "copied" is said only once it is true. */
+function copyText(s) {
+  const w = navigator.clipboard?.writeText(s);
+  if (!w) return toast('copy needs a secure page');
+  w.then(() => toast('copied'), () => toast('copy failed'));
+}
 
 /* ------------------------------------------------------------------ feed */
 
-function newTurn(text, images, at) {
-  const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now());
-  if (!last || new Date(last.at || Date.now()).toDateString() !== now.toDateString()) { if (feed.children.length) { const sep = document.createElement('div'); sep.className = 'when'; sep.textContent = now.toDateString() === new Date().toDateString() ? 'today' : now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }); feed.appendChild(sep); } }
+const dayLabel = (d) => d.toDateString() === new Date().toDateString() ? 'today' : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+function daySep(d) { const sep = document.createElement('div'); sep.className = 'when'; sep.textContent = dayLabel(d); return sep; }
+let stepsSeq = 0;
+/* Attributes only: the feed pins itself to the bottom on any text or child change, and that pin, not the
+   list, is what would move the toggle out from under the pointer. The CSS shows the word that matches. */
+function syncFold(steps, fold) {
+  fold.setAttribute('aria-expanded', String(!steps.classList.contains('folded')));
+}
+/* A finished turn's steps fold behind one line, and the line opens and closes them. While the turn runs
+   the line waits, hidden, after the steps it will summarise; folding moves it to the top of the list, so
+   the list opens under it and the toggle stays where it was pressed. */
+function foldSteps(T, line) {
+  T.fold.querySelector('.l').textContent = line;
+  T.steps.prepend(T.fold);
+  T.steps.classList.add('foldable', 'folded'); syncFold(T.steps, T.fold);
+}
+/* An older transcript kept the summary alone. There is nothing under it to open, so it is a line, not a toggle. */
+function summaryLine(T, line) {
+  const el = document.createElement('div'); el.className = 'fold'; el.innerHTML = '<span class="b"></span><span class="lw"><span class="l"></span></span>';
+  el.querySelector('.l').textContent = line; T.fold.replaceWith(el); T.fold = el;
+  T.steps.hidden = false; T.steps.classList.add('folded');
+}
+/* `into` builds the turn off-document (restored history), so it neither scrolls nor counts as unread */
+function newTurn(text, images, at, into) {
+  const last = S.turns[S.turns.length - 1]; const now = new Date(at || Date.now()); const host = into || feed;
+  if (!into) feed.querySelector(':scope > .feed-empty')?.remove();   // an empty thread's line goes with its first turn; left in, it earned that turn a "today" divider
+  if (!last || new Date(last.at || Date.now()).toDateString() !== now.toDateString()) { if (host.children.length) host.appendChild(daySep(now)); }
   const turn = document.createElement('article'); turn.className = 'turn';
   const you = document.createElement('div'); you.className = 'you';
   if (text === null) turn.classList.add('event');
@@ -295,8 +323,13 @@ function newTurn(text, images, at) {
   const nib = document.createElement('div'); nib.className = 'nib';
   const ava = null;   // no small nibbi beside the bubble: the bubble's corner dot is the signature
   const nibBody = document.createElement('div'); nibBody.className = 'nibbody';
-  const steps = document.createElement('div'); steps.className = 'steps'; steps.hidden = true;
-  const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="l"></span>'; fold.onclick = () => steps.classList.remove('folded'); steps.appendChild(fold);
+  const steps = document.createElement('div'); steps.className = 'steps'; steps.hidden = true; steps.id = 'steps-' + (++stepsSeq);
+  // The summary is a toggle that stays where it is (foldSteps puts it above the list), so focus never leaves it. .l holds the summary alone;
+  // the word that says what a press does sits beside it, so the saved line never carries it.
+  const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold'; fold.innerHTML = '<span class="b"></span><span class="lw"><span class="l"></span><span class="fw"> — <u class="fw-show">show</u><u class="fw-hide">hide</u></span></span>';
+  fold.setAttribute('aria-expanded', 'false'); fold.setAttribute('aria-controls', steps.id);
+  fold.onclick = () => { if (!steps.classList.contains('foldable')) return; steps.classList.toggle('folded'); syncFold(steps, fold); };
+  steps.appendChild(fold);
   for (const P of S.turns) { const a = P.nib.querySelector('.acts:not(.sticky)'); if (a) a.remove(); }
   turn.setAttribute('aria-busy', 'true');
   const said = document.createElement('div'); said.className = 'said';
@@ -307,10 +340,11 @@ function newTurn(text, images, at) {
   nibBody.append(bubble, meta);
   nib.append(nibBody);
   if (text !== null) turn.append(you); turn.append(nib);
-  feed.appendChild(turn);
+  host.appendChild(turn);
   // Your own message always pulls the feed down. Something that arrived on its own while you were
   // reading further up does not: it waits, and the jump button says how much of it there is.
-  if (text === null && !S.stick) noteUnread(1);
+  if (into) { /* history: the caller places it and decides where the reader ends up */ }
+  else if (text === null && !S.stick) noteUnread(1);
   else { S.stick = true; scrollFeed(true); }
   const T = { el: turn, nib, body: nibBody, ava, bubble, steps, said, meta, provenance, fold, text, at: at || Date.now(), startedAt: performance.now(), stepsList: [], liveStep: null, acc: '', done: false, stepLine: '', runId: null, flush: null, tail: null, stable: 0 };
   S.turns.push(T);
@@ -361,7 +395,7 @@ function insertStep(T, ev) {
   T.steps.hidden = false; T.steps.insertBefore(el, T.fold);
   const st = stepRecord(el, ev.label, null, ev); T.stepsList.push(st); return st;
 }
-function markStep(st, state) { st.el.classList.remove('live', 'done', 'fail'); st.el.classList.add(state); if (state === 'fail') st.ok = false; else if (state === 'done' && st.ok === null) st.ok = true; const dt = (performance.now() - st.at) / 1000; if (dt > 1.5) st.el.querySelector('.t').textContent = dt < 60 ? dt.toFixed(0) + 's' : (dt / 60).toFixed(1) + 'm'; }
+function markStep(st, state) { st.el.classList.remove('live', 'done', 'fail'); st.el.classList.add(state); if (state === 'fail') st.ok = false; else if (state === 'done' && st.ok === null) st.ok = true; const ms = performance.now() - st.at; if (ms > 1500) st.el.querySelector('.t').textContent = elapsedLabel(ms, { live: true }); }
 function fillStepResult(st) {
   const res = st.el.querySelector('.sres'); if (!res) return;
   res.replaceChildren(); res.hidden = false; res.classList.toggle('fail', st.ok === false);
@@ -389,7 +423,7 @@ function noteThinking(T, t) {
     const st = addStep(T, 'thinking', 'think');
     st.el.querySelector('.l').insertAdjacentHTML('afterend', '<span class="tailwrap"><span class="tail"></span></span>');
     st.tailText = '';
-    st.timer = setInterval(() => { const el = st.el.querySelector('.t'); if (el) el.textContent = Math.round((performance.now() - st.at) / 1000) + 's'; }, 1000);
+    st.timer = setInterval(() => { const el = st.el.querySelector('.t'); if (el) el.textContent = elapsedLabel(performance.now() - st.at, { live: true }); }, 1000);
     T.think = st;
     if (nibbi.mood() !== 'thinking') nibbi.setMood('thinking');
   }
@@ -416,8 +450,7 @@ function finishSteps(T, ok) {
   if (!rows.length) { if (thought) T.stepLine = 'thought for ' + elapsedLabel(thought.elapsedMs); return; }
   const line = (ok ? '' : 'stopped after ') + stepSummaryLine(rows, performance.now() - T.startedAt);
   T.stepLine = line;
-  T.fold.querySelector('.l').innerHTML = escapeHtml(line) + ' — <u>show</u>';
-  T.steps.classList.add('folded');   // the screen reader hears T.stepLine once, composed into the reply's announcement by the caller; individual tool frames are never announced
+  foldSteps(T, line);   // the screen reader hears T.stepLine once, composed into the reply's announcement by the caller; individual tool frames are never announced
 }
 /* A command's output is text with links in it, never markdown. */
 function renderPlain(T, clean) {
@@ -494,14 +527,17 @@ function setMeta(T, r) {
   // Local provenance lives above the reply, including while tokens stream.
   if (r && r.raw) bits.push(String(r.raw).replace(/^\s*error:\s*/i, '').slice(0, 90));
   T.meta.textContent = bits.filter(Boolean).join(' · '); T.meta.prepend(tm, document.createTextNode(bits.filter(Boolean).length ? ' · ' : ''));
-  const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = '> ' + s + '\n\n'; focusComposer(); autosize(); };
-  const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => { navigator.clipboard?.writeText(T.acc); toast('copied'); };
+  const quote = document.createElement('button'); quote.type = 'button'; quote.textContent = 'quote'; quote.onclick = () => { const s = (window.getSelection() || '').toString().trim() || firstSentences(stripMd(T.acc), 1, 200); ask.value = (ask.value.trim() ? ask.value.replace(/\s*$/, '\n\n') : '') + '> ' + s + '\n\n'; focusComposer(); autosize(); };
+  const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'copy'; copy.onclick = () => copyText(cleanReply(T.acc));   // the reply as read, without its »voice/»acts lines
   const again = document.createElement('button'); again.type = 'button'; again.textContent = 'ask again'; again.onclick = () => send(T.text);
   const acts = document.createElement('span'); acts.className = 'metaacts'; acts.setAttribute('role', 'group'); acts.setAttribute('aria-label', 'reply actions');
   const dot = () => { const d = document.createElement('span'); d.textContent = '·'; d.setAttribute('aria-hidden', 'true'); return d; };   // a separator is punctuation, not a word to read out; the gap around it is the row's own
-  acts.append(quote, dot(), copy, dot(), again);
+  acts.append(quote, dot(), copy);
+  if (T.text) acts.append(dot(), again);   // an event turn, or a reply restored without its question, has nothing to ask again
   T.meta.append(dot(), acts);
 }
+/* Every failed turn goes through here, so a restored or humanised error wears the same mark as a live one. */
+function markFailure(T, raw) { T.nib.classList.add(errorKind(raw) === 'notice' ? 'notice' : 'error'); }
 function addActs(T, acts, opts) {
   if (!acts.length) return;
   const w = document.createElement('div'); w.className = 'acts' + (opts && opts.sticky ? ' sticky' : '');
@@ -517,8 +553,23 @@ function addActs(T, acts, opts) {
 
 const threadKey = (project, id) => (project || 'vault') + '\u0000' + (id || 'home');
 const activeThreadKey = () => threadKey(S.thread.project ?? activeProject(), S.thread.id);
-// The home thread keeps the original localStorage key, so upgrading loses nobody's transcript.
-const transcriptKey = () => S.thread.id === 'home' ? 'transcript' : 'transcript:' + S.thread.id;
+// The vault's home keeps the original localStorage key, so upgrading loses nobody's transcript. A
+// project's home has its own: one shared key let a reload paint one project's conversation in another.
+const transcriptKey = () => S.thread.id !== 'home' ? 'transcript:' + S.thread.id : (S.thread.project || 'vault') === 'vault' ? 'transcript' : 'transcript:' + S.thread.project + ':home';
+/* A draft belongs to the conversation it was written in: one field for every thread let a half-typed
+   message follow you into another. Text survives a reload; attached images live as long as the page. */
+const draftKey = () => 'draft:' + (S.thread.project || 'vault') + ':' + S.thread.id;
+const draftImages = new Map();
+let draftTimer = 0;
+function saveDraft() {
+  clearTimeout(draftTimer); draftTimer = 0;
+  if (ask.value.trim()) LS.set(draftKey(), ask.value); else try { localStorage.removeItem('nibbi.' + draftKey()); } catch { /* private mode */ }
+}
+function stashDraft() { saveDraft(); draftImages.set(draftKey(), pendingImages); }
+function unstashDraft() {
+  ask.value = LS.get(draftKey(), '') || ''; pendingImages = draftImages.get(draftKey()) || []; draftImages.delete(draftKey());
+  renderAttach(); autosize();
+}
 function threadState(key) {
   if (!S.threads.has(key)) S.threads.set(key, { turns: [], nodes: [], hydrated: false });
   return S.threads.get(key);
@@ -534,30 +585,130 @@ async function loadThreads(project) {
     S.threadsByProject.set(project, threads || []); syncMargins(); return threads || [];
   } catch { return S.threadsByProject.get(project) || []; }
 }
-/** Rebuild a thread's conversation from the daemon. Pairs each reply to its user message by
-    runId, which is the only linkage the message log actually records. */
+/** One thread as the daemon announced it (`thread.updated`). The list keeps the daemon's order:
+    home, then live threads by their last message, then archived ones. */
+function mergeThread(thread) {
+  if (!thread || typeof thread.id !== 'string') return;
+  const project = thread.project || 'vault', list = S.threadsByProject.get(project);
+  if (!list) return;   // never read, so nothing on screen to correct; the first read will be current
+  const known = list.find((t) => t.id === thread.id);
+  const next = { ...(known || { count: 0 }), id: thread.id, project: thread.project ?? null, title: String(thread.title || 'Thread'), lastAt: thread.lastAt || known?.lastAt || null, archived: thread.archived === true };
+  const rank = (t) => Date.parse(t.lastAt || '') || 0;
+  const rest = list.filter((t) => t.id !== 'home' && t.id !== thread.id).concat(next);
+  S.threadsByProject.set(project, [...list.filter((t) => t.id === 'home'), ...rest.filter((t) => !t.archived).sort((a, b) => rank(b) - rank(a)), ...rest.filter((t) => t.archived).sort((a, b) => rank(b) - rank(a))]);
+  if ((S.thread.project || 'vault') === project && S.thread.id === thread.id) { S.thread.title = next.title; ask.placeholder = placeholderText(); }
+  syncMargins();
+}
+const PAGE = 60;   // rows per history read
+const historyUrl = (project, id, before) => '/api/history?n=' + PAGE + '&threadId=' + encodeURIComponent(id) + (project && project !== 'vault' ? '&project=' + encodeURIComponent(project) : '') + (before ? '&before=' + encodeURIComponent(before) : '');
+/** Daemon rows as turns, built off-document and put above whatever the feed already holds, so
+    history lands above a turn typed while it was being read. Pairs each reply to the user message
+    before it, which is the only linkage the message log records. */
+function renderHistory(rows) {
+  const pending = [];
+  for (const row of rows || []) {
+    if (row.channel !== 'app' || !row.text) continue;
+    const at = Date.parse(row.ts) || Date.now();
+    if (row.role === 'user') pending.push({ you: row.text, at, ts: row.ts, said: '', cost: 0, error: false });
+    else if (pending.length && pending.at(-1).you !== null && !pending.at(-1).said) { const turn = pending.at(-1); turn.said = row.text; turn.cost = row.costUsd || 0; turn.error = !!row.isError; }
+    else pending.push({ you: null, at, ts: row.ts, said: row.text, cost: row.costUsd || 0, error: !!row.isError });   // nibbi spoke first: an event turn, not an empty "you"
+  }
+  const shown = pending.slice(-40);
+  if (!shown.length) return null;
+  // newTurn reads the turn before it and appends to S.turns. Pointing S.turns at the block while it
+  // is built keeps day dividers right inside the block and leaves the live conversation's chips alone.
+  const frag = document.createDocumentFragment(), live = S.turns, block = [];
+  S.turns = block;
+  try {
+    for (const row of shown) {
+      const T = newTurn(row.you, undefined, row.at, frag);
+      T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true; T.history = true;
+      if (row.error) markFailure(T, row.said);
+      T.at = row.at; setMeta(T, { costUsd: row.cost }); T.el.removeAttribute('aria-busy');
+    }
+  } finally { S.turns = live; }
+  // Where the block meets what was already here: a divider when the day changes, and never two.
+  const next = feed.firstElementChild, first = live[0];
+  const sameDay = first && new Date(block.at(-1).at).toDateString() === new Date(first.at).toDateString();
+  if (first && !sameDay && !next?.classList.contains('when')) frag.appendChild(daySep(new Date(first.at)));
+  else if (first && sameDay && next?.classList.contains('when') && next.textContent === dayLabel(new Date(first.at))) next.remove();
+  feed.insertBefore(frag, feed.firstChild);
+  S.turns.unshift(...block);
+  return { oldest: shown[0].ts, more: pending.length > shown.length };
+}
+/* What a page of daemon rows adds to the feed. Two things stay out: what was tidied away (Tidy clears
+   the table, and a reload must not lay it again), and what the feed already shows — a read that lands
+   after the owner has spoken here (a first read that failed, then a message) returns those messages
+   too, and they were drawn twice. The rows go from the owner's first message on screen: found by its
+   words among the log's last user rows, and failing that by the clock (this page stamped the turn,
+   the daemon the row, a moment later; on the Mac they are one clock). Nibbi's news — briefs, fixer
+   bubbles — is not in the log and its time is when it happened, so it is no edge. A full page's top
+   edge can fall between a message and its reply, which drew the message over an empty reply and the
+   reply as a turn of its own: nibbi's rows before a full page's first message are left to the page
+   before, where they meet what they answer. `more`: the daemon has older rows worth asking for. */
+function pageRows(project, id, rows, present = []) {
+  const all = Array.isArray(rows) ? rows : [], since = tidiedAt(project, id);
+  let kept = since ? all.filter((r) => !(Date.parse(r.ts) <= since)) : all;
+  const tidyEdge = kept.length < all.length;
+  if (all.length === PAGE && !tidyEdge) { const first = kept.findIndex((r) => r.role === 'user' && r.channel === 'app' && r.text); if (first > 0) kept = kept.slice(first); }
+  const onScreen = present.filter((T) => !T.history && (T.stored || typeof T.text === 'string'));
+  if (onScreen.length) kept = kept.filter((r) => !(Date.parse(r.ts) >= onScreen[0].at));
+  const said = onScreen.filter((T) => typeof T.text === 'string').map((T) => T.text);
+  for (let i = kept.length - 1; said.length && i >= 0; i--) {
+    if (kept[i].role !== 'user' || kept[i].text !== said[0]) continue;
+    const after = kept.slice(i).filter((r) => r.role === 'user').map((r) => r.text);
+    if (after.every((text, n) => text === said[n])) { kept = kept.slice(0, i); break; }
+  }
+  return { rows: kept, more: all.length === PAGE && !tidyEdge, oldest: kept[0]?.ts ?? all[0]?.ts };
+}
+/** Rebuild a thread's conversation from the daemon. A read that lands after its thread was left is
+    dropped rather than drawn into whichever conversation is open by then. */
 async function hydrateThread(project, id) {
-  const state = threadState(threadKey(project, id));
+  const key = threadKey(project, id), state = threadState(key);
   if (state.hydrated) return;
   state.hydrated = true;
+  const gen = state.gen = (state.gen || 0) + 1;
   let rows = [];
-  try { rows = await api.get('/api/history?n=60&threadId=' + encodeURIComponent(id) + (project && project !== 'vault' ? '&project=' + encodeURIComponent(project) : '')); }
-  catch { state.hydrated = false; return; }
-  const visible = (rows || []).filter((r) => r.channel === 'app' && r.text);
-  if (!visible.length) return;
-  const pending = [];
-  for (const row of visible) {
-    if (row.role === 'user') pending.push({ you: row.text, at: Date.parse(row.ts) || Date.now(), said: '', cost: 0, error: false });
-    else if (pending.length && !pending.at(-1).said) { const turn = pending.at(-1); turn.said = row.text; turn.cost = row.costUsd || 0; turn.error = !!row.isError; }
-    else pending.push({ you: null, at: Date.parse(row.ts) || Date.now(), said: row.text, cost: row.costUsd || 0, error: !!row.isError });
-  }
-  for (const row of pending.slice(-40)) {
-    const T = newTurn(row.you === null ? undefined : row.you, undefined, row.at);
-    T.bubble.classList.remove('live'); setSaid(T, row.said, false); T.done = true;
-    if (row.error) T.nib.classList.add('error');
-    T.at = row.at; setMeta(T, { costUsd: row.cost }); T.el.removeAttribute('aria-busy');
-  }
+  try { rows = await api.get(historyUrl(project, id)); }
+  catch { if (state.gen === gen) state.hydrated = false; return; }
+  if (state.gen !== gen) return;   // a newer read owns this thread
+  if (activeThreadKey() !== key) { state.hydrated = false; return; }   // left before it landed: read again on return
+  const page = pageRows(project, id, rows, S.turns);
+  const shown = renderHistory(page.rows);
+  noteEarlier(project, id, page, shown);
+  if (!shown) return;
   S.stick = true; scrollFeed(true);
+}
+/* The daemon keeps every message; the first read brings the last sixty. When there is more, the top
+   of the conversation says so, as a divider you can press. It is a feed child, so it leaves and comes
+   back with the conversation. */
+function noteEarlier(project, id, page, shown) {
+  const state = threadState(threadKey(project, id));
+  state.oldest = shown?.oldest ?? page.oldest ?? state.oldest;
+  state.more = page.more || !!shown?.more;
+  if (!state.more || !state.oldest) return;
+  const row = document.createElement('div'); row.className = 'when';
+  const more = document.createElement('button'); more.type = 'button'; more.className = 'chip in earlier'; more.textContent = 'load earlier';
+  more.onclick = () => loadEarlier(project, id, row, more);
+  row.append(more); feed.prepend(row);
+}
+async function loadEarlier(project, id, row, more) {
+  const key = threadKey(project, id), state = threadState(key);
+  if (more.disabled || activeThreadKey() !== key) return;
+  more.disabled = true; more.setAttribute('aria-busy', 'true');
+  let rows;
+  try { rows = await api.get(historyUrl(project, id, state.oldest)); }
+  catch { more.disabled = false; more.removeAttribute('aria-busy'); toast('couldn’t reach the earlier messages — try again', 3200); return; }
+  if (activeThreadKey() !== key || !row.isConnected) { more.disabled = false; more.removeAttribute('aria-busy'); return; }   // left while it was read: it is pressable again when you come back
+  // Whatever you were reading stays where it was: the older block goes in above it and the scroll
+  // position moves down by exactly its height.
+  const before = feed.scrollHeight, had = more === document.activeElement;
+  row.remove();
+  const page = pageRows(project, id, rows);
+  const shown = renderHistory(page.rows);
+  noteEarlier(project, id, page, shown);
+  feed.scrollTop += feed.scrollHeight - before;
+  if (had) feed.querySelector('.earlier')?.focus({ preventScroll: true });   // keyboard: on to the next page, if there is one
 }
 /** Switching threads swaps the whole conversation. A turn that is still streaming keeps its
     own (now detached) nodes, so it finishes correctly in the thread it belongs to. */
@@ -569,23 +720,42 @@ async function openThread(project, id, { focus = true, closeView = true } = {}) 
   // This has to happen before the already-open check: the Chat tab asks for the conversation that
   // is already open, and what it is really asking for is to stop looking at Builds.
   if (closeView && S.projectView) closeProjectView(false);
-  if (target === activeThreadKey() && S.thread.project === project) { if (focus) focusComposer(); return; }
+  if (target === activeThreadKey() && S.thread.project === project) {
+    if (focus) focusComposer();
+    // The open conversation was never read (a reload whose saved copy had expired): read it now
+    // rather than leave the owner looking at a blank page they asked for.
+    if (!threadState(target).hydrated && !S.busy) void settleThread(project, id);
+    return;
+  }
   const current = threadState(activeThreadKey());
   current.turns = S.turns; current.nodes = [...feed.children];
   if (S.review) endReview();
   persistTranscript();
+  stashDraft();
   S.thread = { project, id, title: threadTitle(project, id) };
+  unstashDraft();
   LS.set('thread:' + (project || 'vault'), id);
   // Talking in a project's thread is what makes that project the one you are working on.
   // S.thread is set first, so selecting the project does not bounce back into here.
   if (project && project !== 'vault' && activeProject() !== project) selectMarginProject(project);
   const next = threadState(target);
   S.turns = next.turns; feed.replaceChildren(...next.nodes);
-  setMode(S.turns.length ? 'talk' : 'idle');
+  setMode(S.turns.length || id !== 'home' ? 'talk' : 'idle');   // a thread is a conversation even before it has anything in it; only home rests as the character
   ask.placeholder = placeholderText(); syncSendButton(); syncMargins();
   if (focus) focusComposer();
+  void settleThread(project, id);
+}
+/* The conversation is read behind the swap rather than before it returns. Awaited, it held the bar's
+   pending click for as long as the daemon took, and a click on the next thread was dropped; now a read
+   that lands after you have moved on is simply discarded (hydrateThread). */
+async function settleThread(project, id) {
+  const target = threadKey(project, id);
   await hydrateThread(project, id);
-  setMode(S.turns.length ? 'talk' : 'idle');
+  if (activeThreadKey() !== target) return;
+  // A thread with nothing in it says so. An empty home is the character, which is its own empty state.
+  // The line hides itself (CSS) the moment the conversation has anything else in it.
+  if (id !== 'home' && !S.turns.length && threadState(target).hydrated && !feed.querySelector('.feed-empty')) feed.append(emptyLine('nothing here yet — say what you want built', 'feed-empty'));
+  setMode(S.turns.length || feed.querySelector('.feed-empty') ? 'talk' : 'idle');
 }
 async function newThread(project) {
   const created = await api.command('thread.create', {}, project);
@@ -601,9 +771,9 @@ function tidy() {
   const saved = { turns: S.turns, nodes: [...feed.children] };
   for (const T of S.turns) T.el.classList.add('leave');
   setTimeout(() => { if (tidied === saved) feed.replaceChildren(); }, 240);
-  S.turns = []; tidied = saved; LS.set(transcriptKey(), null); threadState(activeThreadKey()).turns = S.turns;
+  S.turns = []; tidied = saved; const unforget = forgetTranscript(); threadState(activeThreadKey()).turns = S.turns;
   setMode('idle'); body.classList.remove('rest'); nibbi.lookFree(); nibbi.setMood('idle'); interactions.event('tidy'); hideChips();
-  toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); persistTranscript(); } });
+  toast('table tidied', 6000, { label: 'undo', run: () => { if (tidied !== saved) return; tidied = null; S.turns = saved.turns; for (const n of saved.nodes) { n.classList.remove('leave'); feed.appendChild(n); } setMode('talk'); unforget(); persistTranscript(); } });
 }
 
 /* ------------------------------------------------------------------ toast */
@@ -692,7 +862,7 @@ async function localTurn(userText, fn, opts) {
   finishSteps(T, ok);
   if (out.html) { T.said.replaceChildren(out.html); T.acc = out.text || ''; } else setSaid(T, out.text || '', false);
   setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
-  if (!ok) T.nib.classList.add('error');
+  if (!ok) markFailure(T, out.raw || out.text);
   if (out.acts && out.acts.length) addActs(T, out.acts);
   S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1400 : 2600); syncMargins();
   $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + stripMd(out.text || ''); scheduleIdleTimers(); refreshStatus();
@@ -777,6 +947,7 @@ const COMMANDS = [
   { cmd: '/play', args: '<project> [stop|status]', desc: 'launch the project\'s dev server and open it', local: true },
   { cmd: '/project', args: '[name]', desc: 'show or switch the active project', local: true },
   { cmd: '/new', args: '<name> [web|game]', desc: 'start a new project (git repo in ~/NibbiProjects; web = vite scaffold, game = rules/design + plan)', local: true },
+  { cmd: '/register', args: '<path> [name]', desc: 'register a git repository you already have as a project (the full path to its root)', local: true },
   { cmd: '/issue', args: '<text>', desc: 'file an issue to the vault for the active project (nibbi triages it)', local: true },
   { cmd: '/playtest', args: '[project]', desc: 'playtest mode: every report gets logged and triaged', local: false },
   { cmd: '/endtest', args: '', desc: 'end playtest mode with a session summary', local: false },
@@ -798,6 +969,29 @@ const COMMANDS = [
   { cmd: '/help', args: '', desc: 'this list', local: true },
 ];
 
+/* A command that makes another project the active one (/new, /register, /project <name>) takes the
+   conversation with it. It used to change only the project: the next message went to the new project
+   with the old conversation's thread, and from a thread the daemon answered "Unknown thread". The turn
+   that did it goes along to the project's home, so its reply and its chips stay in front of you. */
+function followProject(T) {
+  const project = activeProject();
+  if (!T || S.busy || project === 'vault' || project === (S.thread.project || 'vault')) return T;
+  const i = S.turns.indexOf(T);
+  if (i >= 0) {
+    S.turns.splice(i, 1);
+    const before = T.el.previousElementSibling;
+    T.el.remove();
+    if (before?.classList.contains('when') && !before.nextElementSibling) before.remove();   // its day divider, if it was the last thing under it
+  }
+  void openThread(project, 'home', { focus: false, closeView: false });   // the swap is synchronous; the read settles behind it
+  if (i >= 0) {
+    const last = S.turns.at(-1);
+    if (feed.children.length && (!last || new Date(last.at).toDateString() !== new Date(T.at).toDateString())) feed.appendChild(daySep(new Date(T.at)));
+    feed.appendChild(T.el); S.turns.push(T); setMode('talk'); S.stick = true; scrollFeed(true);
+  }
+  void loadThreads(project);   // the bar lists the project's conversations, Home first
+  return T;
+}
 async function runLocalCommand(name, arg, opts) {
   switch (name) {
     case 'preview': return localTurn('/preview ' + arg, async () => {
@@ -844,7 +1038,7 @@ async function runLocalCommand(name, arg, opts) {
       const lines = ['Working in **' + p.name + '** — `' + p.repo + '`', readme ? '_' + md.esc(readme) + '_' : '', '`' + (p.branch || '?') + '`' + (p.dirty ? ' · ' + p.dirty + ' dirty file' + (p.dirty > 1 ? 's' : '') : ''), total ? 'plan · ' + done + '/' + total + ' tasks (' + Math.round(100 * done / total) + '%)' : 'no plan file yet (`plans/' + p.name + '.md`)', auto ? 'auto ' + (auto.on ? auto.mode + ' mode · ' + auto.inflight + ' in flight · ' + auto.pending + ' pending · ' + auto.staged + ' staged' : 'off') : '', (issues !== null ? issues + ' open issue' + (issues === 1 ? '' : 's') : 'no issues file yet') + (staged ? ' · ' + staged + ' fix' + (staged > 1 ? 'es' : '') + ' staged for review' : ''), commits.length ? '\n**recent commits**\n' + commits.map((c) => '`' + c.hash + '` ' + md.esc(c.msg).slice(0, 70) + ' — ' + relTime(c.at)).join('\n') : ''].filter(Boolean);
       const others = projectNames().filter((n) => n !== p.name);
       return { text: lines.join('\n'), acts: [{ label: 'plan', run: () => send('/plan ' + p.name) }, ...(staged ? [{ label: 'review', run: () => send('/review ' + p.name) }] : []), ...(S.playable || []).filter((x) => x.name === p.name).map(() => ({ label: 'play', run: () => send('/play ' + p.name) })), { label: 'issues', run: () => send('/issue') }, ...others.slice(0, 1).map((n) => ({ label: 'switch to ' + n, run: () => send('/project ' + n) }))] };
-    });
+    }).then(followProject);
     case 'new': { const tm = arg.match(/^(.*?)\s+(web|game)$/i); const name = (tm ? tm[1] : arg).trim(); const template = tm ? tm[2].toLowerCase() : null;
       return localTurn('/new ' + arg, async (T) => {
       if (!name) return { ok: false, text: 'Give it a name: `/new <name> [web|game]`.' };
@@ -860,7 +1054,19 @@ async function runLocalCommand(name, arg, opts) {
       await refreshProjects();
       const ok = code === 0;
       return { ok, text: ok ? '**' + md.esc(name) + '** is a ' + (template === 'web' ? 'web app' : 'game') + ' now — `' + r.repo + '`' + (files.length ? ' (' + files.map((f) => '`' + f + '`').join(', ') + ')' : '') + '.' + (template === 'web' ? ' `npm run dev` is wired, so `/play ' + r.slug + '` works.' : ' The plan is in the vault; tell me the pitch and I\'ll fill it in.') : 'The template landed but `npm install` exited with ' + code + ' — check the log above.', acts: template === 'web' ? [{ label: 'play it', run: () => send('/play ' + r.slug) }, { label: 'first fix', run: () => { ask.value = '/fix '; focusComposer(); autosize(); } }] : [{ label: 'plan', run: () => send('/plan ' + r.slug) }, { label: 'write the pitch', run: () => { ask.value = 'The pitch for ' + name + ': '; focusComposer(); autosize(); } }] };
-    }); }
+    }).then(followProject); }
+    case 'register': return localTurn('/register ' + arg, async (T) => {
+      const m = String(arg || '').trim().match(/^(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+([\s\S]+))?$/);
+      if (!m) return { ok: false, text: 'Point me at the folder: `/register /path/to/repo [name]`. It has to be the root of a git repository. Quote a path with spaces in it.' };
+      const path = (m[1] || m[2] || m[3]).replace(/(.)\/+$/, '$1');
+      if (path.startsWith('~')) return { ok: false, text: 'I need the whole path — `~` isn\'t expanded here. Something like `/Users/you/' + md.esc(path.replace(/^~\/?/, '') || 'repo') + '`.' };
+      const name = (m[4] || path.split('/').filter(Boolean).pop() || '').trim();
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      const st = addStep(T, 'registering ' + path);
+      const r = await api.post('/api/project-create', { mode: 'existing', name, path });   // owner-only: the daemon checks it is a repository root
+      markStep(st, 'done'); await refreshProjects(); S.project = slug; LS.set('project', slug); renderProject();
+      return { text: '**' + md.esc(slug) + '** is a project now — `' + (r.repo || path) + '`. Nothing in the folder changed. It\'s the active project.', acts: [{ label: 'what\'s in it?', run: () => send('/project ' + slug) }, { label: 'plan it', run: () => { ask.value = 'Plan ' + slug + ': '; focusComposer(); autosize(); } }] };
+    }).then(followProject);
     case 'issue': return localTurn('/issue' + (arg ? ' ' + arg : ''), async (T) => {
       const proj = activeProject(); const f = await issuesFile(proj);
       if (!arg) { const open = f ? (f.content.match(/^\s*[-*]\s*\[ \][^\n]*/gm) || []).slice(0, 12) : []; return { text: open.length ? '**' + proj + '** — ' + open.length + ' open issue' + (open.length > 1 ? 's' : '') + ' (`' + f.path + '`)\n\n' + open.map((l) => l.trim()).join('\n') : 'No open issues for **' + proj + '**' + (f ? ' in `' + f.path + '`' : '') + '. File one with `/issue <text>`.', acts: [{ label: 'triage them', run: () => send('triage the open issues in ' + (f ? f.path : 'the issues file') + ' for ' + proj + ': bug / balance / idea, severity, and which one to fix first') }] }; }
@@ -1099,7 +1305,8 @@ function connectEvents() {
         if (!evReady) evReplay.push(ev); else { setMode('talk'); const T = newTurn(null); T.plain = false; T.bubble.classList.remove('live'); setSaid(T, text, false); setMeta(T, {}); T.done = true; }
       } else if (event.type === 'auto.updated') {
         S.auto = { ...(S.auto || {}), [event.projectId]: event.payload.config }; renderProject();
-      }
+      } else if (event.type === 'thread.updated') mergeThread(event.payload?.thread);
+      else if (event.type === 'provider.auth') { void refreshStatus(); if (evReady && event.payload?.success !== false) toast('signed in'); }   // a replayed sign-in is old news
     }
   });
   evSource = { close };
@@ -1304,7 +1511,7 @@ async function playFlow(project, action) {
     }
   } catch (e) { ok = false; text = /unknown project/i.test(e.message) ? 'I don\'t know a project called **' + project + '**. Registered projects: ' + ((S.projects || []).map((p) => p.name).join(', ') || 'none yet') + '.' : /no web dev server|terminal game/i.test(e.message) ? '**' + project + '** has no web dev server — it\'s a terminal game (`npm run play`).' : 'I couldn\'t launch it — ' + e.message; }
   finishSteps(T, ok); setSaid(T, text, false); setMeta(T, {}); T.done = true; T.el.removeAttribute('aria-busy'); T.bubble.classList.remove('live');
-  if (!ok) T.nib.classList.add('error');
+  if (!ok) markFailure(T, text);
   const acts = [];
   if (url) { acts.push({ label: 'open it', run: () => openUrl(url), sticky: true }, { label: 'stop the server', run: () => send('/play ' + project + ' stop') }); }
   else if (ok && action === 'status' && /Want me to start/.test(text)) acts.push({ label: 'start it', run: () => send('/play ' + project) });
@@ -1355,7 +1562,7 @@ async function send(text, images, opts) {
   if (mode === 'plan' && S.planFirst) setPlanFirst(false);
   S.busy = true; body.classList.add('busy'); S.activeRunId = null; S.steerable = false; S.liveThreadKey = activeThreadKey(); syncSendButton(); syncMargins();
   activity(); hideChips();
-  ask.value = ''; autosize(); clearAttach(); sound('send');
+  ask.value = ''; autosize(); clearAttach(); saveDraft(); sound('send');
   setMode('talk');
   const T = newTurn(text, images); T.plain = isCommand; T.mode = mode; S.liveTurn = T;
   if (mode === 'plan') T.el.classList.add('plan');
@@ -1422,12 +1629,14 @@ async function send(text, images, opts) {
   $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + (ok ? stripMd(result.text).slice(0, 400) : 'nibbi hit a problem: ' + stripMd(result.text).slice(0, 200));
   T.done = true;
   // A verdict is a failure; a gateway that cannot be reached is a notice. They do not look alike.
-  if (!ok) T.nib.classList.add(errorKind(result.raw || result.text) === 'notice' ? 'notice' : 'error');
+  if (!ok) markFailure(T, result.raw || result.text);
   if (result.proposal && typeof result.proposal === 'object') renderProposalCard(T, result.proposal, text);
   S.busy = false; body.classList.remove('busy'); S.abort = null; syncSendButton(); syncMargins();
   // The settled turn is written now rather than on a later tick. A turn that finished after its
   // thread was left belongs to that thread's saved state, which openThread already wrote.
   if (S.liveThreadKey === activeThreadKey()) persistTranscript();
+  // Without the event stream nothing says the daemon named this thread from its first message.
+  if (!evReady && !S.demo && S.thread.id !== 'home') void loadThreads(S.thread.project);
   S.liveThreadKey = null;
   nibbi.lookFree();
   if (!ok) { nibbi.setMood('error'); addActs(T, T.local ? [{ label: 'try again', run: () => send(T.text) }] : errorActs(result.text)); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, 2600); }
@@ -1532,7 +1741,7 @@ function renderProposalCard(T, p, prompt) {
 const restartAct = () => ({ label: 'restart the gateway', confirm: 'restart the brain — sure?', warn: true, run: () => api.post('/nibbi/gateway', { action: 'restart' }).then(() => { toast('gateway restarting — session resumes in a few seconds', 5000); setTimeout(refreshStatus, 6000); }).catch((e) => toast(e.message)) });
 function errorActs(text) {
   const acts = [{ label: 'try again', run: () => { const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }];
-  if (/oauth|authenticate|token/i.test(text)) acts.push({ label: 'how to re-login', warn: true, run: () => { toast('open Settings → Providers to configure the API key or Codex login', 5000); } });
+  if (/oauth|authenticate|token|sign-in has lapsed|isn't signed in/i.test(text)) acts.push({ label: 'sign in', run: () => openPlatform('Providers') });   // the chip goes where signing in happens, instead of describing it
   if (/gateway (offline|isn)|failed to fetch|networkerror|not reachable/i.test(text)) { acts.push(restartAct()); acts.push({ label: 'use the demo brain', run: () => { S.demo = true; refreshStatus(); const last = S.turns[S.turns.length - 1]; if (last) send(last.text); } }); }
   return acts;
 }
@@ -1710,12 +1919,12 @@ function syncMargins() {
   });
   const metadata = marginMetadata({ status, project: selected, busy: S.busy, link: S.link, demo: S.demo, sessionCost: S.sessionCost, sessionTurns: S.sessionTurns });
   projectWorkspace.setBusy(S.busy);
-  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), activeProject: active, view: S.projectView, busy: S.busy, progress: S.progress, settings: {
+  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), projectsError: !!S.projectsError, activeProject: active, view: S.projectView, busy: S.busy, progress: S.progress, settings: {
     microphone: S.micEnabled, microphonePhase: S.micPhase,
     voice: S.voiceOn, sounds: LS.get('sounds', false) === true,
     notifications: LS.get('notifications', true) === true && notificationPermission === 'granted',
     notificationsSupported: !!notificationApi(),
-    notificationStatus: { granted: 'System permission granted', denied: 'Blocked in system or browser settings', default: 'Permission is needed to enable notifications', unavailable: 'Permission is not available here' }[notificationPermission] || 'Permission is not available here',
+    notificationStatus: { granted: 'Notifications are allowed by the system or browser', denied: 'Notifications are blocked in system or browser settings', default: 'Notifications need your permission; turning them on asks for it', unavailable: 'Notifications aren’t available here' }[notificationPermission] || 'Notifications aren’t available here', notificationBlocked: notificationPermission === 'denied',   // every status names its subject: the card shows it with nothing beside it
     ...metadata,
     demo: S.demo, calm: calmMotion, systemReduced: reducedMotion.matches,
     glass: glassOn, glassAvailable,
@@ -1746,14 +1955,29 @@ function selectMarginProject(id) {
   }
   return p.name;
 }
+/* One turn runs at a time. Leaving the conversation that is answering is refused with one sentence,
+   shown by the bar where the click happened; going back to it — the Chat tab from Builds — is not. */
+const liveKey = () => S.liveThreadKey || activeThreadKey();   // a local command is busy in the open conversation
+function busyNotice() { const [project, id] = liveKey().split('\u0000'); return notice(NAME + ' is answering in “' + threadTitle(project, id) + '” — switch when it’s done'); }
+const notice = (message) => Object.assign(new Error(message), { kind: 'notice' });   // the bar shows it in ink: waiting is not a failure
 async function handleMarginAction(action, id, value) {
   activity();
-  if (['newProject', 'fix', 'plan', 'play', 'review', 'autoMode', 'spendCap'].includes(action) && S.busy) throw new Error(NAME + ' is still working — one thing at a time.');
+  if (['newProject', 'fix', 'plan', 'play', 'review', 'autoMode', 'spendCap'].includes(action) && S.busy) throw notice(NAME + ' is still working — one thing at a time.');
   switch (action) {
-    case 'selectProject': if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
+    case 'selectProject':
+      if (S.busy && id !== activeProject()) throw busyNotice();
+      if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
     case 'projectSection': openProjectSection(id, value); return;
     case 'repository': openProjectSection(id, 'repository'); margins.close(); return;
-    case 'newProject': margins.close(); ask.value = '/new '; focusComposer(); autosize(); return;
+    case 'newProject': {
+      // Two ways in, and the daemon has had both: a fresh repository, or one you already have. The field
+      // used to be prefilled with "/new ", so registering an existing folder had no door at all.
+      margins.close();
+      const start = (command) => () => { ask.value = command; focusComposer(); autosize(); };
+      await localTurn(undefined, async () => ({ text: 'A project is a git repository I can build in. Start a fresh one, or point me at one you already have.', acts: [{ label: 'create a new repo', run: start('/new ') }, { label: 'register a folder I have', run: start('/register ') }] }), { keepInput: true });
+      return;
+    }
+    case 'refreshProjects': clearTimeout(projectsRetry); projectsRetry = 0; await refreshProjects(); return;
     case 'fix': selectMarginProject(id); margins.close(); ask.value = '/fix '; focusComposer(); autosize(); return;
     case 'plan': case 'play': case 'review':
       selectMarginProject(id); margins.close(); await send('/' + action + ' ' + id); return;
@@ -1781,12 +2005,27 @@ async function handleMarginAction(action, id, value) {
     case 'glass': if (glassAvailable) { glassOn = !glassOn; LS.set('glass', glassOn); applyPaper(); syncMargins(); toast(glassOn ? 'glass window' : 'paper window'); } return;
     case 'demo': S.demo = !S.demo; syncMargins(); await refreshStatus(); renderAgents(S.fixers); toast(S.demo ? 'demo brain — scripted replies' : 'talking to the real brain'); return;
     case 'thread': {
-      if (S.busy) { toast(NAME + ' is answering in “' + threadTitle(S.thread.project, S.thread.id) + '” — one thing at a time'); return; }
+      if (S.busy && threadKey(id, value) !== liveKey()) throw busyNotice();
       margins.close(); await openThread(id, value); return;
     }
     case 'newThread': {
-      if (S.busy) { toast(NAME + ' is still working — one thing at a time'); return; }
+      if (S.busy) throw busyNotice();
       margins.close(); await newThread(id); return;
+    }
+    case 'renameThread': {
+      const renamed = await api.command('thread.rename', { id, title: String(value?.title || '') }, value?.project);
+      mergeThread(renamed); return;   // the event says the same thing a moment later; merging twice is harmless
+    }
+    case 'archiveThread': {
+      const project = value?.project;
+      if (S.busy && threadKey(project, id) === liveKey()) throw busyNotice();
+      await api.command('thread.archive', { id }, project);
+      const wasOpen = threadKey(project, id) === activeThreadKey();
+      await loadThreads(project);
+      if (wasOpen) await openThread(project, 'home', { focus: false });
+      const draft = 'draft:' + (project || 'vault') + ':' + id;   // after the swap, which saves the field under the thread it leaves
+      draftImages.delete(draft); try { localStorage.removeItem('nibbi.' + draft); } catch { /* private mode */ }
+      toast('archived — it stays in the log', 2600); return;
     }
     case 'tidy': margins.close(); tidy(); return;
     default: throw new Error('This control is not available.');
@@ -1802,7 +2041,10 @@ function openProjectSection(id, section, detail = {}) {
   closeDock(false); hideChips(); paletteEl.hidden = true;
   projectWorkspace.open({ project: id, kind: project.kind, section, ...detail });
   watchProjectSummaries();
-  syncMargins(); layout(false);
+  // From idle the hero snaps to the header pose, a scene change like first paint: springing, it shrank
+  // through the section's header for ~600ms while the section itself arrived in 220. From talk it is
+  // already small, and the short move springs.
+  syncMargins(); layout(S.mode !== 'talk');
 }
 function closeProjectView(focus = true) {
   if (!S.projectView) return;
@@ -1912,19 +2154,14 @@ async function refreshStatus() {
   }
   syncMargins();
 }
+// The saved project's home paints at once from its stored copy; which project is really active is
+// only known once the list arrives, and the conversation follows it there (bootThread, below).
+S.thread = { project: LS.get('project', null) || 'vault', id: 'home', title: 'Home' };
+// Until then a message goes to the project whose conversation is on screen. activeProject() read
+// "vault" before the list, so a message sent in that second was the vault's on the daemon and the
+// project's in the window.
+if (S.thread.project !== 'vault') S.project = S.thread.project;
 try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
-// The active project's remembered thread. Home restores from its stored transcript as before;
-// any other thread is rebuilt from the daemon, which is the only place threads are kept.
-(async () => {
-  const project = activeProject();
-  S.thread = { project, id: 'home', title: 'Home' };
-  threadState(threadKey(project, 'home')).hydrated = S.turns.length > 0;
-  await loadThreads(project);
-  const remembered = LS.get('thread:' + (project || 'vault'), 'home');
-  if (remembered && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) {
-    await openThread(project, remembered, { focus: false });
-  }
-})().catch((e) => clientLog('error', 'threads: ' + e.message));
 refreshStatus().then(connectEvents); setInterval(() => { if (!evReady) refreshStatus().then(connectEvents); }, 30000);
 function mostActiveProject(list) {
   const names = new Set(list.map((p) => p.name));
@@ -1934,25 +2171,73 @@ function mostActiveProject(list) {
   for (const f of S.fixers || []) { const t = Date.parse(f.endedAt || f.startedAt || 0) || 0; const n = f.game || f.project; if (names.has(n) && t > at) { at = t; best = n; } }
   return best || autoOn[0] || null;
 }
-let projectsRead = 0;
+let projectsRead = 0, projectsRetry = 0;
+/* A first read that never arrives is said, not waited on: the bar read "Loading projects…" for as long
+   as the daemon was away. It retries every 10s until the list first arrives, and Retry asks at once.
+   Once a list is on screen, a later failed refresh keeps it. */
+function projectsUnreachable(read) {
+  if (read !== projectsRead || Array.isArray(S.projects)) return;
+  S.projectsError = true; syncMargins();
+  if (!projectsRetry) projectsRetry = setTimeout(() => { projectsRetry = 0; void refreshProjects(); }, 10000);
+}
 async function refreshProjects() {
   const read = ++projectsRead;
   try {
-    const r = await fetch('/api/projects'); if (!r.ok) return;
+    const r = await fetch('/api/projects'); if (!r.ok) { projectsUnreachable(read); return; }
     const list = await r.json(); if (read !== projectsRead || !Array.isArray(list)) return;
-    S.projects = list;
+    S.projects = list; S.projectsError = false; clearTimeout(projectsRetry); projectsRetry = 0;
     const saved = LS.get('project', null), recent = mostActiveProject(list);
     // Read current selection after the await, so a refresh cannot undo a user's choice.
     const selected = list.find(p => p.name === S.project) || list.find(p => p.name === saved) || list.find(p => p.name === recent) || list.find(p => p.kind === 'game') || list[0];
     S.project = selected?.name || null; renderProject();
+    if (!threadBooted) void bootThread().catch((e) => clientLog('error', 'threads: ' + e.message));
     const playable = await Promise.all(list.filter(p => p.kind === 'game').map(async p => {
       try { const r = await fetch('/api/play?project=' + encodeURIComponent(p.name)); if (!r.ok) return null; const ps = await r.json(); return ps.playable ? { name: p.name, running: ps.running, url: ps.url } : null; } catch { return null; }
     }));
     if (read !== projectsRead) return;
     S.playable = playable.filter(Boolean); renderProject();
-  } catch { /* offline */ }
+  } catch { projectsUnreachable(read); }
 }
-refreshProjects(); setInterval(() => { if (!document.hidden) refreshProjects(); }, 120000);
+/* One sequence, once the projects are known: the conversation belongs to the active project, the
+   thread you were in comes back, and a home with no saved copy is read from the daemon rather than
+   left blank. Before this ran inside the first paint, every project's remembered thread was looked up
+   under 'vault' and never found. */
+let threadBooted = false;
+async function bootThread() {
+  if (threadBooted || !Array.isArray(S.projects)) return;
+  threadBooted = true;
+  const project = activeProject();
+  // Anything the owner said before the list arrived — a message sent, a reply still running — stays
+  // where it is being read, and the owner is not moved to another thread under it. Nibbi's own news
+  // (an away bubble, a fixer finishing) is not the owner's: it used to count, and a reload with news
+  // waiting landed in Home instead of the thread you were in, with Home's history unread.
+  const live = S.turns.filter((T) => !T.stored), typed = S.busy || live.some((T) => typeof T.text === 'string');
+  if (project !== S.thread.project) {
+    if (typed) {
+      // Sent before the list named the project, so the daemon filed them under the conversation they
+      // were typed in. They stay on screen, and are not saved as this project's.
+      for (const T of live) if (typeof T.text === 'string') T.sentTo = S.thread.project || 'vault';
+      if (S.liveThreadKey === activeThreadKey()) S.liveThreadKey = threadKey(project, 'home');
+    } else { feed.replaceChildren(); S.turns = []; setMode('idle'); body.classList.remove('rest'); }   // the stored copy was another project's
+    S.thread = { project, id: 'home', title: 'Home' };
+    if (!typed) {
+      // This project's own stored copy, if it has one, paints before the daemon is asked; the news comes after it.
+      try { restoreTranscript(); } catch (e) { clientLog('error', 'restore: ' + e.message); }
+      for (const T of live) { const last = S.turns.at(-1); if (last && new Date(last.at).toDateString() !== new Date(T.at).toDateString()) feed.appendChild(daySep(new Date(T.at))); feed.appendChild(T.el); S.turns.push(T); }
+      if (live.length) setMode('talk');
+    }
+  }
+  const home = threadKey(project, 'home');
+  threadState(home).hydrated = S.turns.some((T) => T.stored);   // only a saved copy is Home's history; news and early messages are not
+  if (!ask.value) { ask.value = LS.get(draftKey(), '') || ''; autosize(); }   // before any thread swap, which saves the field under home
+  await loadThreads(project);
+  const remembered = LS.get('thread:' + project, 'home');
+  if (!typed && remembered !== 'home' && (S.threadsByProject.get(project) || []).some((t) => t.id === remembered && !t.archived)) await openThread(project, remembered, { focus: false, closeView: false });
+  else if (!threadState(home).hydrated) await settleThread(project, 'home');   // what the feed already shows is left out of the read (pageRows)
+  ask.placeholder = placeholderText(); syncMargins();
+}
+void refreshProjects();   // and bootThread, the first time the list arrives
+setInterval(() => { if (!document.hidden) refreshProjects(); }, 120000);
 (async () => { try { const items = await api.get('/api/history?n=12'); const recent = (Array.isArray(items) ? items : []).filter((m) => m.channel === 'app'); S.recent = recent.length > 0 && Date.now() - Date.parse(recent[recent.length - 1].ts) < 12 * 3600000; } catch { S.recent = false; } })();
 if (S.demo) { renderAgents([], {}); renderProject(); }
 
@@ -1963,20 +2248,22 @@ function chipSet(when) {
   const fx = S.fixers || [];
   const staged = fx.filter((f) => f.status === 'staged' && (f.game || f.project) === activeProject() && (!f.endedAt || Date.now() - Date.parse(f.endedAt) < 7 * 86400000)).length;
   const running = fx.filter((f) => /running|queued/i.test(f.status) && (f.game || f.project) === activeProject()).length;
-  const proj = S.project || 'shipless';
+  // Chips name things that exist. A playtest needs a project to play, and "what's new?" needs a past.
+  const proj = registeredProject(), firstRun = Array.isArray(S.projects) && !S.projects.some((p) => p.kind !== 'brain');
   if (staged) out.push(autoOf(activeProject()).mode === 'ship' ? { label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' in the merge queue', text: '/artifacts ' + activeProject() } : { label: staged + ' fix' + (staged > 1 ? 'es' : '') + ' waiting for review', text: '/review ' + activeProject() });
   for (const f of fx.filter((x) => x.status === 'running').slice(0, 1)) out.push({ label: 'steer ' + fixerTitle(f).slice(0, 22), text: '__steer:' + f.id });
   if (running) out.push({ label: running + ' fixer' + (running > 1 ? 's' : '') + ' working', text: 'how are the fixers doing?' });
   const h = new Date().getHours();
   if (S.link === 'offline' && !S.demo && when !== 'after') { out.unshift({ label: 'wake the gateway', text: '__wake' }, { label: 'use the demo brain', text: '__demo' }); }
   if (S.playtest && when !== 'after') { return [{ label: 'bug', text: '__prefix:[bug] ' }, { label: 'balance', text: '__prefix:[balance] ' }, { label: 'idea', text: '__prefix:[idea] ' }, { label: 'rules question', text: '__prefix:[rules] ' }, { label: 'end playtest', text: '/endtest' }]; }
-  if (when === 'idle' || when === 'focus') {
+  if ((when === 'idle' || when === 'focus') && firstRun) out.push({ label: 'new project', text: '__newProject' }, { label: 'what can you do?', text: '/help' });
+  else if (when === 'idle' || when === 'focus') {
     if (S.recent && !S.turns.length) out.push({ label: 'pick up where we left off', text: '/recent' });
     if (h < 11) out.push({ label: 'morning brief', text: 'give me my morning brief' });
-    out.push({ label: 'what\'s new?', text: 'what\'s new since we last talked?' });
+    if (S.recent) out.push({ label: 'what\'s new?', text: 'what\'s new since we last talked?' });
     for (const p of (S.playable || []).slice(0, 2)) out.push(p.running && p.url ? { label: p.name + ' is running — open', text: '/play ' + p.name + ' status' } : { label: 'play ' + p.name, text: '/play ' + p.name });
-    out.push({ label: 'start a playtest', text: '/playtest ' + proj });
-    out.push({ label: 'what were we doing?', text: 'remind me what we were working on and what\'s next' });
+    if (proj) out.push({ label: 'start a playtest', text: '/playtest ' + proj });
+    if (S.recent) out.push({ label: 'what were we doing?', text: 'remind me what we were working on and what\'s next' });
   } else if (when === 'after') {
     out.push({ label: 'go on', text: 'go on' });
     out.push({ label: 'show me', text: 'show me — give me a preview or the diff' });
@@ -1991,7 +2278,7 @@ function showChips(when) {
   chipsShown = true;
   clearTimeout(S.chipTimer); S.chipTimer = setTimeout(hideChips, when === 'after' ? 14000 : 30000);
 }
-function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; focusComposer(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); focusComposer(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } send(text); }
+function chipRun(text) { if (text.startsWith('__steer:')) { ask.value = '/steer ' + text.slice(8) + ' '; focusComposer(); autosize(); toast('tell the fixer what to change, then Enter', 3000); return; } if (text.startsWith('__prefix:')) { ask.value = text.slice(9) + ask.value.replace(/^\[[a-z ]+\]\s*/i, ''); focusComposer(); autosize(); return; } if (text === '__wake') { toast('launchctl kickstart -k gui/$(id -u)/com.nibbi.gateway', 6000); return; } if (text === '__demo') { S.demo = true; refreshStatus(); toast('demo brain — scripted replies'); hideChips(); return; } if (text === '__newProject') { void handleMarginAction('newProject').catch((e) => toast(e.message)); return; } send(text); }
 function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c of chipsEl.children) c.classList.remove('in'); setTimeout(() => { if (!chipsShown) chipsEl.replaceChildren(); }, 260); }
 
 /* ------------------------------------------------------------------ pill */
@@ -2002,15 +2289,16 @@ function hideChips() { if (!chipsShown) return; chipsShown = false; for (const c
 function autosize() { if (S.autosizeRaf) return; S.autosizeRaf = requestAnimationFrame(() => { S.autosizeRaf = 0; resizeField(); }); }
 function resizeField() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, innerHeight * 0.38) + 'px'; pill.classList.toggle('tall', ask.offsetHeight > 56); layout(false); }   // .tall: the field holds more than one line, so "+" and send drop to the last line
 ask.addEventListener('input', () => { autosize(); if (ask.value.trim()) { hideChips(); interactions.event('typing'); } else if (document.activeElement === ask) showChips('focus'); if (S.busy) syncSendButton(); activity(); });
+ask.addEventListener('input', () => { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 400); }); addEventListener('pagehide', saveDraft);   // the draft, a beat after typing stops; the field as it really is when the page goes
 ask.addEventListener('focus', () => { layout(false); interactions.event('focus'); const r = pill.getBoundingClientRect(); nibbi.lookAt(r.left + r.width * 0.35, r.top + r.height / 2); if (!ask.value.trim()) showChips('focus'); });
 ask.addEventListener('blur', () => { layout(false); if (!S.busy) nibbi.lookFree(); });
 ask.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); pill.requestSubmit(); }
-  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: 'smooth' }); }
+  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); feed.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * feed.clientHeight, behavior: reducedMotion.matches || calmMotion ? 'auto' : 'smooth' }); }
   if (e.key === 'End' && !ask.value) { e.preventDefault(); jumpBtn.onclick(); }
   // Escape dismisses; it does not destroy. Clearing the whole conversation is a two-step action and
   // lives on the Settings card's Tidy conversation, next to what it affects.
-  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); } else ask.blur(); }
+  if (e.key === 'Escape') { if (ask.value) { ask.value = ''; autosize(); saveDraft(); } else ask.blur(); }
 });
 /* mid-run steering: typed text while a steerable turn runs becomes guidance for that turn; an empty send still stops it */
 async function steerTurn(text) {
@@ -2051,9 +2339,20 @@ addEventListener('keydown', (e) => {
 });
 
 /* images: paste or drop */
+/* A file that cannot go says why, in numbers. It used to vanish. The limits are the daemon's: four
+   images, and 8M base64 characters each, which is about 6 MB before encoding. `reading` counts files
+   still loading: the check used to see only what had landed, so a drop of six attached all six. */
+let reading = 0;
 function addImage(file) {
-  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type) || pendingImages.length >= 4) return;
-  const rd = new FileReader(); rd.onload = () => { const data = String(rd.result).split(',')[1]; pendingImages.push({ media_type: file.type, data }); renderAttach(); interactions.event('attach'); }; rd.readAsDataURL(file);
+  if (!file) return;
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { toast('images only — png, jpeg, webp or gif', 2600); return; }
+  if (pendingImages.length + reading >= 4) { toast('4 images is the most per message', 2600); return; }
+  // Rounded up: 6,040,000 bytes read "6.0 MB — 6 MB is the most", which is the limit, not over it.
+  if (file.size > 6_000_000) { toast((Math.ceil(file.size / 1e5) / 10).toFixed(1) + ' MB — 6 MB is the most one image can be', 3200); return; }
+  const into = pendingImages; reading++;
+  const rd = new FileReader();
+  rd.onloadend = () => { reading--; if (rd.error || into !== pendingImages) return; const data = String(rd.result).split(',')[1]; pendingImages.push({ media_type: file.type, data }); renderAttach(); interactions.event('attach'); };
+  rd.readAsDataURL(file);
 }
 function renderAttach() {
   attachEl.hidden = !pendingImages.length; attachEl.replaceChildren();
@@ -2061,7 +2360,7 @@ function renderAttach() {
   layout(false);   // the strip changes the pill's height (its own row at ≤640px): suggestion chips, feed and fixers re-place above it
 }
 function clearAttach() { pendingImages = []; renderAttach(); }
-document.addEventListener('paste', (e) => { for (const it of e.clipboardData?.items || []) if (it.kind === 'file') addImage(it.getAsFile()); });
+document.addEventListener('paste', (e) => { if (keyboardInputOwned(e, true)) return; for (const it of e.clipboardData?.items || []) if (it.kind === 'file') addImage(it.getAsFile()); });   // a paste into a workspace form or a card is that field's
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => { const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return; e.preventDefault(); for (const f of files) addImage(f); focusComposer(); });
 
@@ -2130,7 +2429,7 @@ function renderVoice() {
   micBtn.title = (listening ? 'Hey Nibbi is on — turn microphone off' : 'Hey Nibbi is off — turn microphone on') + ' (⌥ Space)';
   body.dataset.mic = phase; pill.classList.toggle('mic-on', listening); pill.classList.toggle('listening', phase === 'listening');
   listenEl.hidden = !listening;
-  const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: "What's up, Matty?", listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
+  const labels = { starting: 'Allow microphone access…', armed: 'Waiting for “Hey Nibbi”', transcribing: 'Processing speech · mic paused', greeting: WAKE_GREETING, listening: S.micCapturing ? 'Listening — pause to send' : 'Listening — go ahead', sending: 'Nibbi is answering…', paused: 'Mic on · waiting for this reply or draft', off: '' };
   $('.heard', listenEl).textContent = labels[phase] || '';
   syncDockTitle();   // the listen strip already carries the live phase; the “+” title only has to name the mode
   S.voiceFinishing = phase === 'listening' && S.micCapturing;
@@ -2241,21 +2540,34 @@ function restoreStep(T, row) {
 }
 function persistTranscript() {
   try {
-    const rows = S.turns.filter((T) => T.done && !T.restoredOnly).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), notice: T.nib.classList.contains('notice'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
-    LS.set(transcriptKey(), { at: Date.now(), rows });
+    const rows = S.turns.filter((T) => T.done && !T.restoredOnly && (!T.sentTo || T.sentTo === (S.thread.project || 'vault'))).slice(-40).map((T) => ({ at: T.at, you: T.text === undefined ? null : T.text, acc: (T.acc || T.said.textContent || '').slice(0, 6000), plain: !!T.plain, error: T.nib.classList.contains('error'), notice: T.nib.classList.contains('notice'), fixerId: T.fixerId || null, cost: T.cost || 0, ...localReplyMetadata(T), steps: T.stepsList.length ? T.fold.querySelector('.l').textContent.replace(/ — show$/, '') : '', ...(T.stepsList.some((s) => s.el) ? { stepRows: T.stepsList.filter((s) => s.el).slice(-40).map(stepRow) } : {}) }));   // summary-only rows from older transcripts keep their one line
+    // An empty feed is never written over a saved one: Tidy clears the key itself, and a feed that is
+    // empty only because it is still being read from the daemon must not erase the copy it replaces.
+    if (rows.length) LS.set(transcriptKey(), { at: Date.now(), project: S.thread.project || 'vault', rows });
   } catch { /* quota */ }
+}
+/* Tidy clears the table, not the log: the daemon keeps every message, and a home with no saved copy is
+   read back from it. So the moment of a tidy is kept per conversation, and a read leaves out what came
+   before it (pageRows); a reload used to lay the tidied conversation straight back. Returns the undo. */
+const tidyKey = (project, id) => 'tidied:' + (project || 'vault') + ':' + id;
+const tidiedAt = (project, id) => Number(LS.get(tidyKey(project, id), 0)) || 0;
+function forgetTranscript() {
+  const key = tidyKey(S.thread.project, S.thread.id), was = LS.get(key, 0);
+  LS.set(transcriptKey(), null); LS.set(key, Date.now());
+  return () => LS.set(key, was);
 }
 function restoreTranscript() {
   const t = LS.get(transcriptKey(), null); if (!t || !t.rows || !t.rows.length || Date.now() - t.at > 12 * 3600000) return;
+  if (t.project !== undefined && t.project !== (S.thread.project || 'vault')) return;   // another project's conversation; rows saved before the field existed are accepted once and rewritten with it
   setMode('talk');
   for (const r of t.rows) {
-    const T = newTurn(r.you, undefined, r.at); T.plain = r.plain; T.bubble.classList.remove('live'); T.fixerId = r.fixerId; T.cost = r.cost;
+    const T = newTurn(r.you, undefined, r.at); T.plain = r.plain; T.bubble.classList.remove('live'); T.fixerId = r.fixerId; T.cost = r.cost; T.stored = true;
     if (Array.isArray(r.stepRows) && r.stepRows.length) {   // structured steps come back folded and expandable
       for (const row of r.stepRows.slice(0, 40)) if (row && typeof row === 'object') restoreStep(T, row);
       T.stepLine = r.steps || stepSummaryLine(T.stepsList.flatMap((s) => Array.from({ length: s.n || 1 }, () => s)));
-      T.fold.querySelector('.l').innerHTML = escapeHtml(T.stepLine) + ' — <u>show</u>'; T.steps.classList.add('folded');
-    } else if (r.steps) { T.steps.hidden = false; T.fold.querySelector('.l').innerHTML = escapeHtml(r.steps); T.steps.classList.add('folded'); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
-    setSaid(T, r.acc, false); T.done = true; if (r.error) T.nib.classList.add('error'); if (r.notice) T.nib.classList.add('notice');
+      foldSteps(T, T.stepLine);
+    } else if (r.steps) { summaryLine(T, r.steps); T.stepsList.push({ n: 1 }); }   // older saved transcripts: the one-line summary only
+    setSaid(T, r.acc, false); T.done = true; if (r.notice) T.nib.classList.add('notice'); else if (r.error) markFailure(T, r.acc);
     T.at = r.at; setMeta(T, { costUsd: r.cost, ...localReplyMetadata(r) }); T.el.removeAttribute('aria-busy');
   }
   S.stick = true; scrollFeed(true); body.classList.add('rest');

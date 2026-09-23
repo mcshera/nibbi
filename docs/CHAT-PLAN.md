@@ -26,12 +26,16 @@ messaging. It makes the chat history hard to read."*
 - Only the latest turn keeps its action chips (unchanged).
 - Thin scrollbar on hover so long histories are navigable.
 
-**P1 — history and reading — ✅ `pick up where we left off` / `/recent` with time separators, hover scrollbar, PageUp/PageDown/End; remaining: code-block cap, relative times**
+**P1 — history and reading — ✅ `pick up where we left off` / `/recent` with time separators, hover scrollbar, PageUp/PageDown/End, code-block cap, relative times**
 - `pick up where we left off` chip on open when there's recent conversation (last 12 h); `/recent` renders the last
   exchanges chronologically with time separators. Opening stays pure (idle) — history is a tap away, not forced.
 - Day/time separators when restoring history; relative times in the meta line.
 - Long replies: code blocks capped with expand; tables scroll horizontally.
 - Keyboard: `PageUp/PageDown` scroll the feed while typing; `End` jumps to latest.
+- The reply is a page-width card from its first frame, so it never changes width mid-reply, and its caret takes a line
+  of its own under a trailing fence, quote or table. The folded steps are a toggle (`— show` / `— hide`,
+  `aria-expanded`) above the list it opens, so it stays in place and focus never leaves it. Copy copies what was read: a code block's code
+  without its buttons' labels, a reply without its `»` lines, and "copied" only once the clipboard has it.
 
 **P2 — how it streams — ✅ 2026-09-22**
 - Instant, not paced: text lands as it arrives, but at most one render per frame however many tokens
@@ -70,6 +74,7 @@ and a thread can later be continued from any transport.
 `GET /api/threads?project=` lists home first, then live threads by recency, then archived ones.
 `thread.create`, `thread.rename` and `thread.archive` are ordinary project commands. `/api/send`
 carries `threadId`, and the SSE `start`, `ready` and `done` frames echo it back.
+Every write to a thread emits `thread.updated` (`{ id, project, title, lastAt, archived }`) on `/api/events` — including the first message naming it — and a touch that changes nothing emits nothing.
 
 Each thread gets its own provider session, its own continuity snapshot and its own `recent_chat`
 scope; `search_chat` takes `allThreads` to widen to the project. `/clear` resets one thread's
@@ -77,7 +82,11 @@ sessions rather than every project's. The home thread deliberately keeps the ori
 key, so upgrading resets nobody's live context.
 
 In the surface, threads are rows under a project's Builds, Issues and Plans, with New thread
-last. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
+leading the list. Switching swaps the whole conversation, which is rebuilt from the daemon rather than from
 localStorage; a turn that is still streaming keeps its own detached nodes and finishes in the
 thread it belongs to. The thread's name rides on the composer placeholder, never as a badge in
-the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused.
+the bar. One turn runs at a time per project, so switching while Nibbi is answering is refused, except returning to the thread that is answering (the Chat tab can leave Builds mid-reply); the refusal is one sentence in the bar, in ink, and goes when the reply does.
+Each thread keeps its own draft (`draft:<project>:<thread>` in localStorage; attached images stay in memory for the life of the page), and quoting adds to a draft rather than replacing it.
+A project starts from New project, which offers `/new <name>` (a fresh repository) or `/register <path> [name]` (one you already have: the root of a git repository, name defaulting to the folder's; `/api/project-create` with `mode: 'existing'`, owner-only). A command that makes another project active (`/new`, `/register`, `/project <name>`) takes the conversation to that project's home, with the command's turn. A thread with no messages says `nothing here yet — say what you want built`; an empty home is the character.
+A thread's row has the project rows' gear, which opens a card to rename it (`thread.rename`) or archive it (`thread.archive`, after a confirm; it stays in the log). Home has no gear, and nothing deletes. When the daemon holds more than the first sixty messages, the top of the conversation is a `load earlier` divider that reads the page before (`/api/history?before=`) without moving what you were reading. A history read that lands after its thread was left is dropped and read again on return.
+A reload returns to the active project's remembered thread. A project's home keeps its own stored copy (`transcript:<project>:home`; the vault's home keeps `transcript`), and a home with no copy is read from the daemon, so it is never blank.

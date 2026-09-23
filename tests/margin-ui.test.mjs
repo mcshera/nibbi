@@ -5,6 +5,14 @@ import {chromium} from 'playwright';
 import {progressLine} from '../public/lib/margin-ui.js';
 import {describeProjectSection} from '../public/lib/project-summary.js';
 
+// The bar is loaded into the page as a data: module, and a data: module cannot resolve a relative
+// import, so the one module margin-ui.js imports (./empty.js) is inlined into it the same way.
+async function marginModuleURL() {
+  const inline = async name => 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/' + name, import.meta.url))).toString('base64');
+  const source = (await readFile(new URL('../public/lib/margin-ui.js', import.meta.url), 'utf8')).replace("'./empty.js'", `'${await inline('empty.js')}'`);
+  return 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
+}
+
 test('progress line reports verified merges without proposing a next goal', () => {
   assert.equal(progressLine(undefined), 'Progress not available');
   assert.equal(progressLine(null), 'Progress not available');
@@ -32,7 +40,8 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     await page.setContent('<style>:root{--ease:ease-out;--ink:#151413;--ink-2:#3a3835;--ink-3:#6f6b65}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav><button id="outside" style="position:fixed;bottom:10px;left:50%">Outside</button><div id="already-inert" inert>Previously unavailable</div>');
     await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
     await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
-    const moduleURL = 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/margin-ui.js', import.meta.url))).toString('base64');
+    // A data: module cannot resolve a relative import, so the one the bar has is inlined the same way.
+    const moduleURL = await marginModuleURL();
     await page.evaluate(async url => {
       const {installMarginUI} = await import(url);
       window.calls = [];
@@ -122,6 +131,43 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     const longRow = page.locator('[data-thread-id="long"]');
     assert.equal(await longRow.getAttribute('title'), await page.evaluate(() => window.longTitle), 'the whole name is reachable even though the row shows one line of it');
     assert.ok(await longRow.locator('.project-section-copy').evaluate(el => el.scrollWidth > el.clientWidth), 'and it really is clipped, so the title is not decoration');
+    // A thread is renamed or put away from its own row. Home is every message with no thread, so it
+    // has no name to change and cannot be archived: no gear.
+    assert.equal(await page.locator('.project-thread-row:has([data-thread-id="home"])').count(), 0, 'home has no gear');
+    assert.equal(await page.locator('.project-thread-row:has([data-thread-id="long"]) .project-options').count(), 1, 'a thread does');
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 1, 'no thread card exists until one is asked for');
+    const threadGear = page.locator('.project-thread-row:has([data-thread-id="long"]) .project-options');
+    const callsBeforeThread = await page.evaluate(() => calls.length);
+    await threadGear.click();
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 2, 'opening one builds its card');
+    assert.equal(await card.locator('h2').innerText(), await page.evaluate(() => window.longTitle), 'titled with the thread');
+    assert.equal(await threadGear.getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.evaluate(() => calls.length), callsBeforeThread, 'opening it dispatches nothing');
+    await card.locator('input[type="text"]').fill('Turn lock');
+    await card.getByRole('button', {name: 'Save', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'renameThread', id: 'long', value: {project: 'alpha', title: 'Turn lock'}});
+    await card.getByRole('button', {name: 'Archive', exact: true}).click();
+    assert.equal(await page.evaluate(() => calls.filter(c => c.action === 'archiveThread').length), 0, 'Archive asks first');
+    assert.match(await card.locator('.margin-confirm').innerText(), /Archive this conversation\? It stays in the log\./);
+    await card.locator('.margin-confirm').getByRole('button', {name: 'Cancel', exact: true}).click();
+    assert.equal(await page.evaluate(() => calls.filter(c => c.action === 'archiveThread').length), 0, 'and Cancel means no');
+    await page.keyboard.press('Escape');
+    assert.equal(await card.count(), 0);
+    assert.equal(await threadGear.evaluate(el => el === document.activeElement), true, 'Escape returns to the gear');
+    // The list is rebuilt whenever any thread in the project is written to, from any device. The
+    // keyboard stays where it was instead of dropping to the page.
+    await page.evaluate(() => {model.projects[0].threads = [...model.projects[0].threads, {id: 'other', title: 'Other', lastAt: new Date(Date.now() - 1000).toISOString()}]; ui.update(model);});
+    assert.equal(await threadGear.evaluate(el => el === document.activeElement), true, 'a rebuilt list keeps focus on the gear');
+    await longRow.focus();
+    await page.evaluate(() => {model.projects[0].threads = model.projects[0].threads.map(t => t.id === 'other' ? {...t, lastAt: new Date().toISOString()} : t); ui.update(model);});
+    assert.equal(await longRow.evaluate(el => el === document.activeElement), true, 'and on the row');
+    await threadGear.click();
+    await card.getByRole('button', {name: 'Archive', exact: true}).click();
+    await card.locator('.margin-confirm').getByRole('button', {name: 'Archive', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'archiveThread', id: 'long', value: {project: 'alpha'}});
+    assert.equal(await card.count(), 0, 'a confirmed archive closes the card');
+    await page.evaluate(() => {model.projects[0].threads = [{id: 'home', title: 'Home', active: true}]; ui.update(model);});
+    assert.equal(await page.locator('.margin-card[role="dialog"]').count(), 1, 'and the card goes when its thread leaves the list');
 
     // Escape belongs to whatever you are actually in. Docked, the bar is open all day; swallowing
     // every Escape meant the composer and the palette never saw one.
@@ -306,6 +352,15 @@ test('sidebar preserves live authority, drafts, focus, and responsive controls',
     // that does not exist.
     await page.evaluate(() => {model.projects=[];model.activeProject=null;model.projectsLoaded=false;ui.update(model);});
     assert.match(await page.locator('.margin-switch-trigger').innerText(), /Loading projects/);
+    // A list that never arrived is not still loading. It says so once, and Retry asks again.
+    await page.evaluate(() => {model.projectsError=true;ui.update(model);});
+    assert.equal(await page.locator('.margin-switch-trigger').getAttribute('aria-label'), 'Projects: couldn’t reach the projects list');
+    assert.doesNotMatch(await page.locator('.margin-switch-trigger').innerText(), /couldn’t/, 'said once, in the body, not truncated in the switcher too');
+    assert.equal(await page.locator('.margin-body .margin-empty').innerText(), 'couldn’t reach the projects list');
+    assert.doesNotMatch(await page.locator('#project-rail').innerText(), /Loading projects/, 'and nothing claims it is still loading');
+    await page.locator('.margin-body').getByRole('button', {name: 'Retry', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'refreshProjects', id: undefined, value: undefined});
+    await page.evaluate(() => {delete model.projectsError;ui.update(model);});
     await page.evaluate(() => {model.projectsLoaded=true;ui.update(model);});
     const firstRun = await page.locator('.margin-switch-trigger').innerText();
     assert.match(firstRun, /No projects yet/);
@@ -341,7 +396,7 @@ test('the closed bar says on its toggle what is waiting, without renaming the to
     await page.setContent('<meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav>');
     await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
     await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
-    const moduleURL = 'data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../public/lib/margin-ui.js', import.meta.url))).toString('base64');
+    const moduleURL = await marginModuleURL();
     await page.evaluate(async url => {
       const {installMarginUI} = await import(url);
       window.ui = installMarginUI({onAction: () => {}});
@@ -382,4 +437,62 @@ test('the closed bar says on its toggle what is waiting, without renaming the to
     assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'false');
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
+});
+
+// A section tab in the bar says one thing once: the badge is the fact, and a line under it only adds
+// what the badge lacks. Every Settings status names its subject, since it is shown with nothing beside it.
+test('a section says its fact once, and a blocked permission says so', {timeout: 60000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+    const errors = []; page.on('pageerror', err => errors.push(err.message));
+    await page.setContent('<style>*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f5f2ec}</style><nav id="project-rail"></nav><nav id="settings-rail"></nav>');
+    await page.addStyleTag({content: await readFile(new URL('../public/tokens.css', import.meta.url), 'utf8')});
+    await page.addStyleTag({content: await readFile(new URL('../public/margins.css', import.meta.url), 'utf8')});
+    const moduleURL = await marginModuleURL();
+    await page.evaluate(async url => {
+      const {installMarginUI} = await import(url);
+      window.calls = [];
+      window.ui = installMarginUI({onAction: (action, id, value) => { calls.push({action, id, value}); }});
+      window.model = {projects: [
+        {id: 'alpha', name: 'Alpha', active: true, branch: 'main', goal: 'A real goal', mode: 'stage', inFlight: 2, pending: 1, staged: 3, done: 2, total: 7, planAvailable: true,
+          sections: {builds: {badge: '3 review', tone: 'attention'}, issues: {badge: '2 open', tone: 'quiet'}, plans: {badge: '2/7 tasks', detail: 'First shoots', tone: 'quiet'}}},
+      ], activeProject: 'alpha', busy: false, view: {project: 'alpha', section: 'issues'},
+      settings: {notifications: false, notificationsSupported: true, notificationBlocked: true, notificationStatus: 'Notifications are blocked in system or browser settings', session: 'abc · $1.00 · 7 turns', calm: false, systemReduced: false}};
+      ui.update(model);
+    }, moduleURL);
+    const section = () => page.locator('.margin-section').innerText();
+    const issues = await section();
+    assert.equal(issues.split('2 open').length - 1, 1, '"2 open" is said once, was ' + JSON.stringify(issues));
+    assert.doesNotMatch(issues, /full list|beside the bar/i, 'no hint that is untrue in the drawer');
+    assert.doesNotMatch(issues, /\.\s*$/m, 'state lines are fragments, not sentences');
+    await page.evaluate(() => { model.view = {project: 'alpha', section: 'builds'}; ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['3 review', '2 in flight · 3 staged · 1 pending'], 'builds add what is moving, which the badge does not say');
+    await page.evaluate(() => { Object.assign(model.projects[0], {inFlight: 0, pending: 0, staged: 0}); ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['3 review', 'nothing queued']);
+    await page.evaluate(() => { model.view = {project: 'alpha', section: 'plans'}; ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['2/7 tasks', 'First shoots', 'A real goal'], 'plans add the goal, not the count again');
+    await page.evaluate(() => { model.projects[0].goal = ''; ui.update(model); });
+    assert.deepEqual(await page.locator('.margin-section p').allInnerTexts(), ['2/7 tasks', 'First shoots'], 'and nothing when there is no goal');
+    assert.equal(await page.locator('#st-notifications .margin-pref-value').innerText(), 'Blocked', 'a denied permission reads Blocked, not Off');
+    const note = await page.locator('.margin-pref-note').filter({hasText: /blocked/}).innerText();
+    assert.match(note, /^Notifications /, 'and its note names what is blocked');
+    // A value too long to sit beside its label takes a line of its own, and stays right-aligned with the rest.
+    await page.evaluate(() => { Object.assign(model.settings, {brain: 'ready', model: 'fixture-model', provider: 'fixture', context: '240 turns · $31.20 known lifetime cost'}); ui.update(model); });
+    await page.locator('#status').click();
+    const rows = await page.locator('.margin-card:not([hidden]) .margin-data-row').evaluateAll(els => els.map(row => { const r = row.getBoundingClientRect(), dt = row.querySelector('dt').getBoundingClientRect(), dd = row.querySelector('dd').getBoundingClientRect(); return {label: row.querySelector('dt').textContent, wrapped: dd.top >= dt.bottom - 1, gap: Math.round(r.right - dd.right)}; }));
+    assert.ok(rows.some(row => row.wrapped), 'one value is long enough to wrap: ' + JSON.stringify(rows));
+    for (const row of rows) assert.equal(row.gap, 0, 'every value ends at the right edge, wrapped or not: ' + JSON.stringify(row));
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('every notification status the app reports names its subject', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const map = app.match(/notificationStatus: \{([^}]*)\}\[notificationPermission\] \|\| '([^']*)'/);
+  assert.ok(map, 'the status map is where the Settings card reads it');
+  const values = [...map[1].matchAll(/(\w+): '([^']*)'/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(values.map(([key]) => key), ['granted', 'denied', 'default', 'unavailable']);
+  for (const [key, value] of [...values, ['fallback', map[2]]]) assert.match(value, /^Notifications /, key + ': ' + value);
+  assert.match(app, /notificationBlocked: notificationPermission === 'denied'/);
 });

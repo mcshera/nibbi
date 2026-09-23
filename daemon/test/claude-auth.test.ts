@@ -43,5 +43,5 @@ test('Claude sign-in opens only the official CLI flow and creates no token-beari
   const script = readFileSync(file, 'utf8'); assert.match(script, /auth login --claudeai/); assert.match(script, /ANTHROPIC_\*/); assert.match(script, /forceLoginMethod/);
   assert.ok(!script.includes('fixture-key')); assert.ok(!script.includes('fixture-token')); assert.equal(statSync(file).mode & 0o777, 0o700);
   await execute(tmpdir(), '/bin/bash', ['-n', file], { env: claudeEnvironment() });
-  assert.match(result.message, /Check connections/);
+  assert.match(result.message, /Check again/);   // the Providers tab's button, renamed when the check began running on open
 });

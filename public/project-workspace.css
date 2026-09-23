@@ -10,29 +10,31 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-close { flex: none; width: var(--touch); height: var(--touch); margin-right: -10px; border: 0; border-radius: 50%; background: transparent; color: var(--ink-3); font-size: var(--type-title); line-height: 1; cursor: pointer; transition: background var(--t1), color var(--t1); }
 .project-close:hover { background: var(--veil-hover); color: var(--ink); }
 .project-close:active { background: var(--veil-press); }
-.project-close:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.project-close:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 .project-workspace h1 { margin: 0; font-size: var(--type-display); line-height: 1.25; letter-spacing: -.025em; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .project-workspace h1:focus { outline: none; }
 .project-workspace h2 { font-size: var(--type-field); font-weight: 550; line-height: 1.4; margin: 0 0 8px; }
 .project-workspace h3 { font-size: var(--type-body); font-weight: 600; margin: 0 0 12px; }
 .project-workspace button, .project-workspace summary { cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.project-workspace button, .project-workspace input, .project-workspace textarea, .project-workspace select { font: inherit; }
-.project-workspace button:disabled { cursor: default; opacity: .45; }
-.project-workspace :is(button,summary,a,input,textarea,select):focus-visible, .project-workspace-body:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 3px; }
+/* Under :where() the reset weighs one element (0,0,1), so a control's own class sets its size without an !important. */
+:where(.project-workspace) :is(button, input, textarea, select) { font: inherit; }
+.project-workspace button:disabled { cursor: default; opacity: var(--dim-disabled); }
+.project-workspace :is(button,summary,a,input,textarea,select):focus-visible, .project-workspace-body:focus-visible { outline: var(--focus-ring); outline-offset: 3px; }
 .project-workspace ::selection { background: var(--selection); color: var(--ink); }
 .project-workspace-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 4px calc(88px + env(safe-area-inset-bottom)); scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom)); margin: 0 -4px; scrollbar-width: thin; scrollbar-color: var(--ink-scroll) transparent; overflow-anchor: none; }
 .project-content { font-size: var(--type-body); line-height: 1.55; user-select: text; -webkit-user-select: text; }
 .project-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; }
 .project-summary { margin: 0; font-size: var(--type-fine); color: var(--ink-3); }
 .project-toolbar-actions, .project-order-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.project-action { border: 1px solid var(--line); border-radius: var(--r-well); padding: 9px 12px; min-height: var(--touch); background: var(--paper-raised); color: var(--ink-2); font-size: var(--type-fine) !important; }
+.project-action { border: 1px solid var(--line); border-radius: var(--r-well); padding: 9px 12px; min-height: var(--touch); background: var(--paper-raised); color: var(--ink-2); font-size: var(--type-fine); }
 .project-action.primary { background: var(--ink); color: var(--paper); border-color: transparent; }
 .project-action:hover:not(:disabled) { background: var(--bed-hover); }
 .project-action.primary:hover:not(:disabled) { background: var(--ink-bed-hover); }
 .project-action:active:not(:disabled) { transform: translateY(1px); }
-.project-text-button { color: var(--ink-3); min-height: var(--touch); padding: 7px 0; border: 0; background: none; white-space: nowrap; font-size: var(--type-fine) !important; }
+.project-text-button { color: var(--ink-3); min-height: var(--touch); padding: 7px 0; border: 0; background: none; white-space: nowrap; font-size: var(--type-fine); }
 .project-text-button:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-.project-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 0; padding: 10px 12px; color: var(--fail-text); font-size: var(--type-control); background: var(--notice-bed); border-radius: var(--r-well); }
+/* A notice is information ("Saved.", "Confirm this build action below."); only data-kind="error" is a verdict. */
+.project-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 0; padding: 10px 12px; color: var(--ink-2); font-size: var(--type-control); background: var(--notice-bed); border-radius: var(--r-well); }
 .project-notice[data-kind="error"] { color: var(--fail-text); background: var(--fail-wash-warm); }
 .project-notice[data-kind="success"] { color: var(--pass-text); background: var(--pass-wash-warm); }
 .project-notice > span { flex: 1; min-width: 180px; }
@@ -40,7 +42,7 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-empty { padding: 28px 0; max-width: 50ch; }
 .project-empty p { color: var(--ink-3); margin: 0; }
 .project-loading { padding: 24px 0; color: var(--ink-3); }
-.project-group-title { font-size: var(--type-fine) !important; font-weight: 600 !important; color: var(--ink-3); margin: 24px 0 8px !important; }
+.project-workspace .project-group-title { font-size: var(--type-fine); font-weight: 600; color: var(--ink-3); margin: 24px 0 8px; }   /* an h2: scoped so it outranks .project-workspace h2 */
 .project-build, .project-record { border-bottom: 1px solid var(--line); }
 .project-build > summary, .project-record > summary, .project-milestone > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; padding: 16px 0; list-style: none; min-height: var(--touch); }
 .project-workspace summary::-webkit-details-marker { display: none; }
@@ -51,11 +53,13 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-record-summary > strong, .project-milestone-summary > strong { flex: 1; }
 .project-muted { color: var(--ink-3); font-size: var(--type-fine); font-variant-numeric: tabular-nums; }
 .project-build-status, .project-record-status { font-size: var(--type-fine); color: var(--ink-2); white-space: nowrap; }
-.project-build-status[data-status="failed"], .project-build-status[data-status="interrupted"] { color: var(--fail-text); }
+/* A verdict wears one colour wherever it is shown. Scoped to the workspace so it outranks the rail's
+   quiet status (.project-build-rail .project-build-status) — they were equal, and the later one won. */
+.project-workspace .project-build-status:is([data-status="failed"], [data-status="interrupted"]) { color: var(--fail-text); }
 .project-build-detail, .project-record-detail { padding: 0 0 20px; overflow-wrap: anywhere; }
 .project-build-detail p, .project-record-detail p { margin: 0 0 12px; }
 .project-filters, .project-evidence-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
-.project-filter { border: 0; border-radius: var(--r-inline); background: transparent; color: var(--ink-3); font-size: var(--type-fine) !important; padding: 8px 10px; min-height: var(--touch); font-variant-numeric: tabular-nums; }
+.project-filter { border: 0; border-radius: var(--r-inline); background: transparent; color: var(--ink-3); font-size: var(--type-fine); padding: 8px 10px; min-height: var(--touch); font-variant-numeric: tabular-nums; }
 .project-filter[aria-pressed="true"] { background: var(--veil-hover); color: var(--ink); }
 .project-filter:hover { background: var(--veil-well); }
 .project-evidence-tabs { border-bottom: 1px solid var(--line); gap: 12px; }
@@ -81,7 +85,7 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-related { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 12px; }
 .project-related:empty { display: none; }
 .project-related-link, .project-next-link { min-height: var(--touch); text-align: left; background: none; border: 0; padding: 8px 0; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
-.project-related-link { font-size: var(--type-fine) !important; }
+.project-related-link { font-size: var(--type-fine); }
 .project-issue.completed strong, .project-task.completed strong { color: var(--ink-3); }
 .project-source, .project-plan-history { margin-top: 24px; }
 .project-source > summary, .project-plan-history > summary, .project-completed-tasks > summary { min-height: var(--touch); display: flex; align-items: center; font-size: var(--type-fine); color: var(--ink-3); padding: 8px 0; box-sizing: border-box; }
@@ -90,7 +94,7 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 .project-plan-outcome { margin: 4px 0 20px; max-width: 70ch; }
 .project-plan-focus { font-size: var(--type-control); margin: 0 0 8px; }
 .project-next-task { margin: 12px 0 24px; display: flex; flex-direction: column; align-items: flex-start; }
-.project-next-link { font-size: var(--type-body) !important; padding-block: 4px; font-weight: 550 !important; }
+.project-next-link { font-size: var(--type-body); padding-block: 4px; font-weight: 550; }
 .project-milestones { margin-bottom: 20px; }
 .project-milestone { border-block-end: 1px solid var(--line); }
 .project-milestone > summary { padding-block: 18px; }
@@ -114,15 +118,31 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
 @media (max-width: 899px) {
   .project-workspace { width: calc(100vw - 32px); }
   .project-workspace h1 { font-size: var(--type-title); }
+  /* The summary takes its own line and the controls one row under it: wrapped together they made a
+     jagged two-row stack at 390. Only the header's own row stays unwrapped; record actions still wrap.
+     The GitHub panels' toolbars are a heading and one button, with no actions group: they keep the row,
+     since stacked and stretched the button became a full-width slab. */
   .project-toolbar { gap: 8px; flex-wrap: wrap; padding-block: 12px; }
+  .project-toolbar:has(> .project-toolbar-actions) { flex-direction: column; align-items: stretch; }
+  .project-toolbar > .project-toolbar-actions { flex-wrap: nowrap; }
   .project-build > summary, .project-record > summary { flex-wrap: wrap; column-gap: 10px; row-gap: 4px; }
   .project-build-label, .project-record-copy { min-width: 65%; }
   .project-build-status, .project-record-status { margin-right: auto; }
   .project-workspace-head { gap: 8px; }
   .project-filter { padding-inline: 8px; }
 }
+/* Below 360 the longest row (Refresh · Add milestone · Discuss plan changes, 316px) no longer fits, and a
+   wrapped row of whole labels reads better than labels broken inside their buttons. */
+@media (max-width: 359px) { .project-toolbar > .project-toolbar-actions { flex-wrap: wrap; } }
 @media (max-width: 540px) {
   .project-list-tools .project-filter { padding-inline: 0; }
+  /* The filters scroll sideways on one row and fade at the edge that has more. The padding keeps the
+     focus ring (2px offset: a dense row) inside the scroller, which would otherwise clip it; it matches
+     the body's own 4px gutter, so the row never widens the page. */
+  .project-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px; margin: -4px -4px 8px; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent); }
+  .project-filters::-webkit-scrollbar { display: none; }
+  .project-filters .project-filter { flex: none; white-space: nowrap; }
+  .project-filters .project-filter:focus-visible { outline-offset: 2px; }
   .project-record-summary > strong { min-width: 62%; }
   .project-milestone > summary { gap: 12px; }
   .project-evidence-code { max-height: min(420px, 55vh); }
@@ -131,7 +151,7 @@ body.project-view .feed, body.project-view .chips, body.project-view .jump { dis
   .project-workspace-head { padding-bottom: 4px; }
   .project-workspace h1 { font-size: var(--type-title); }
   .project-toolbar { padding-block: 8px; }
-  .project-group-title { margin-top: 16px !important; }
+  .project-workspace .project-group-title { margin-top: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .project-action:active:not(:disabled) { transform: none; } }
 
@@ -224,9 +244,10 @@ body.glass .project-action:hover:not(:disabled) { background: rgba(233, 229, 221
 .project-build-stage .project-build-label strong { font-size: var(--type-title); line-height: 1.3; }
 .project-build-stage > .project-build > summary::after { display: none; }   /* it cannot collapse */
 .project-lobby-cta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px; }
-.project-lobby-cta .project-action { min-height: 48px; padding: 12px 18px; border-radius: var(--r-panel); font-size: var(--type-control) !important; }
+.project-lobby-cta .project-action { min-height: 48px; padding: 12px 18px; border-radius: var(--r-panel); font-size: var(--type-control); }
 .project-lobby-cta .project-action.primary { font-weight: 600; }
 .project-lobby-keys { flex-basis: 100%; margin: 2px 0 0; color: var(--ink-3); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+@media (hover: none), (pointer: coarse) { .project-lobby-keys { display: none; } }   /* no keyboard to press them on */
 .project-build-rail { display: flex; flex-direction: column; gap: 6px; }
 .project-build-rail .project-build { border-bottom: 0; }
 .project-build-rail .project-build > summary { flex-direction: column; align-items: stretch; gap: 3px; padding: 10px 12px; min-height: var(--touch); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface, var(--paper-raised)); }

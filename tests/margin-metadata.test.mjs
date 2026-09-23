@@ -62,18 +62,19 @@ test('real busy, offline, demo and waking states keep their priority', () => {
   for (const [input, expected] of cases) assert.equal(marginMetadata(input).brain, expected);
 });
 
-test('known sitting and lifetime data keep their scope and descriptors', () => {
+test('the Session row names the scope, so its value is only the numbers; lifetime keeps its descriptor', () => {
   const result = marginMetadata({ status: { sessionShort: 'abc', ctxTokens: 12345, turns: 7, costUsdTotal: 9.75, rateLimit: { status: 'rejected' } }, sessionCost: 1.25, sessionTurns: 3 });
-  assert.equal(result.session, 'abc · rate-limited · $1.25 known sitting cost / 3 turns');
+  assert.equal(result.session, 'abc · rate-limited · $1.25 · 3 turns');
   assert.equal(result.context, '12k tokens · 7 turns · $9.75 known lifetime cost');
 });
 
 test('explicit zero is valid, and partial metrics do not fabricate companions', () => {
   const zero = marginMetadata({ status: { ctxTokens: 0, turns: 0, costUsdTotal: 0 }, sessionCost: 0, sessionTurns: 0 });
   assert.equal(zero.context, '0 tokens · 0 turns · $0.00 known lifetime cost');
-  assert.equal(zero.session, 'Not available · $0.00 known sitting cost / 0 turns');
-  assert.equal(marginMetadata({ sessionTurns: 2 }).session, 'Not available · 2 sitting turns');
-  assert.equal(marginMetadata({ sessionCost: 0 }).session, 'Not available · $0.00 known sitting cost');
+  assert.equal(zero.session, 'Not available · $0.00 · 0 turns');
+  assert.equal(marginMetadata({ sessionTurns: 2 }).session, 'Not available · 2 turns');
+  assert.equal(marginMetadata({ sessionTurns: 1 }).session, 'Not available · 1 turn');
+  assert.equal(marginMetadata({ sessionCost: 0 }).session, 'Not available · $0.00');
   assert.equal(marginMetadata({ status: { turns: 0 } }).context, '0 turns');
   assert.equal(marginMetadata({ status: { ctxTokens: 1 } }).context, '1 tokens');
   assert.equal(marginMetadata({ status: { ctxTokens: 1.5, turns: 1.5 }, sessionTurns: 1.5 }).context, 'Not available');

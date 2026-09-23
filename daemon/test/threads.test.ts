@@ -90,3 +90,23 @@ test('an untitled thread takes its name from the first thing the owner says', t 
   renameThread('battalion', thread.id, 'Salvage dice', store);
   assert.equal(store.get<{ title: string }>('threads', thread.id)!.title, 'Salvage dice');
 });
+
+test('every real change to a thread is announced, and an unchanged touch is not', t => {
+  const { store } = fixture(t);
+  const events: { type: string; projectId?: string; payload: Record<string, unknown> }[] = [];
+  store.events.on('event', event => { if (event.type === 'thread.updated') events.push(event); });
+  const thread = createThread('battalion', undefined, store);
+  assert.equal(events.length, 1, 'creating a thread says so');
+  touchThread(thread.id, '2026-09-04T10:00:00.000Z', 'Rebalance the salvage dice', store);
+  assert.equal(events.length, 2, 'the first message names it, and that is news');
+  assert.deepEqual(events[1].payload.thread, { id: thread.id, project: 'battalion', title: 'Rebalance the salvage dice', lastAt: '2026-09-04T10:00:00.000Z', archived: false });
+  assert.equal(events[1].projectId, 'battalion');
+  touchThread(thread.id, '2026-09-04T10:00:00.000Z', 'Rebalance the salvage dice', store);
+  assert.equal(events.length, 2, 'a touch that changes nothing is silent');
+  renameThread('battalion', thread.id, 'Salvage dice', store);
+  assert.equal(events.length, 3);
+  assert.equal((events[2].payload.thread as { title: string }).title, 'Salvage dice');
+  archiveThread('battalion', thread.id, true, store);
+  assert.equal((events[3].payload.thread as { archived: boolean }).archived, true, 'archiving is a change too');
+  assert.equal(store.replay(0, 100).filter(event => event.type === 'thread.updated').length, 4, 'and each one is in the replayable log');
+});

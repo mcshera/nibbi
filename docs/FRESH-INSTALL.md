@@ -12,7 +12,7 @@ Also run `npm test`, `npm run typecheck` and `npm run verify`.
 
 1. Follow [the migration guide](PLATFORM-MIGRATION.md), or install on an unused account with `bash install.sh`. Expect one backend service, not separate host and gateway owners.
 2. Open the browser URL. Confirm the character, conversation pill and Settings work. The doctor should identify Nibbi protocol version 1.
-3. Install Claude Code, then use Settings → Providers → Sign in with Claude. Complete the official CLI's Terminal/browser flow and use Check connections to confirm subscription sign-in. No API key or token copying is needed. Install the tested Codex CLI and connect it from Settings. Test a small lead turn with each provider; confirm Claude does not switch to API billing if sign-in fails.
+3. Install Claude Code, then use Settings → Providers → Sign in with Claude. Complete the official CLI's Terminal/browser flow and reopen Providers (it checks as it opens) or press Check again to confirm subscription sign-in. No API key or token copying is needed. Install the tested Codex CLI and connect it from Settings. Test a small lead turn with each provider; confirm Claude does not switch to API billing if sign-in fails.
 4. Create a disposable project. Configure a meaningful check. Test Claude and Codex independently as fixer, including provider/model selection and a selected skill.
 5. Confirm the lead cannot edit project source or protected vault instructions directly. The fixer must not write outside its worktree, alter Git metadata, publish, or read credential files.
 6. Stage a change, inspect its exact diff, introduce a conflicting owner change and confirm merge refusal. Confirm an unrelated owner commit is preserved during successful integration.

@@ -110,6 +110,14 @@ try {
     await page.evaluate(() => { window.__transcriptWrites = 0; window.nibbiApp.send('fix the lock bug'); });
     const live = page.locator('.bubble.live');
     await live.waitFor({ timeout: 20_000 });
+    // The reply is a page-width card from its first frame. Shrink-wrapped, it opened at the width of
+    // its steps and jumped to the full measure at the first word.
+    const opened = await page.evaluate(() => {
+      const bubble = document.querySelector('.bubble.live'), said = bubble.querySelector('.said');
+      return { bubble: bubble.getBoundingClientRect().width, body: bubble.closest('.nibbody').getBoundingClientRect().width, stepLive: !!bubble.querySelector('.step.live'), dots: getComputedStyle(said, '::after').display };
+    });
+    assert.ok(opened.bubble > 0 && opened.bubble === opened.body, 'the live reply is as wide as its column, was ' + JSON.stringify(opened));
+    if (!opened.stepLive) assert.notEqual(opened.dots, 'none', 'before any step runs, the dots say the turn is working');
 
     // Thinking is shown while it happens: a reasoning model that says nothing for ten seconds must
     // not look hung. The step counts, shows the end of what it is thinking, and closes into a verdict.
@@ -117,11 +125,20 @@ try {
     const thinking = await page.waitForFunction(() => {
       const step = document.querySelector('.step.think');
       const tail = step?.querySelector('.tail')?.textContent ?? '';
-      return tail.trim() ? { label: step.querySelector('.l').textContent, tail, live: step.classList.contains('live') } : null;
+      const said = step?.closest('.bubble')?.querySelector('.said');
+      return tail.trim() ? { label: step.querySelector('.l').textContent, tail, live: step.classList.contains('live'), dots: said ? getComputedStyle(said, '::after').display : '', saidEmpty: said ? !said.textContent : null, iterations: getComputedStyle(step.querySelector('.b')).animationIterationCount, timings: document.getAnimations().map(a => a.effect.getTiming().iterations) } : null;
     }, null, { timeout: 20_000 }).then(handle => handle.jsonValue());
     assert.equal(thinking.label, 'thinking', 'the live step says what it is doing');
     assert.equal(thinking.live, true);
     assert.ok(thinking.tail.trim().length, 'and shows the end of what is being thought');
+    // One working mark at a time: a running step is it, so the dots under it stand down.
+    assert.equal(thinking.saidEmpty, true, 'nothing has been said yet');
+    assert.equal(thinking.dots, 'none', 'the dots stand down while a step is live');
+    if (reducedMotion === 'reduce') {
+      // At 1ms an infinite loop does not stand still, it flickers: every animation plays once.
+      assert.equal(thinking.iterations, '1', 'the live step dot plays once under reduced motion');
+      assert.ok(thinking.timings.every(n => n === 1), 'every running animation plays once, was ' + JSON.stringify(thinking.timings));
+    } else assert.equal(thinking.iterations, 'infinite', 'and beats while motion is allowed');
     if (reducedMotion === 'no-preference') await page.screenshot({ path: out + 'thinking-1180x820.png' });
 
     // The tail is the only part still being rendered; everything above it is finished.
@@ -177,8 +194,12 @@ try {
         thought: turn.querySelector('.step.think')?.className ?? '',
         thoughtLabel: turn.querySelector('.step.think .l')?.textContent ?? '',
         thoughtTime: turn.querySelector('.step.think .t')?.textContent ?? '',
+        width: turn.querySelector('.bubble').getBoundingClientRect().width,
+        bodyWidth: turn.querySelector('.nibbody').getBoundingClientRect().width,
       };
     });
+    assert.equal(settled.width, settled.bodyWidth, 'the settled reply is still as wide as its column');
+    assert.equal(settled.width, opened.bubble, 'and the card never changed width between its first frame and its last');
     assert.equal(settled.tails, 0, 'the tail is unwrapped when the reply settles');
     assert.equal(settled.liveBubbles, 0, 'the settled reply is no longer live');
     assert.equal(settled.items, 2, 'both list items are in the finished reply');
@@ -194,6 +215,26 @@ try {
     assert.ok(!/(^|\n)- /.test(settled.text), 'and no raw list markers either');
 
     if (reducedMotion === 'no-preference') await page.screenshot({ path: out + 'settled-1180x820.png' });
+
+    // The folded steps are a toggle that stays under the pointer: it opens, closes, and keeps focus.
+    const fold = page.locator('.turn:last-child .steps .fold');
+    const foldState = () => fold.evaluate(el => ({ expanded: el.getAttribute('aria-expanded'), folded: el.closest('.steps').classList.contains('folded'), word: [...el.querySelectorAll('.fw u')].filter(u => u.getClientRects().length).map(u => u.textContent).join('|'), line: el.querySelector('.l').textContent, focused: document.activeElement === el, controls: document.getElementById(el.getAttribute('aria-controls')) === el.closest('.steps'), top: el.getBoundingClientRect().top, above: [...el.closest('.steps').querySelectorAll('.step')].every(step => el.compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING) }));
+    const closed = await foldState();
+    assert.deepEqual([closed.expanded, closed.folded, closed.word, closed.controls, closed.above], ['false', true, 'show', true, true], 'the steps settle folded behind their summary, which sits above them');
+    assert.match(closed.line, /^\d+ steps? in /, 'and the summary line carries no toggle word of its own');
+    // Pressed with the pointer, twice, at one spot: the list opens under the toggle, so the toggle is still there.
+    const foldBox = await fold.boundingBox(), spot = [foldBox.x + 40, foldBox.y + foldBox.height / 2];
+    const underPointer = () => page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.fold'), spot);
+    await page.mouse.click(...spot);
+    const opened2 = await foldState();
+    assert.deepEqual([opened2.expanded, opened2.folded, opened2.word, opened2.focused], ['true', false, 'hide', true], 'show opens them, and focus stays on the toggle');
+    assert.ok(await page.locator('.turn:last-child .steps .step:visible').count() >= 4, 'the steps are on screen');
+    assert.ok(Math.abs(opened2.top - closed.top) < 1 && await underPointer(), `the toggle has not moved (${closed.top} → ${opened2.top}) and is still under the pointer`);
+    await page.mouse.click(...spot);
+    const closedAgain = await foldState();
+    assert.deepEqual([closedAgain.expanded, closedAgain.folded, closedAgain.word, closedAgain.focused], ['false', true, 'show', true], 'and hide folds them again from the same place');
+    assert.ok(Math.abs(closedAgain.top - closed.top) < 1, `where it started (${closed.top} → ${closedAgain.top})`);
+
     const writesAfter = await page.evaluate(() => window.__transcriptWrites);
     assert.ok(writesAfter > writesWhileStreaming, 'the settled turn is written once it is done');
 
@@ -208,11 +249,53 @@ try {
     assert.equal(restored.text, settled.text, 'the restored reply is the reply that was read');
     assert.equal(restored.items, 2, 'its list came back');
     assert.equal(restored.tails, 0, 'a restored reply has no live tail');
+    assert.equal(await page.locator('.turn:last-child .steps.foldable.folded .fold[aria-expanded="false"]').count(), 1, 'a restored reply folds its steps behind the same toggle');
 
+    if (reducedMotion === 'no-preference') {
+      // Calm motion is the same kill switch as the system setting, carried as a class on body.
+      const calm = await page.evaluate(() => {
+        document.querySelector('#st-motion').click();
+        const turn = document.querySelector('.turn');
+        return { on: document.body.classList.contains('calm'), duration: getComputedStyle(turn).animationDuration, iterations: getComputedStyle(turn).animationIterationCount };
+      });
+      assert.deepEqual(calm, { on: true, duration: '0.001s', iterations: '1' }, 'Calm motion turns on body.calm and the reduced-motion rules with it');
+      assert.equal(await page.evaluate(() => { document.querySelector('#st-motion').click(); return document.body.classList.contains('calm'); }), false, 'and turning it off takes them away');
+    }
     assert.deepEqual(errors, [], 'No unexpected browser errors (' + reducedMotion + ')');
     await context.close();
   }
-  console.log('Streaming checks passed: block-stable rendering, a surviving selection, a clean settle and no transcript writes mid-reply.');
+
+  // Copy gives you what you read: the code without its buttons' labels, the reply without its
+  // protocol lines. A scripted /api/send answers once, with a long fence and an »acts: line.
+  {
+    const errors = [];
+    const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: fixture.base });
+    const page = await context.newPage();
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text() + ' @ ' + message.location().url); });
+    const code = Array.from({ length: 18 }, (_, i) => `const line${i} = ${i};`).join('\n');
+    const reply = 'Here it is.\n\n```js\n' + code + '\n```\n\nTwo lines of it matter.\n»acts: ship it | not now\n';
+    await page.route('**/api/send', route => route.fulfill({ json: { text: reply, costUsd: 0, isError: false } }));
+    await page.goto(fixture.base + '/?nosw=1');
+    await page.waitForFunction(() => window.nibbiApp && document.body.dataset.link === 'live');
+    await page.evaluate(() => window.nibbiApp.send('show me the snippet'));
+    await page.waitForFunction(() => !window.nibbiApp.state().busy && document.querySelector('.turn:last-child pre .copycode'), null, { timeout: 20_000 });
+    assert.equal(await page.locator('.turn:last-child pre .expand').count(), 1, 'the long fence is capped, so it has a second button inside it too');
+    const copied = async () => { await page.waitForFunction(() => document.querySelector('#toast')?.textContent === 'copied' && !document.querySelector('#toast').hidden); const text = await page.evaluate(() => navigator.clipboard.readText()); await page.evaluate(() => { document.querySelector('#toast').hidden = true; document.querySelector('#toast').textContent = ''; }); return text; };
+    await page.locator('.turn:last-child pre .copycode').click();
+    const fence = await copied();
+    assert.equal(fence.trimEnd(), code, 'the code block copies its code and nothing else');
+    assert.ok(!/copy\s*$/.test(fence) && !fence.includes('show all'), 'no button label rides along');
+    await page.locator('.turn:last-child .meta .metaacts button', { hasText: /^copy$/ }).click();
+    const whole = await copied();
+    assert.ok(whole.startsWith('Here it is.') && whole.includes('const line17 = 17;'), 'the reply copies as it reads');
+    assert.ok(!whole.includes('»') && !whole.includes('acts:'), 'without its protocol lines, was ' + JSON.stringify(whole.slice(-60)));
+    assert.deepEqual(await page.locator('.turn:last-child .meta .metaacts button').allTextContents(), ['quote', 'copy', 'ask again'], 'a reply to something you said can be asked again');
+    assert.deepEqual(errors, [], 'No unexpected browser errors (copy)');
+    await context.close();
+  }
+  console.log('Streaming checks passed: block-stable rendering, a surviving selection, a clean settle, no transcript writes mid-reply, a fold that toggles in place, and copy that copies what was read.');
   await streamAtSizes(browser);
   console.log('Streaming checks passed at 1180x600, 390x844 and under glass: an open fence is code, the caret, a counted jump, a table that fits.');
 } finally {

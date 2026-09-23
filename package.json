@@ -12,7 +12,7 @@
     "typecheck": "npm run build -w @nibbi/contracts && npm run typecheck -w @nibbi/daemon && tsc -p tsconfig.ui.json",
     "serve": "node server.mjs",
     "shot": "node tools/shot.mjs",
-    "verify": "node tools/contrast-verify.mjs && node tools/verify.mjs && node tools/attention-verify.mjs && node tools/review-verify.mjs && node tools/stream-verify.mjs",
+    "verify": "node tools/style-verify.mjs && node tools/contrast-verify.mjs && node tools/verify.mjs && node tools/attention-verify.mjs && node tools/review-verify.mjs && node tools/stream-verify.mjs && node tools/surfaces-verify.mjs && node tools/continuity-verify.mjs",
     "verify:webkit": "node tools/webkit-verify.mjs",
     "verify:all": "npm run verify && npm run verify:webkit && node tools/kanban-verify.mjs && node tools/build-play-verify.mjs && node tools/margin-ui-verify.mjs && node tools/sidebar-verify.mjs && node tools/harness-verify.mjs && node tools/project-workflow-verify.mjs && NIBBI_WEB_CANDIDATE=. node tools/web-verify.mjs && NIBBI_MCP_CANDIDATE=. node tools/mcp-client-verify.mjs && node tools/voice-verify.mjs && node tools/pocket-verify.mjs",
     "fixture": "node tools/test-backend.mjs",

@@ -18,9 +18,9 @@ export function marginMetadata(input = {}) {
   const limit = text(record(status?.rateLimit)?.status);
   if (limit && limit !== 'allowed') session.push('rate-limited');
   const cost = number(sessionCost), turns = count(sessionTurns);
-  if (cost !== null && turns !== null) session.push('$' + cost.toFixed(2) + ' known sitting cost / ' + turns + ' turns');
-  else if (cost !== null) session.push('$' + cost.toFixed(2) + ' known sitting cost');
-  else if (turns !== null) session.push(turns + ' sitting turns');
+  // The row's own label says whose numbers these are, so the value carries only the numbers: one line.
+  if (cost !== null) session.push('$' + cost.toFixed(2));
+  if (turns !== null) session.push(turns + (turns === 1 ? ' turn' : ' turns'));
   const context = [];
   const tokens = count(status?.ctxTokens), totalTurns = count(status?.turns), totalCost = number(status?.costUsdTotal);
   if (tokens !== null) context.push(tokens < 1000 ? tokens + ' tokens' : Math.round(tokens / 1000) + 'k tokens');

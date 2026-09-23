@@ -22,6 +22,13 @@ test('questionActs: yes/no only for yes/no questions', () => {
 
 test('humanError maps gateway failures to nibbi lines and keeps the rest', () => {
   assert.match(humanError('error: Failed to authenticate: OAuth session expired'), /spilled the ink pot/);
+  // The login line points where signing in actually happens. It used to say `claude setup-token`, a
+  // command Settings never mentions; Settings says Sign in with Claude.
+  assert.equal(humanError('error: Failed to authenticate: OAuth session expired'), 'I spilled the ink pot — Claude\'s sign-in has lapsed. Sign in again under Settings → Providers and I\'ll pick this back up.');
+  assert.doesNotMatch(humanError('token expired'), /setup-token/);
+  // What the daemon itself says when Claude Code is not signed in, before any run starts.
+  for (const daemon of ['Sign in to Claude Code with your Claude account. Nibbi will not fall back to API billing.', 'Claude sign-in unavailable. Use Sign in with Claude, then Check again.'])
+    assert.equal(humanError(daemon), 'Claude isn\'t signed in on this Mac. Sign in under Settings → Providers and I\'ll pick this back up.');
   assert.match(humanError('gateway offline'), /gateway isn.t answering/);
   assert.match(humanError('HTTP 502'), /choked/);
   assert.match(humanError('rate limit exceeded'), /rate-limited/);
@@ -74,4 +81,13 @@ test('a machine verdict and a machine being unreachable are different kinds of b
     assert.equal(errorKind(notice), 'notice', notice);
   }
   assert.equal(errorKind(''), 'failure', 'with nothing to go on, say nothing reassuring');
+});
+
+test('a reply the daemon stored already humanised keeps its kind', () => {
+  for (const raw of ['error: Failed to authenticate: OAuth session expired', 'gateway offline', 'HTTP 502', 'rate limit exceeded', 'Sign in to Claude Code first', 'Claude sign-in unavailable']) {
+    assert.equal(errorKind(humanError(raw)), 'notice', humanError(raw));
+  }
+  assert.equal(errorKind("The gateway isn't answering, so there's no brain behind me right now."), 'notice');
+  assert.equal(errorKind('Sign in to Claude Code first'), 'notice', 'not signed in is a notice, raw or put into words');
+  assert.equal(errorKind(humanError('Checks failed on the staged branch')), 'failure', 'a verdict stays a verdict once it has been put into words');
 });
