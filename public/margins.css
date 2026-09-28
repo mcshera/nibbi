@@ -1,22 +1,53 @@
-/* 5c2 project rings + 5c1 glyphs + 5c3 paper cards. */
+/* The bar — Cards (docs/CONTROL-PANEL.md §2.1; ported from the lab's round six options/bar-cards-shell.css).
+   Every block is the same card: the project, the conversations, the builds. The foot is a quiet line under the last.
+
+   THE GRID (x from the bar's left edge; docked the bar is 256 with a 1px edge on its right, the drawer 300)
+      12       the bar's margin; every card's edge (cards 12–243 docked, 12–288 in the drawer)
+      16       a row's edge: a card's 4px padding (the row's radius 8 is concentric with the card's 12)
+      24–40    the icon column: every row's glyph, 16px. A header leaves it empty. The logo stands on 24.
+      48       the words' edge: the project's name, both labels, every row's first word, the foot. One edge.
+      64       one step in (16): inside main. Its nodes, its fold and its + sit in the column at 40–56
+      207      the right-hand edge: every word, count, badge and time ends here (240 in the drawer)
+      207–239  the trailing column: every caret and +, main's ▶, the head's keys, a gear: 32 wide, centred on 223
+               (44 wide, centred on 262, in the drawer and at a coarse pointer)
+   ONE ROW: two lines, 13/18 over 11.5/16, 2 apart, 4 above and below — 44 tall (--space-9 + --space-5) at both
+      widths. A row whose words wrap grows by its lines. One-line rows (+ improvement, a fold, a project in the
+      list) are 36 (44 in the drawer and at a coarse pointer).
+   ONE HEADER: [empty icon slot] label · badge ending on 207 · key on the trailing column, 44 tall like the rows.
+      A group's header draws its card's top, so when it is stuck it is still the top of a card.
+   FOUR TYPE ROLES (plus the logo, nibbi 21/600, the brand mark): title 14.5/600/20 --ink (the project) ·
+      group label 12/600/16 --ink-2 · row primary 13/400/18 --ink · row secondary 11.5/400/16 --ink-3.
+      Tones only on state words: attention --ink, active --ink-2, the verdicts in their colours.
+   TWO KEY LOOKS: the well (▶, up next: --veil-well, no ring) and the quiet icon key (+, carets, Settings,
+      collapse, a gear: nothing at rest). The one ink key is the open form's submit.
+   MARKS, every row kind alike: rest nothing · hover --veil-hover · press --veil-press · current: the row lifts
+      out of its card as seated paper (--paper-raised, the hairline, --e-seated, --e-highlight), never a hover.
+   SPACE: 2 row to row (--space-0) · 4 a card's padding (--space-1) · 12 block to block and the bar's margin
+      (--space-5) · 16 one step in (--space-6).
+   LINES: --veil-hairline is an edge (a card, the lifted row, a stuck header); --veil-edge is structure (the trunk). */
+
+/* ================================================================ the cards beside the bar: Settings, a project, a thread */
 .margin-rail, .margin-card {
   --margin-ink: var(--ink, #151413);
   /* the bar no longer forks its muted ink: the derived --ink-3 is Lc 69 on var(--paper-bar),
      clear of the Lc 65 band for this 10-12px type. see tokens.css and design/LANGUAGE.md 2.5. */
   --margin-muted: var(--ink-3);
   --margin-line: var(--veil-press);
-  font: var(--type-fine)/var(--leading-body) var(--font);
   color: var(--margin-ink);
   box-sizing: border-box;
 }
-.margin-rail *, .margin-card * { box-sizing: border-box; }
-/* The resets sit under :where(), so they weigh one element (0,0,1) and any single class beats them.
-   At (0,1,1) they outranked every control's own colour and size, and sixteen !important flags papered over it. */
-:where(.margin-rail, .margin-card) button, :where(.margin-card) input { font: inherit; }
-:where(.margin-rail, .margin-card) button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-:where(.margin-rail, .margin-card) button:disabled { opacity: var(--dim-disabled); cursor: default; }
-.margin-rail button:focus-visible, .margin-rail input:focus-visible, .margin-card button:focus-visible, .margin-card input:focus-visible { outline: var(--focus-ring); outline-offset: 3px; }
-.margin-rail [hidden], .margin-card[hidden], .margin-card [hidden] { display: none !important; }
+.margin-card { font: var(--type-fine)/var(--leading-body) var(--font); }
+.workspace-sidebar, .workspace-sidebar *, .sidebar-toggle, .sidebar-toggle * { box-sizing: border-box; }
+/* The resets sit under :where(), so they weigh one element (0,0,1) and any single class beats them. */
+:where(.workspace-sidebar) :is(button, input, textarea) { font: inherit; }
+:where(.workspace-sidebar, .sidebar-toggle) button, :where(.sidebar-toggle) {
+  color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; margin: 0;
+  /* the premium baseline: every control answers in colour, on --t1, and never with `all` */
+  transition: background-color var(--t1) var(--ease), color var(--t1) var(--ease), box-shadow var(--t1) var(--ease);
+}
+:where(.workspace-sidebar) button:disabled { opacity: var(--dim-disabled); cursor: default; }
+.workspace-sidebar :is(button, input, textarea):focus-visible, .sidebar-toggle:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.workspace-sidebar [hidden], .margin-card[hidden] { display: none !important; }
 /* One declaration, not two: the old top/width/radius here were dead, overridden further down. */
 .margin-card { --margin-paper: var(--paper-raised); position: fixed; top: 80px; z-index: var(--z-sheet); display: flex; flex-direction: column; width: var(--measure-card); max-height: calc(100dvh - 96px); overflow: hidden; padding: 0; border-radius: var(--r-panel); background: var(--margin-paper); border: 1px solid var(--margin-line); box-shadow: var(--e-lifted); }
 .margin-card:focus { outline: none; }
@@ -33,13 +64,14 @@
 .margin-card p { margin: 6px 0; overflow-wrap: anywhere; }
 .margin-muted, .margin-project-stats { color: var(--margin-muted); font-size: var(--type-meta); }
 .margin-goal { color: var(--ink-2, #383633); }
-.margin-progress { height: 4px; border-radius: var(--r-bar); background: var(--veil-hairline); margin: 9px 0 12px; overflow: hidden; }
-.margin-progress > span { display: block; height: 100%; background: var(--margin-ink); border-radius: inherit; }
 .margin-field-label { color: var(--margin-muted); font-size: var(--type-meta); }
-.margin-segment { display: flex; padding: 3px; border-radius: var(--r-pill); background: var(--veil-hover); margin: 4px 0 10px; }
+.margin-segment { display: flex; padding: 3px; border-radius: var(--r-pill); background: var(--veil-hover); margin: 4px 0 4px; }
 .margin-mode { flex: 1; min-width: 0; border: 0; border-radius: var(--r-pill); padding: 5px 6px; background: transparent; color: var(--margin-muted); font-size: var(--type-meta); }
+.margin-mode:hover:not(:disabled):not([aria-pressed="true"]) { color: var(--margin-ink); }
+.margin-mode:active:not(:disabled) { background: var(--veil-press); }
 .margin-mode[aria-pressed="true"] { background: var(--paper-raised); color: var(--margin-ink); box-shadow: var(--e-seated); }
 .margin-mode:last-child[aria-pressed="true"] { background: var(--margin-ink); color: var(--ink-inverse); }
+.margin-card .margin-roadmap { margin: 0 0 10px; }
 .margin-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
 .margin-pill { min-height: 32px; padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--margin-line); background: var(--bed); color: var(--ink-2, #383633); font-size: var(--type-meta); }
 .margin-pill:hover:not(:disabled) { background: var(--bed-hover); border-color: var(--veil-strong); }
@@ -52,7 +84,6 @@
 .margin-cap { display: grid; grid-template-columns: 1fr 72px auto; align-items: center; gap: 7px; padding-top: 11px; margin-top: 11px; border-top: 1px solid var(--margin-line); }
 .margin-cap label { color: var(--margin-muted); font-size: var(--type-meta); }
 .margin-cap input { width: 100%; min-width: 0; padding: 5px 7px; border: 1px solid var(--margin-line); background: var(--wash-field); color: var(--margin-ink); border-radius: var(--r-well); }
-.margin-metadata { margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--margin-line); }
 .margin-data-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 16px; padding: 4px 0; }   /* a long value takes its own line rather than squeezing the label */
 .margin-data-row dt { flex: none; color: var(--margin-muted); font-size: var(--type-meta); }
 .margin-data-row dd { margin: 0 0 0 auto; color: var(--ink-2, #383633); text-align: right; overflow-wrap: anywhere; min-width: 0; font-variant-numeric: tabular-nums; }   /* auto: a value that wraps to its own line stays at the right edge */
@@ -66,81 +97,314 @@
 .margin-pref:disabled .margin-pref-value { background: transparent; box-shadow: inset 0 0 0 1px var(--veil-press); }
 .margin-card .margin-pref-note { margin-top: 8px; }
 .margin-error { color: var(--fail-text); font-size: var(--type-meta); overflow-wrap: anywhere; }
-.margin-card .margin-error, .margin-rail .margin-error { margin-top: 10px; }
-.margin-global-error { background: var(--paper-raised); border: 1px solid var(--margin-line); border-radius: var(--r-control); padding: 8px; }
+.margin-card .margin-error { margin-top: 10px; }
+.margin-global-error { margin: 0; background: var(--paper-raised); border: 1px solid var(--margin-line); border-radius: var(--r-control); padding: 8px; }
 .margin-error[data-kind="notice"] { color: var(--ink-2); }   /* "not now" is not a verdict: a refusal to switch mid-reply reads in ink */
+.margin-metadata { margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--margin-line); }
+.margin-rename { grid-template-columns: 1fr auto; padding-top: 0; margin-top: 0; border-top: 0; }
+.margin-rename label { grid-column: 1 / -1; }
+/* A project's card opens beside the bar (from its gear); Settings opens at the top, beside its key in the head. */
+.margin-card-left, .margin-card-right { left: calc(var(--sidebar-width) + 12px); right: auto; }
+.margin-card-right { top: var(--space-5); max-height: calc(100dvh - 2 * var(--space-5)); }
 
-/* Navigation occupies one edge; the conversation uses the remaining workspace. */
+/* ================================================================ the frame around the bar */
 :root { --workspace-left: 0px; }   /* the width itself is a token; this is the state that reads it */
 body.sidebar-open { --workspace-left: var(--sidebar-width); }
-.workspace-sidebar { position: fixed; inset: 0 auto 0 0; width: var(--sidebar-width); z-index: var(--z-sheet-rail); display: flex; flex-direction: column; background: var(--paper-bar); border-right: 1px solid var(--veil-hairline); transform: translateX(-100%); visibility: hidden; transition: transform var(--t2) var(--ease), visibility var(--t2); }
+.workspace-sidebar {
+  --cp-pad: var(--space-5);                            /* 12: the bar's margin, and the gap between blocks */
+  --cp-inset: var(--space-1);                          /* 4: a card's padding */
+  --cp-rowpad: var(--space-3);                         /* 8: a row's side padding — its glyph starts at 24 */
+  --cp-glyph: 16px;
+  --cp-step: var(--space-6);                           /* 16: one step in */
+  --cp-key: 32px;                                      /* a key, and the trailing column */
+  --cp-row2: calc(var(--space-9) + var(--space-5));    /* 44 (= --touch): 18 + 2 + 16, and 4 above and below */
+  --cp-row1: calc(var(--space-9) + var(--space-1));    /* 36: a one-line row */
+  --cp-gap: var(--space-0);                            /* 2: row to row */
+  --cp-edge: 0 0 0 1px var(--veil-hairline);           /* line 1 of 2: an edge */
+  --cp-edge-in: inset 0 0 0 1px var(--veil-hairline);  /* the same edge drawn inside a card, so a stuck header can draw over it */
+  --cp-text: calc(var(--cp-rowpad) + var(--cp-glyph) + var(--space-3));   /* 32: a row's edge to its words */
+  position: fixed; inset: 0 auto 0 0; width: var(--sidebar-width); z-index: var(--z-sheet-rail);
+  display: flex; flex-direction: column; gap: var(--cp-pad); padding: var(--cp-pad);
+  font: var(--type-control)/var(--leading-tight) var(--font); color: var(--ink);
+  background: var(--paper-bar); border-right: 1px solid var(--veil-hairline);
+  transform: translateX(-100%); visibility: hidden; transition: transform var(--t2) var(--ease), visibility var(--t2);
+}
 body.sidebar-open .workspace-sidebar { transform: none; visibility: visible; }
-.sidebar-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 12px 24px; }
-.sidebar-brand { font-size: var(--type-title); font-weight: 650; letter-spacing: -.035em; }
-.sidebar-toggle, .sidebar-collapse { display: grid; place-items: center; width: 40px; height: 40px; flex: none; color: var(--ink-2); background: transparent; border: 0; border-radius: var(--r-well); cursor: pointer; }
-.sidebar-toggle { position: fixed; left: 16px; top: 16px; z-index: var(--z-sheet-rail); background: rgba(245,242,236,.94); }
+@media (max-width: 899px), (pointer: coarse) { .workspace-sidebar { --cp-key: var(--touch); --cp-row1: var(--touch); } }
+.workspace-sidebar svg, .sidebar-toggle svg { width: var(--cp-glyph, 16px); height: var(--cp-glyph, 16px); flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.workspace-sidebar h2 { margin: 0; }
+.sidebar-backdrop { position: fixed; inset: 0; z-index: var(--z-sheet-backdrop); border: 0; background: var(--veil-edge); }
+/* collapsed: the bar folded to one small card, and the words it still owes you */
+.sidebar-toggle { position: fixed; left: 16px; top: 16px; z-index: var(--z-sheet-rail); display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: var(--r-card); color: var(--ink-2); background: var(--paper); box-shadow: 0 0 0 1px var(--veil-hairline); }
+.sidebar-toggle svg { width: 20px; height: 20px; }   /* window chrome keeps the one 20px glyph */
 .sidebar-toggle:has(.sidebar-toggle-count:not(:empty)) { width: auto; padding: 0 12px 0 8px; display: inline-flex; align-items: center; gap: 6px; }
 /* The words take only what the talk pose leaves them. That pose sits top-centre at r >= 48px (app.js
    layout()), so on a phone its left edge is 50vw - 48px, and the toggle's own chrome is 62px (16 inset,
    8 + 20 icon + 6 gap, 12). Past that the words wrap to a second line; a third is clipped. */
 .sidebar-toggle-count { font-size: var(--type-meta); line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: left; text-wrap: balance; max-width: calc(50vw - 111px); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .sidebar-toggle-count:empty { display: none; }
+.sidebar-toggle-count[data-tone="attention"] { color: var(--ink); }
 .sidebar-toggle-count[data-tone="error"] { color: var(--fail-text); }
-.sidebar-toggle:hover, .sidebar-collapse:hover { background: var(--veil-hover); }
-.sidebar-toggle svg, .sidebar-collapse svg, .margin-project > svg, .project-folder svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; fill: none; }
-.sidebar-toggle:focus-visible, .sidebar-collapse:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
-.margin-projects { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: visible; padding: 0; }
-.margin-project-list { display: flex; flex-direction: column; gap: 4px; }
-.margin-project { width: 100%; border: 0; padding: 10px 12px; min-height: 48px; display: flex; align-items: center; gap: 12px; text-align: left; background: transparent; border-radius: var(--r-well); }
-.margin-project:hover { background: var(--veil-well); }
-.margin-project.is-active { background: var(--veil-hover); }
-.project-folder { flex: none; display: grid; place-items: center; color: var(--ink-3); }
-.margin-project.is-active .project-folder { color: var(--ink); }
-.margin-project-labels { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.margin-project-name { font-size: var(--type-control); font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.margin-project-summary { color: var(--margin-muted); font-size: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.margin-new { min-height: var(--touch); background: var(--wash-rest); gap: 10px; }
-.margin-new > svg { flex: none; width: 18px; height: 18px; }
-.margin-empty { margin: 12px; color: var(--ink-3); }
-.margin-settings { flex: none; padding: 12px; border-top: 1px solid var(--veil-hover); }
-.margin-glyph { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--touch); padding: 8px 12px; background: none; border: 0; border-radius: var(--r-well); text-align: left; }
-.margin-glyph:hover, .margin-glyph[aria-expanded="true"] { background: var(--veil-hover); }
-.margin-glyph-core { display: grid; place-items: center; }
-.margin-glyph-core svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.margin-glyph-label { font-size: var(--type-control); font-weight: 500; }
-.margin-card-left, .margin-card-right { left: calc(var(--sidebar-width) + 12px); right: auto; }
-.margin-card-right { top: auto; bottom: 16px; }
-.margin-metadata { margin: 16px 0 0; padding: 12px 0 0; border-bottom: 0; border-top: 1px solid var(--margin-line); }
-.sidebar-backdrop { position: fixed; inset: 0; z-index: var(--z-sheet-backdrop); border: 0; background: var(--veil-edge); }
+@media (hover: hover) { .sidebar-toggle:hover:not(:active) { background: var(--paper-raised); color: var(--ink); } }
+.sidebar-toggle:active { background: var(--bed-press); }
+@media (max-width: 899px), (pointer: coarse) { .sidebar-toggle { width: var(--touch); height: var(--touch); } }
+
+/* ---------------------------------------------------------------- the head: nibbi ……… [⚙] [⊟] */
+/* Not a card: the bar's own name. The logo stands on the icon column's edge (24); collapse on the trailing column. */
+.sidebar-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); height: var(--cp-key); padding: 0 var(--cp-inset) 0 calc(var(--cp-inset) + var(--cp-rowpad)); }
+.sidebar-brand { font-size: var(--type-title); font-weight: 600; letter-spacing: var(--track-title); line-height: 1; margin-left: -1px; }   /* -1: the n's own side bearing, so its stem stands on 24 */
+.cp-head-keys, .margin-settings { display: flex; align-items: center; gap: 0; }
+
+/* ================================================================ THE CARD — one, three times */
+.cp-card { flex: none; position: relative; display: flex; flex-direction: column; gap: var(--cp-gap); min-width: 0; padding: var(--cp-inset); border-radius: var(--r-card); background: var(--paper); box-shadow: var(--cp-edge-in); }
+/* a group card's header draws the card's own top (below), so the card starts at its header */
+.cp-group { padding-top: 0; }
+
+/* ---------------------------------------------------------------- THE HEADER — the project's row and both groups' */
+.cp-card-head { display: flex; align-items: center; gap: 0; width: 100%; min-width: 0; min-height: var(--cp-row2); padding: 0 0 0 var(--cp-rowpad); border: 0; border-radius: var(--r-well); background: var(--paper); color: var(--ink); text-align: left; }
+.cp-card-head > .cp-lead { margin-right: var(--space-3); }
+.cp-card-head > .cp-trail { margin-left: auto; }   /* with no badge beside it, the key still stands on the trailing column */
+/* the name keeps its words first; the badge takes what is left and ends on the right-hand edge */
+.cp-label, .cp-title { flex: 0 0 auto; max-width: 70%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-label { font-size: var(--type-fine); font-weight: 600; line-height: 16px; color: var(--ink-2); }   /* role: group label */
+.cp-title { font-size: var(--type-body); font-weight: 600; line-height: 20px; color: var(--ink); }   /* role: title */
+/* the badge: a word on the right-hand edge, like every word in the rows under it */
+.cp-badge { flex: 1 1 auto; min-width: 0; padding-left: var(--space-3); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-meta); font-weight: 400; line-height: 16px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.cp-badge:empty { padding-left: 0; }
+/* a header with nothing on its trailing column still stops its badge at the right-hand edge */
+.cp-group-head > .cp-badge:last-child { margin-right: var(--cp-key); }
+/* The groups' headers stay in view while their rows scroll under them. A group's header IS its card's top: it
+   spans the card's width and draws the card's top edge and corners itself (::before), on the bar's own ground
+   outside the curve, so a stuck header is still the top of a card. A hairline under it only while it holds its place. */
+.cp-group-head {
+  position: sticky; top: 0; z-index: 2; isolation: isolate; width: auto;
+  min-height: calc(var(--cp-row2) + var(--cp-inset));
+  margin: 0 calc(-1 * var(--cp-inset)); padding: var(--cp-inset) var(--cp-inset) 0 calc(var(--cp-inset) + var(--cp-rowpad));
+  background: var(--paper-bar); border-radius: 0;
+}
+.cp-group-head::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  border: 1px solid var(--veil-hairline); border-bottom-width: 0; border-radius: var(--r-card) var(--r-card) 0 0;
+  background: var(--paper);
+}
+.cp-group-head.is-stuck::before { border-bottom-width: 1px; }
+
+/* ================================================================ THE ROW — one, for every row kind */
+.cp-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-width: 0; min-height: var(--cp-row1); padding: var(--space-1) var(--cp-rowpad); border: 0; border-radius: var(--r-well); background: none; color: var(--ink); font-size: var(--type-control); font-weight: 400; line-height: 18px; text-align: left; }
+.cp-row.cp-two { align-items: flex-start; min-height: var(--cp-row2); }
+/* the icon column */
+.cp-glyph { flex: none; display: grid; place-items: center; width: var(--cp-glyph); height: var(--cp-glyph); color: var(--ink-3); }
+/* two lines: the glyph stands by the pair — (18 + 2 + 16 − 16) / 2 = 10 — and stays by them when line one wraps */
+.cp-row.cp-two > .cp-glyph { margin-top: var(--space-4); }
+.cp-lines { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--cp-gap); }
+.cp-line-1, .cp-line-2 { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.cp-line-1, .cp-primary { font-size: var(--type-control); font-weight: 400; line-height: 18px; color: var(--ink); }   /* role: row primary */
+.cp-primary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-line-2, .cp-word, .cp-why { font-size: var(--type-meta); font-weight: 400; line-height: 16px; color: var(--ink-3); font-variant-numeric: tabular-nums; }   /* role: row secondary */
+.cp-note { flex: 1 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-word { flex: none; white-space: nowrap; }
+/* the right-hand edge: a row with nothing on the trailing column still stops its words at 207. Its first line
+   (the owner's words) may run on into the column; its words never do. A row beside a key stops at the key. */
+.cp-row > .cp-lines > .cp-line-2, .cp-row > .cp-word { margin-right: calc(var(--cp-key) - var(--cp-rowpad)); }
+.cp-rowwrap > .cp-row { flex: 1 1 auto; padding-right: 0; }
+.cp-rowwrap > .cp-row > .cp-lines > .cp-line-2 { margin-right: 0; }
+/* tones: words carry state; colour only on the verdicts */
+.cp-word[data-tone="attention"], .cp-badge[data-tone="attention"] { color: var(--ink); }
+.cp-word[data-tone="active"], .cp-badge[data-tone="active"] { color: var(--ink-2); }
+.cp-word[data-tone="error"], .cp-badge[data-tone="error"], .cp-primary[data-tone="error"] { color: var(--fail-text); }
+.cp-word[data-tone="pass"] { color: var(--pass-text); }
+
+/* ---------------------------------------------------------------- the marks, every row kind alike */
+@media (hover: hover) {
+  .cp-row:not(.cp-rowwrap > .cp-row):hover:not(:disabled):not(:active):not([aria-current="true"]):not([aria-current="page"]), .margin-switch-trigger:hover:not(:active):not([aria-expanded="true"]) { background: var(--veil-hover); }
+  /* a line that is two keys (a row and its gear or ▶): the row's hover covers the whole line, as its mark does */
+  .cp-rowwrap:not(.is-current):has(> .cp-row:hover:not(:active)) { background: var(--veil-hover); }
+}
+.cp-row:active:not(:disabled), .margin-switch-trigger:active { background: var(--veil-press); }
+.margin-switch-trigger[aria-expanded="true"] { background: var(--veil-hover); }
+/* current: the row lifts out of its card — seated paper, one edge. A hover is ink over the card; this is paper on it */
+.cp-row:is([aria-current="true"], [aria-current="page"]), .cp-rowwrap.is-current { background: var(--paper-raised); box-shadow: var(--cp-edge), var(--e-seated), var(--e-highlight); }
+.cp-rowwrap.is-current > .cp-row { background: none; box-shadow: none; }
+.cp-row:is([aria-current="true"], [aria-current="page"]):active:not(:disabled) { background: var(--bed-press); box-shadow: var(--cp-edge); }
+/* the glyph says open and current in ink; at rest --ink-3 */
+.cp-row:is([aria-current="true"], [aria-current="page"]) > .cp-glyph, .cp-main > .cp-glyph { color: var(--ink); }
+.cp-rowwrap { display: flex; align-items: center; gap: 0; min-width: 0; border-radius: var(--r-well); }
+
+/* ================================================================ THE KEYS */
+/* the well: ▶ and up next. No ring, no shadow, a row's weight */
+.cp-key { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-3); min-width: var(--cp-key); height: var(--cp-key); padding: 0 var(--space-5); border: 0; border-radius: var(--r-well); background: var(--veil-well); color: var(--ink-2); font-size: var(--type-control); font-weight: 400; line-height: 18px; white-space: nowrap; }
+/* held (playing): the word says it and the key goes to ink — no heavier fill, so a playing main is never a chip */
+.cp-key[aria-pressed="true"] { background: var(--veil-hover); color: var(--ink); }
+.cp-key:active:not(:disabled) { background: var(--veil-press); color: var(--ink); }
+.cp-play { width: var(--cp-key); padding: 0; }
+.cp-play svg { fill: currentColor; stroke-width: 1.2; }
+/* the quiet keys: +, the carets, Settings, collapse, a gear. Nothing at rest; held while what they opened is open */
+.cp-icon-key { display: grid; place-items: center; flex: none; width: var(--cp-key); height: var(--cp-key); padding: 0; border: 0; border-radius: var(--r-well); background: none; color: var(--ink-2); }
+.cp-icon-key:active:not(:disabled), .cp-icon-key[aria-expanded="true"] { background: var(--veil-press); color: var(--ink); }
+.cp-trail { flex: none; }
+.project-caret { display: grid; place-items: center; width: var(--cp-key); height: var(--cp-key); color: var(--ink-2); }
+.margin-switch-trigger[aria-expanded="true"] .project-caret svg { rotate: 180deg; }   /* it turns without a motion (LANGUAGE §7.2) */
+@media (hover: hover) {
+  .cp-key:hover:not(:disabled):not(:active):not([aria-pressed="true"]), .cp-icon-key:hover:not(:disabled):not(:active):not([aria-expanded="true"]) { background: var(--veil-hover); color: var(--ink); }
+  .margin-switch-trigger:hover .project-caret { color: var(--ink); }
+}
+
+/* ================================================================ card 1: the project, and its list */
+.margin-projects { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--cp-pad); }
+.margin-switcher { position: relative; z-index: 4; }
+.margin-switch-trigger { cursor: pointer; }
+/* the roll — other projects that want you — a quiet line inside the project card, on the words' edge */
+.margin-rollup { display: block; width: 100%; margin: calc(-1 * var(--space-3)) 0 0; padding: 0 var(--cp-key) var(--space-2) var(--cp-text); border: 0; border-radius: var(--r-well); background: none; text-align: left; font-size: var(--type-meta); line-height: 16px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.margin-rollup:active { background: var(--veil-press); }
+@media (hover: hover) { .margin-rollup:hover:not(:active) { background: var(--veil-hover); } }
+.margin-switch-menu { position: absolute; left: 0; right: 0; top: calc(100% + var(--space-1)); z-index: 10; display: flex; flex-direction: column; max-height: min(420px, 60dvh); overflow: hidden; background: var(--paper-raised); border-radius: var(--r-card); box-shadow: var(--cp-edge), var(--e-lifted), var(--e-highlight); }
+.margin-switch-search { flex: none; display: flex; align-items: center; gap: var(--space-3); min-height: var(--cp-row1); padding: 0 var(--space-5); border-bottom: 1px solid var(--veil-hairline); color: var(--ink-3); }
+.margin-switch-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font-size: var(--type-control); line-height: 18px; border-radius: var(--r-inline); }
+.margin-switch-search input::placeholder { color: var(--ink-3); }
+.margin-project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--cp-gap); padding: var(--cp-inset); scrollbar-width: thin; scrollbar-color: var(--ink-scroll) transparent; }
+.project-heading-row { display: flex; align-items: center; gap: 0; min-width: 0; border-radius: var(--r-well); }
+.project-heading-row > .margin-project { flex: 1 1 auto; padding-right: 0; }
+.margin-project-list .margin-project-name { flex: 0 0 auto; max-width: 60%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.margin-project-list .margin-project-summary { flex: 1 1 auto; min-width: 0; margin-right: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+.margin-project-list .margin-project[aria-current="true"] { background: none; box-shadow: none; }   /* on a lifted list the check says it */
+.margin-project.is-active > .cp-glyph { color: var(--ink); }
+.margin-new { flex: none; margin: 0 var(--cp-inset) var(--cp-inset); width: auto; }
+.margin-new .cp-primary, .margin-new > .cp-glyph { color: var(--ink-2); }
+.margin-switch-menu .margin-empty { margin: 12px 16px; }
+.margin-empty { margin: 0; color: var(--ink-3); font-size: var(--type-control); line-height: 18px; }
+.cp-none { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding: var(--space-6) var(--cp-inset) 0 calc(var(--cp-inset) + var(--cp-text)); }
+.margin-empty-new, .margin-empty-retry { align-self: flex-start; }
+
+/* ================================================================ the body: the two group cards and the foot, one scroll */
+.margin-body {
+  position: relative; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: var(--cp-pad);
+  margin: 0 calc(-1 * var(--cp-inset)); padding: 0 var(--cp-inset);   /* room for the lifted row's edge, drawn outside it */
+  scrollbar-width: thin; scrollbar-color: var(--ink-scroll) transparent;
+}
+.cp-rows, .cp-builds { display: flex; flex-direction: column; gap: var(--cp-gap); min-width: 0; }
+.cp-why { margin: 0; padding: 0 var(--cp-key) var(--space-1) var(--cp-text); overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- card 2: conversations */
+/* A thread's gear sits beside its row on the trailing column and shows when the row is in hand: hovered,
+   focused, open, or the one you are in. With no hover to reveal it, it is always there. */
+.project-thread-row .project-options { opacity: 0; transition: opacity var(--t1) var(--ease), background-color var(--t1) var(--ease), color var(--t1) var(--ease); }
+.project-thread-row:hover .project-options, .project-thread-row:focus-within .project-options, .project-thread-row.is-current .project-options, .project-thread-row .project-options[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .project-thread-row .project-options { opacity: 1; } }
+
+/* ---------------------------------------------------------------- card 3: builds — main and its trunk */
+.cp-build { position: relative; display: flex; flex-direction: column; gap: var(--cp-gap); min-width: 0; }
+/* the trunk: main's lower stem carried on down past what is inside it. x: the trunk glyph's stem is its centre,
+   8 into the 16 column (24 + 8 = 32), drawn from 31.5. top: the stem leaves the node 24 into main's 44 row.
+   It ends 12 above the build's foot, beside + improvement. */
+.cp-build::before { content: ''; position: absolute; left: calc(var(--cp-rowpad) + var(--cp-glyph) / 2 - .5px); top: var(--space-8); bottom: var(--space-5); width: 1px; background: var(--veil-edge); pointer-events: none; }   /* line 2 of 2: structure */
+.cp-main .cp-glyph path:last-child { fill: currentColor; }   /* main's node is filled: the live one */
+.cp-main-why { padding-left: var(--cp-text); }
+.cp-build-body { position: relative; display: flex; flex-direction: column; gap: var(--cp-gap); min-width: 0; padding: 0 0 var(--space-1) var(--cp-step); }
+/* an improvement: a node in the inside icon column. Presence, never state (the words say that). A bullet, it
+   stands by the title's first line: (18 − 16) / 2 = 1, optical */
+.cp-row.cp-two.cp-improvement > .cp-node { margin-top: 1px; }
+.cp-improvement[aria-current="page"] > .cp-node path { fill: currentColor; }
+.cp-improvement[data-state="in"] .cp-primary { color: var(--ink-2); }
+.cp-improvement[aria-current="page"] .cp-primary { color: var(--ink); }
+/* the owner's own words wrap to two lines before anything is cut */
+.cp-improvement .cp-line-1 .cp-primary { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+/* a failed one: its word floats on the right-hand edge and the reason wraps under it — past the word it may run
+   on like a title does — three lines at most */
+.cp-row > .cp-lines > .cp-line-2.cp-sub-why { display: block; max-height: 48px; overflow: hidden; margin-right: 0; }
+.cp-sub-why > .cp-word { float: right; margin: 0 calc(var(--cp-key) - var(--cp-rowpad)) 0 var(--space-3); }
+.cp-sub-why > .cp-reason { display: inline; white-space: normal; overflow: visible; }
+/* the action rows inside: a fold and + improvement — their glyph in the same inside column */
+.cp-add .cp-primary, .cp-fold .cp-primary:not([data-tone="error"]), .cp-add > .cp-glyph, .cp-fold > .cp-glyph { color: var(--ink-2); }
+.cp-add[aria-expanded="true"] { background: var(--veil-press); }
+.cp-fold[aria-expanded="true"] > .cp-glyph svg { rotate: 180deg; }   /* it turns without a motion */
+.cp-build-body > .cp-why { padding-left: var(--cp-text); }
+
+/* ================================================================ the form (transient; the one ink is its submit) */
+.cp-form { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) var(--space-3) var(--space-3); margin: 0 0 var(--cp-gap); border-radius: var(--r-well); background: var(--paper-raised); box-shadow: var(--cp-edge); }
+.cp-form:not([hidden]) { animation: arrive var(--t3) var(--ease); }   /* arrive: it came from the key under it */
+.cp-form-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-right: calc(-1 * var(--space-2)); }
+.cp-form-label { font-size: var(--type-fine); font-weight: 600; line-height: 16px; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-form-x { font-size: var(--type-title); line-height: 1; font-weight: 400; }
+.cp-form-field { display: block; width: 100%; min-width: 0; min-height: calc(var(--cp-key) + var(--space-6)); padding: var(--space-2) var(--space-3); border: 1px solid var(--field-edge); border-radius: var(--r-inline); background: var(--bed); color: var(--ink); font-size: var(--type-control); line-height: 18px; resize: none; transition: border-color var(--t1) var(--ease); }
+.cp-form-field::placeholder { color: var(--ink-3); }
+.workspace-sidebar .cp-form-field:focus-visible { outline-offset: -1px; }
+.cp-form-note { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--r-inline); background: var(--notice-bed); color: var(--ink-2); font-size: var(--type-meta); line-height: 16px; overflow-wrap: anywhere; }
+.cp-form-note[data-kind="error"] { color: var(--fail-text); }
+.cp-form-keys { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.cp-form-hint { margin: 0; font-size: var(--type-meta); line-height: 16px; color: var(--ink-3); }
+/* the one ink: flat, a squircle like send, and the only control that scales when held */
+.cp-primary-key { display: inline-flex; align-items: center; gap: var(--space-2); height: var(--cp-key); padding: 0 var(--space-2) 0 var(--space-4); border: 0; border-radius: var(--r-control); background: var(--ink); color: var(--ink-inverse); font-size: var(--type-control); font-weight: 400; white-space: nowrap; transition: background-color var(--t1) var(--ease), transform var(--t1) var(--ease); }
+.cp-primary-key:active:not(:disabled) { background: var(--ink-bed-press); transform: scale(.96); }
+.cp-cap { display: inline-grid; place-items: center; min-width: 12px; font: 400 var(--type-control)/1 var(--font); color: inherit; opacity: .72; }
+/* the conversational route, one quiet step away: words in ink, a row's marks */
+.cp-quiet-key { align-self: flex-start; min-height: var(--cp-key); padding: 0 var(--space-3); margin-left: calc(-1 * var(--space-3)); border: 0; border-radius: var(--r-well); background: none; color: var(--ink-2); font-size: var(--type-meta); line-height: 16px; }
+.cp-quiet-key:active:not(:disabled) { background: var(--veil-press); color: var(--ink); }
+@media (hover: hover) {
+  .cp-primary-key:hover:not(:disabled):not(:active) { background: var(--ink-bed-hover); }
+  .cp-quiet-key:hover:not(:disabled):not(:active) { background: var(--veil-hover); color: var(--ink); }
+  .cp-form-field:hover { border-color: var(--veil-outline); }
+}
+@media (max-width: 899px) { .cp-primary-key { border-radius: var(--r-panel); } }
+
+/* ================================================================ the foot: one quiet line under the last card */
+/* The scroll's last item, 12 under the last card. Once the cards run past it, it holds the bottom edge on the
+   bar's ground and the cards fade out under it (a wash of the bar's own paper, 24 tall). No top fade: a stuck
+   header is what stands at the top. */
+.margin-foot { flex: none; position: sticky; bottom: 0; z-index: 3; display: flex; flex-direction: column; gap: var(--space-1); margin: 0 calc(-1 * var(--cp-inset)); padding: 0 var(--cp-inset) 0 calc(2 * var(--cp-inset) + var(--cp-text)); background: var(--paper-bar); }
+.margin-foot::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: calc(var(--space-8) + var(--cp-pad)); pointer-events: none; background: linear-gradient(to bottom, transparent, var(--paper-bar) calc(100% - var(--cp-pad))); opacity: 0; }
+.margin-body.has-more > .margin-foot::before { opacity: 1; }
+.margin-body.has-more > .margin-foot { box-shadow: 0 calc(-1 * var(--cp-pad)) 0 var(--paper-bar); }   /* the 12 above it is ground too */
+.margin-foot > * { margin: 0; }
+/* one line: a fact that does not fit drops whole to a second line nobody sees; the title has all of it */
+.sidebar-progress { height: 16px; overflow: hidden; font-size: var(--type-meta); line-height: 16px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.cp-seg { display: inline-block; white-space: pre; }
+.cp-sep { padding: 0 1px; }
+.margin-link { font-size: var(--type-meta); line-height: 16px; }
+.margin-foot > .margin-global-error { margin-left: calc(-1 * var(--cp-text)); }
+
+/* ================================================================ narrow: the same bar as a drawer */
 body.margin-ui-active .feed, body.margin-ui-active .pill, body.margin-ui-active .chips { left: calc(50% + var(--workspace-left) / 2); width: min(720px, calc(100vw - var(--workspace-left) - 48px)); }
 body.margin-ui-active .agents, body.margin-ui-active .jump, body.margin-ui-active .toast, body.margin-ui-active .palette { left: calc(50% + var(--workspace-left) / 2); }
 body.margin-ui-active .pill { transition: box-shadow var(--t2) var(--ease), border-color var(--t2); }
 body.margin-ui-active .pill textarea::placeholder { color: var(--ink-3); }
-body.native-mac .sidebar-head { padding-top: 48px; }
+body.native-mac .workspace-sidebar { padding-top: 44px; }
 body.native-mac .sidebar-toggle { top: 48px; }
 /* Scoped away from narrow widths: specificity beat the phone block here, whatever the order. */
-@media (min-width: 900px) { body.native-mac .margin-card { top: 104px; max-height: calc(100dvh - 120px); } }
-body.native-mac .margin-card-right { top: auto; }
+@media (min-width: 900px) {
+  body.native-mac .margin-card { top: 104px; max-height: calc(100dvh - 120px); }
+  body.native-mac .margin-card-right { top: 44px; max-height: calc(100dvh - 56px); }
+}
 @media (max-width: 899px) {
   body.sidebar-open { --workspace-left: 0px; }
-  .workspace-sidebar { width: var(--sidebar-width-narrow); box-shadow: var(--e-rail); }
+  .workspace-sidebar { width: var(--sidebar-width-narrow); border-right: 0; box-shadow: var(--e-rail); }
   .margin-card-left, .margin-card-right { left: 12px; right: 12px; width: auto; }
   .margin-card { top: 76px; max-height: calc(100dvh - 92px); }
-  .margin-card-right { top: auto; }
+  /* Settings opens under the head, so the key that opened it stays in view */
+  .margin-card-right { top: calc(var(--space-5) + var(--touch) + var(--space-3)); max-height: calc(100dvh - var(--space-5) - var(--touch) - 2 * var(--space-3)); }
   .margin-card .margin-pill, .margin-card .margin-mode { min-height: 36px; }
   .margin-pref { min-height: var(--touch); }
   body.margin-ui-active .feed, body.margin-ui-active .pill, body.margin-ui-active .chips { width: calc(100vw - 24px); }
 }
-@media (max-height: 480px) {
-  .sidebar-head { padding-top: 8px; padding-bottom: 4px; }
-  .margin-card { top: 12px; max-height: calc(100dvh - 24px); }
+@media (max-width: 899px), (pointer: coarse) {
+  /* 44px to press, same place to see: the negative margins keep the × on the padding edge and the head its height */
+  .margin-close { width: var(--touch); height: var(--touch); margin: -6px -12px -6px 0; }
+  .margin-rollup { display: flex; align-items: center; min-height: var(--touch); padding-bottom: 0; }
 }
+@media (pointer: coarse) {
+  .margin-empty-retry, .margin-empty-new { min-height: var(--touch); }
+  .margin-thread-card .margin-pill, .margin-rename input { min-height: var(--touch); }   /* the card's Save, Archive, confirm and name field; the shared card rule stops at 36px */
+}
+@media (max-height: 480px) {
+  .workspace-sidebar { padding-block: var(--space-3); gap: var(--space-3); }
+  .margin-card, .margin-card-right { top: 12px; max-height: calc(100dvh - 24px); }
+}
+
+/* ================================================================ the motions: arrive and pulse, nothing else */
 /* Arrive and leave, as transitions rather than keyframes, so `hidden` stays the one thing that says
    whether a panel is open — six tools and the app's own keyboard routing select on it.
    `translate` rather than `transform`: the surfaces this shape is shared with centre themselves with
    a transform, and a keyframe on that property would throw them sideways.
-   Entrance is not the hover feedback docs/MARGIN-SURFACE-POLISH.md asked to leave alone; it is the
-   `arrive` the rest of the system already uses to say a thing is new.
    @starting-style gives the in; transition-behavior gives the box long enough to play the out.
    Where neither is supported both are instant, which is exactly where this started. */
 .margin-card, .margin-switch-menu { transition: opacity var(--t2) var(--ease), translate var(--t2) var(--ease); }
@@ -155,133 +419,13 @@ body.native-mac .margin-card-right { top: auto; }
   .margin-card[hidden], .margin-switch-menu[hidden] { opacity: 0; translate: 0 8px; pointer-events: none; transition-duration: var(--t2); }
   .sidebar-backdrop[hidden] { opacity: 0; pointer-events: none; }
 }
-
+/* pulse: only a word that is building, and nibbi answering. Opacity alone, never below .75 (it clears 4.5:1 at the trough). */
+@keyframes cp-bar-pulse { 50% { opacity: .75; } }
+.cp-live { animation: cp-bar-pulse 1.2s var(--ease) infinite; }
 @media (prefers-reduced-motion: reduce) { .workspace-sidebar, .sidebar-toggle, .sidebar-backdrop, .workspace-sidebar * { transition: none !important; animation: none !important; } }
 
-/* A project's work lives directly beneath its name. */
-.project-heading-row { display: flex; align-items: center; gap: 0; }
-.project-heading-row .margin-project { flex: 1; min-width: 0; gap: 9px; padding-inline: 10px 5px; }
-.project-heading-row .margin-project-labels { flex: 1; }
-.project-caret { display: grid; place-items: center; flex: none; color: var(--ink-3); }
-.project-caret svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.7; fill: none; transition: transform var(--t1) var(--ease); }
-.margin-project[aria-expanded="true"] .project-caret svg { transform: rotate(90deg); }
-.project-options { display: grid; place-items: center; flex: none; width: 30px; height: 40px; border: 0; border-radius: var(--r-well); color: var(--ink-3); background: none; }
-.project-options svg, .project-section svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-.project-options:hover, .project-options[aria-expanded="true"] { background: var(--veil-hover); color: var(--ink); }
-.project-section { display: flex; align-items: center; text-align: left; border: 0; border-radius: var(--r-inline); background: none; color: var(--ink-2); font-size: var(--type-fine); }
-.project-section:hover { background: var(--veil-well); }
-.project-section[aria-current="page"] { background: var(--veil-hover); color: var(--ink); font-weight: 600; }
-@media (max-width: 899px), (pointer: coarse) {
-  .project-options { width: var(--touch); height: var(--touch); }
-  /* 44px to press, same place to see: the negative margins keep the × on the padding edge and the head its height */
-  .margin-close { width: var(--touch); height: var(--touch); margin: -6px -12px -6px 0; }
-}
-/* Navigation explains the work waiting inside each project section. */
-.project-section { min-height: var(--touch); gap: 8px; padding: 7px 8px; }
-.project-section-copy { flex: 1; min-width: 0; }
-.project-section-name { flex: none; }
-.project-section-badge { color: var(--margin-muted); font-size: var(--type-micro); font-weight: 450; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.project-section-badge[data-tone="attention"] { color: var(--ink); font-weight: 600; }
-.project-section-badge[data-tone="error"] { color: var(--fail-text); }
-
-/* Glass: the sidebar and its cards become frosted paper over the translucent window. */
+/* ================================================================ glass: the bar and its cards become frosted paper */
 body.glass .workspace-sidebar { background: rgba(236, 232, 224, .70); backdrop-filter: var(--glass-heavy); }
 body.glass .margin-card { --margin-paper: rgba(250, 248, 244, .88); backdrop-filter: var(--glass-heavy); }
 body.glass .margin-global-error { background: rgba(250, 248, 244, .88); }
-body.glass .sidebar-toggle { background: rgba(245,242,236,.86); backdrop-filter: var(--glass); }
-body.glass .margin-new { background: var(--wash-faint); }
-
-/* Threads sit under a project's sections: the conversations, not another record type. */
-.project-threads { display: flex; flex-direction: column; }
-.project-thread .project-section-copy, .project-thread-new .project-section-copy { font-size: var(--type-control); }
-.project-thread-when { margin-left: auto; padding-left: 8px; color: var(--margin-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.project-thread[aria-current="true"] { background: var(--veil-hover); }
-.project-thread[aria-current="true"] .project-section-copy { font-weight: 600; }
-.project-thread-new .project-section-copy { color: var(--ink-3); }
-.project-thread-new:hover .project-section-copy { color: var(--ink-2); }
-/* A thread's gear sits beside its row and shows when the row is in hand: hovered, focused, open, or
-   the one you are in. With no hover to reveal it, it is always there. */
-.project-thread-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.project-thread-row > .project-thread { flex: 1; min-width: 0; }
-.margin-body .project-thread-row > .project-section { width: auto; }
-.project-thread-row .project-options { opacity: 0; }
-.project-thread-row:hover .project-options, .project-thread-row:focus-within .project-options, .project-thread-row:has(> [aria-current="true"]) .project-options, .project-thread-row .project-options[aria-expanded="true"] { opacity: 1; }
-@media (hover: none) { .project-thread-row .project-options { opacity: 1; } }
-@media (pointer: coarse) {
-  .project-thread-row .project-options { width: var(--touch); height: var(--touch); }
-  .margin-thread-card .margin-pill, .margin-rename input { min-height: var(--touch); }   /* the card's Save, Archive, confirm and name field; the shared card rule stops at 36px */
-}
-.margin-rename { grid-template-columns: 1fr auto; padding-top: 0; margin-top: 0; border-top: 0; }
-.margin-rename label { grid-column: 1 / -1; }
-
-/* ---------- the bar: one project at a time ----------
-   A switcher names the project you are in and opens a list of the rest. Under it a strip of four
-   glyphs, and the one you are on opens up to say its name and what is waiting. Under that, the
-   conversations — which is what the bar is for. */
-.margin-switcher { position: relative; flex: none; padding: 0 12px 10px; }
-.margin-switch-trigger { width: 100%; min-height: 52px; gap: 10px; padding: 8px 8px 8px 10px; border-radius: var(--r-control); background: var(--wash-rest); border: 1px solid var(--veil-hairline); }
-.margin-switch-trigger:hover { background: var(--wash-hover); }
-.margin-switch-trigger[aria-expanded="true"] { background: var(--paper-raised); border-color: var(--veil-strong); }
-.margin-switch-trigger .margin-project-labels { flex: 1; }
-.margin-switch-trigger .margin-project-name { font-size: var(--type-body); font-weight: 600; letter-spacing: -.01em; }
-.margin-switch-trigger .project-caret svg { transition: transform var(--t1) var(--ease); }
-.margin-switch-trigger[aria-expanded="true"] .project-caret svg { transform: rotate(180deg); }
-/* The popup answers to the bar's width, not the caret's: that is what makes it read as a dropdown. */
-.margin-switch-menu { position: absolute; left: 12px; right: 12px; top: calc(100% - 4px); z-index: 10; display: flex; flex-direction: column; max-height: min(420px, 60dvh); overflow: hidden; background: var(--paper-raised); border: 1px solid var(--veil-press); border-radius: var(--r-card); box-shadow: var(--e-lifted); }
-.margin-switch-search { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--margin-line); color: var(--margin-muted); }
-.margin-switch-search svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; flex: none; }
-.margin-switch-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--type-control); border-radius: var(--r-inline); }
-.margin-switch-search input::placeholder { color: var(--margin-muted); }
-.margin-switch-menu .margin-project-list { flex: 1; min-height: 0; overflow-y: auto; padding: 5px; gap: 0; scrollbar-width: thin; scrollbar-color: var(--ink-scroll) transparent; }
-.margin-switch-menu .project-heading-row { border-radius: var(--r-well); }
-.margin-switch-menu .project-heading-row:hover { background: var(--veil-well); }
-.margin-switch-menu .margin-project { min-height: var(--touch); padding: 7px 4px 7px 8px; gap: 9px; }
-.margin-switch-menu .margin-project.is-active { background: var(--veil-hover); }
-.margin-switch-menu .margin-project.is-active .project-folder { color: var(--ink); }
-.margin-switch-menu .margin-project.is-active .margin-project-name { font-weight: 700; }
-.margin-switch-menu .margin-project-name { font-weight: 500; }
-.margin-switch-menu .margin-project .margin-project-labels { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 10px; flex: 1; }
-.margin-switch-menu .margin-project-name { font-size: var(--type-control); flex: none; max-width: 56%; }
-.margin-switch-menu .margin-project-summary { flex: 1; text-align: right; font-size: var(--type-meta); }
-.margin-switch-menu .margin-new { margin: 0; border-top: 1px solid var(--margin-line); border-radius: 0 0 12px 12px; background: transparent; }
-.margin-switch-menu .margin-new:hover { background: var(--veil-well); }
-.margin-switch-menu .margin-empty { margin: 12px; }
-
-.margin-tabs { flex: none; display: flex; align-items: stretch; gap: 2px; padding: 0 12px 8px; min-width: 0; overflow: hidden; }
-.margin-tab { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 7px 7px; border-radius: var(--r-well); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-2); text-align: left; }
-.margin-tab svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-.margin-tab:hover { background: var(--veil-well); color: var(--ink); }
-.margin-tab.is-current { flex: 1 1 auto; min-width: 0; padding-right: 9px; background: var(--veil-hover); border-bottom-color: var(--ink); color: var(--ink); }
-.margin-tab .project-section-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
-.margin-tab .project-section-name { font-size: var(--type-fine); font-weight: 650; line-height: 1.25; white-space: nowrap; }
-.margin-tab .project-section-badge { font-size: var(--type-micro); line-height: 1.3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.margin-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 12px 12px; scrollbar-width: thin; scrollbar-color: var(--ink-scroll) transparent; }
-.margin-body .project-threads { padding: 0; }
-.margin-body .project-section { width: 100%; padding: 7px 8px; }
-.margin-body .project-section-copy { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.margin-body .project-thread-new { background: var(--wash-rest); border: 1px solid var(--veil-hairline); margin-bottom: 6px; }
-.margin-body .project-thread-new:hover:not(:disabled) { background: var(--wash-hover); }
-.margin-body .project-thread[aria-current="true"] .project-section-copy { font-weight: 600; }
-.margin-section { padding: 4px 8px 0; }
-.margin-section-headline { margin: 0 0 4px; font-size: var(--type-body); font-weight: 600; letter-spacing: -.01em; }
-.margin-section-headline[data-tone="error"] { color: var(--fail-text); }
-.margin-section-line { margin: 0 0 4px; color: var(--ink-2); font-size: var(--type-fine); }
-.margin-section > .margin-pill { margin-top: 8px; }
-/* The foot: what is true about the projects you are not looking at, held against the bottom so the
-   conversations above it can take whatever room there is. */
-.margin-foot { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 8px 12px 10px; }
-.margin-foot > * { margin: 0; }
-.margin-rollup { min-height: 32px; text-align: left; padding: 6px 0; border: 0; border-radius: var(--r-inline); background: none; font-size: var(--type-meta); }
-.margin-rollup:hover { color: var(--ink-2); }
-.margin-link { font-size: var(--type-meta); }
-.margin-empty-new { align-self: flex-start; margin-top: 4px; }
-.margin-empty-retry { align-self: flex-start; margin: 0 12px; }
-@media (pointer: coarse) { .margin-empty-retry { min-height: var(--touch); } }
-@media (max-width: 899px) { .margin-rollup { min-height: var(--touch); } }
-.margin-foot > .sidebar-progress { font-size: var(--type-meta); }
-@media (max-width: 899px) {
-  .margin-tab { min-height: var(--touch); }
-  .margin-switch-menu .margin-project { min-height: var(--touch); }
-  .margin-switch-menu { max-height: min(60dvh, 420px); }
-}
+body.glass .sidebar-toggle { background: rgba(245, 242, 236, .86); backdrop-filter: var(--glass); }
