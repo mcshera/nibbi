@@ -10,7 +10,7 @@ export const threadClause = (alias: string, param: string): string =>
 export function logChat(entry: ChatEntry): number {
   const thread = entry.threadId && entry.threadId !== HOME ? entry.threadId : null;
   const id = Number(runtime().db.prepare('INSERT INTO messages(at,project_id,role,channel,text,metadata,thread_id) VALUES(?,?,?,?,?,?,?)').run(entry.ts, entry.project ?? null, entry.role, entry.channel, entry.text, JSON.stringify({ costUsd: entry.costUsd, runId: entry.runId, source: entry.source, local: entry.local, localModel: entry.localModel, fallback: entry.fallback, isError: entry.isError }), thread).lastInsertRowid);
-  if (thread) touchThread(thread, entry.ts, entry.role === 'user' ? entry.text : undefined);
+  if (thread) touchThread(thread, entry.ts, entry.role === 'user' ? entry.text : undefined, runtime(), entry.text);
   return id;
 }
 export function readChat(n = 80, before?: string, project?: string, threadId?: string): ChatEntry[] {
