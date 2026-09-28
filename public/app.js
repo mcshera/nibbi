@@ -1915,19 +1915,6 @@ function guideForm(a, f) {
 document.addEventListener('click', (e) => { if (!e.target.closest('.agent')) for (const a of agentEls.values()) a.el.classList.remove('pinned'); });
 
 /* ------------------------------------------------------------------ live margin model: the view never owns app or backend state */
-const msCache = new Map(), msPending = new Map();
-async function milestonesFor(name) {
-  const cached = msCache.get(name);
-  if (cached && Date.now() - cached.at < 60000) return cached.ms;
-  if (msPending.has(name)) return msPending.get(name);
-  const pending = (async () => {
-    let ms = null;
-    try { const result = await api.get('/api/milestones?project=' + encodeURIComponent(name)); if (Array.isArray(result)) ms = result; } catch { /* unavailable is not zero progress */ }
-    msCache.set(name, { at: Date.now(), ms }); return ms;
-  })();
-  msPending.set(name, pending);
-  try { return await pending; } finally { msPending.delete(name); }
-}
 const MODES = ['off', 'suggest', 'stage', 'ship'];
 function autoOf(name) { const a = (S.auto || {})[name]; if (!a) return { on: false, mode: 'off', inflight: 0, pending: 0, staged: 0, spend: 0 }; return { ...a, mode: a.on ? (a.mode || 'stage') : 'off' }; }
 const liveNumber = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : null;
@@ -2045,13 +2032,6 @@ function renderProject() {
   if (S.projectView && Array.isArray(S.projects) && !S.projects.some(p => p.name === S.projectView.project)) closeProjectView(false);
   syncMargins();
   watchProjectSummaries();
-  for (const p of (S.projects || []).filter(p => p.kind !== 'brain')) {
-    const cached = msCache.get(p.name);
-    if ((!cached || Date.now() - cached.at >= 60000) && !msPending.has(p.name)) {
-      // Resolve against current state, never against the project selected when a read began.
-      void milestonesFor(p.name).then(syncMargins);
-    }
-  }
 }
 function selectMarginProject(id) {
   const p = (S.projects || []).find(p => p.name === id && p.kind !== 'brain');
@@ -2314,8 +2294,8 @@ async function handleProjectAction(action, project, value) {
   // running is worth reaching while Nibbi is mid-turn, and neither call changes anything.
   if (action === 'previewStatus') return api.get('/api/preview?id=' + encodeURIComponent(value.id));
   if (action === 'openUrl') { openUrl(value.url); return true; }
-  // Only what writes into the composer waits for the lead turn; a daemon command never contends with it.
-  if (S.busy && ['buildChanges','buildLog','newBuild','newIssue','newPlan','editPlan'].includes(action)) throw new Error('Nibbi is still working. You can keep browsing while it finishes.');
+  // A daemon command never contends with the lead turn; what waits for the reply is decided by the
+  // control panel (WAITS_FOR_REPLY), before it gets here.
   if (S.demo && ['projectCommand','buildCommand','githubCommand'].includes(action)) throw new Error('Leave demo mode before changing project work.');
   selectMarginProject(project);
   if (action === 'githubCommand') {
@@ -2336,16 +2316,7 @@ async function handleProjectAction(action, project, value) {
     const result = await api.command(value.command, {...(value.id ? {id:value.id} : {}), ...(value.args || {})}, project);
     void refreshControlPanel(project); void refreshStatus(); return result;
   }
-  if (action === 'buildChanges' || action === 'buildLog') {
-    closeProjectView(false);
-    await runLocalCommand(action === 'buildChanges' ? 'diff' : 'log', value, { keepInput: true });
-    focusComposer(); return;
-  }
-  const prompts = { newBuild: '/fix ', newIssue: '/issue ', newPlan: 'Write a plan with milestones and checkbox tasks for ' + project + ' in plans/' + project + '.md: ', editPlan: '/plan edit ' };
-  if (!(action in prompts)) throw new Error('This project action is unavailable.');
-  closeProjectView(false);
-  if (ask.value.trim() || pendingImages.length) { focusComposer(); toast('Your draft is still here. Send or clear it before starting something new.'); return; }
-  ask.value = prompts[action]; focusComposer(); autosize();
+  throw new Error('This project action is unavailable.');
 }
 
 let projectRefreshTimer = 0, allProjectRefresh = false;
