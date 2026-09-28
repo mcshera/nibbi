@@ -451,7 +451,8 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
       }
       return top;
     });
-    const why = [...new Set(shown.map(s => s.blocked).filter(Boolean))];
+    // said once: when the status line already is the reason (no check set), the note under the keys would repeat it
+    const why = [...new Set(shown.map(s => s.blocked).filter(Boolean))].filter(w => w !== t.statusLine);
     const blocked = keep('status-why', JSON.stringify(why), () => {
       const box = node('div', 'cp-blocked'); box.hidden = !why.length;
       for (const w of why) box.append(node('p', '', w));

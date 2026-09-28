@@ -51,7 +51,12 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
   const body = node('div', 'project-workspace-body'); body.tabIndex = 0;
   body.setAttribute('role', 'region'); body.setAttribute('aria-label', 'Project content');
   const notice = node('div', 'project-notice'); notice.setAttribute('role', 'status'); notice.hidden = true;
-  const content = node('div', 'project-content'); body.append(notice, content); el.append(head, body); document.body.append(el);
+  const content = node('div', 'project-content'); body.append(notice, content);
+  // The control panel's pages (project-pages.js) draw into their own host inside this frame; the head
+  // and body after it belong to Repository & GitHub. One or the other shows, never both, and the host
+  // comes first, so the frame's first .project-close is always the one on screen.
+  const pageHost = node('div', 'cp-page-host'); pageHost.hidden = true;
+  el.append(pageHost, head, body); document.body.append(el);
   const views = new Map(), actions = new Set();
   let current = null, generation = 0, controller = null, busy = false, pointerActive = false, pointerRelease = null;
   content.addEventListener('pointerdown', () => { clearTimeout(pointerRelease); pointerActive = true; }, true);
@@ -740,16 +745,27 @@ export function installProjectWorkspace({ renderMarkdown, renderDiff, onNavigate
       if (!view.data) render();
     } finally { if (request === generation) el.setAttribute('aria-busy', 'false'); }
   }
+  function showPage(on) {
+    head.hidden = !!on; body.hidden = !!on; pageHost.hidden = !on;
+    if (on) {
+      if (current) getView().scroll = body.scrollTop;
+      generation++; controller?.abort(); current = null;
+      el.dataset.section = 'page'; el.removeAttribute('aria-labelledby'); el.setAttribute('aria-busy', 'false'); el.hidden = false;
+    } else el.setAttribute('aria-labelledby', 'project-workspace-title');
+  }
   return {
     element: el,
+    pageHost,
+    showPage,
     open(selection) {
+      showPage(false);
       if (!viewLabels[selection.section]) throw new Error('Unknown project section.');
       pointerActive = false; clearTimeout(pointerRelease);
       if (current) getView().scroll = body.scrollTop;
       el.dataset.section = selection.section; current = { ...selection }; const view = getView(); if(selection.section==='builds'&&selection.buildId){view.filter='all';view.selectedBuild=selection.buildId;view.open.add(`build-${selection.buildId}`);view.evidence.set(selection.buildId,{kind:selection.evidence||'summary'});} title.textContent = viewLabels[selection.section]; body.setAttribute('aria-label', `${selection.project} ${viewLabels[selection.section]}`);
       el.hidden = false; render(true); body.scrollTop = view.scroll; title.focus({ preventScroll: true }); void refresh();
     },
-    close() { if (current) getView().scroll = body.scrollTop; pointerActive = false; clearTimeout(pointerRelease); generation++; controller?.abort(); current = null; el.hidden = true; },
+    close() { if (current) getView().scroll = body.scrollTop; pointerActive = false; clearTimeout(pointerRelease); generation++; controller?.abort(); current = null; el.hidden = true; showPage(false); },
     refresh,
     /** A run event from the app's stream. With that build's Log open, the entry joins the log as it
         happens — appended to the list already on screen, which is never rebuilt for it. */

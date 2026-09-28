@@ -2,6 +2,7 @@ import './platform.css';
 import './margins.css';
 import './voice.css';
 import './project-workspace.css';
+import './project-pages.css';
 import './project-composer.css';
 import { createWakeVoice, WAKE_GREETING } from './lib/wake-voice.js';
 import { createMicCapture } from './lib/mic-capture.js';
@@ -9,8 +10,10 @@ import { createVoicePlayer } from './lib/voice-player.js';
 import { installMarginUI } from './lib/margin-ui.js';
 import { emptyLine } from './lib/empty.js';
 import { installProjectWorkspace } from './lib/project-workspace.js';
-import { projectCommand, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
-import { createProjectSummaryStore, describeProjectSection } from './lib/project-summary.js';
+import { installProjectPages } from './lib/project-pages.js';
+import { buildMain, ticketOf, improvementIdForRun, conversationsFor, splitImprovementText } from './lib/builds-model.js';
+import { MAIN, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS } from './lib/control-panel-contract.js';
+import { projectCommand, loadProjectSection, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { marginMetadata } from './lib/margin-metadata.js';
 import { localReplyMetadata, localReplyLabel, updateLocalReply, settleLocalReply, rateLimitNotice } from './lib/local-fallback.js';
 import { installPocketInteractions } from './lib/pocket-interactions.js';
@@ -61,7 +64,8 @@ const S = {
   demo: Q.get('demo') === '1',
   busy: false,
   turns: [],
-  projectView: null,
+  projectView: null,       // null: the chat. { project, page: 'build' | 'ticket' | 'repository', id } (docs/CONTROL-PANEL.md §6)
+  cp: new Map(),           // project → { builds, issues, play, list, gen }: the reads the control panel draws from (§3.2)
   sessionCost: 0, sessionTurns: 0,
   status: null,            // last /api/status
   fixers: [],              // last /api/fixers
@@ -81,10 +85,14 @@ const S = {
 };
 if (S.voiceOn) body.classList.add('voice-on');
 let visibleProjectIds = [];
-const projectSummaries = createProjectSummaryStore({ onChange: () => syncMargins() });
+const mainMemo = new Map();   // project → main's BuildVM and what it was made from (mainFor)
+let pagesBusy = null;          // what project-pages.js was last told about busy
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
-const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onNavigate: openProjectSection, onAction: handleProjectAction, onClose: () => closeProjectView(), onData: (selection, data) => projectSummaries.accept(selection.project, selection.section, data) });
-// A section's way back to the conversation is its own header ×, which never scrolls away and exists at every width.
+// The frame in the main area: Repository & GitHub draws into its own head and body, the control panel's
+// build and ticket pages into its page host. Both keep the composer, the character and the fixers as they were.
+const projectWorkspace = installProjectWorkspace({ renderMarkdown: renderMd, renderDiff, onAction: handleProjectAction, onClose: () => closeProjectView() });
+const projectPages = installProjectPages({ host: projectWorkspace.pageHost, onAction: handleControlPanelAction, renderMarkdown: renderMd, renderDiff });
+// A page's way back to the conversation is its own header ×, which never scrolls away and exists at every width.
 function focusComposer() { closeProjectView(false); ask.focus(); }
 /* "Plan first": the next message becomes a reviewable plan (numbered steps → approve → builds) instead of a chat turn */
 const planBtn = document.createElement('button'); planBtn.type = 'button'; planBtn.id = 'plan-first'; planBtn.className = 'ico plan'; planBtn.setAttribute('aria-pressed', 'false'); planBtn.setAttribute('aria-label', 'Plan first');
@@ -157,7 +165,6 @@ attachFile.addEventListener('change', () => { for (const f of attachFile.files |
 setPlanFirst(false);
 function watchProjectSummaries() {
   const wanted = [...new Set([...visibleProjectIds, ...(S.projectView ? [S.projectView.project] : [])])];
-  projectSummaries.watch(wanted);
   // A project only lists its threads once it is expanded, so the read follows visibility.
   for (const project of wanted) if (project && !threadsRead.has(project)) { threadsRead.add(project); void loadThreads(project); }
 }
@@ -605,7 +612,8 @@ function mergeThread(thread) {
   const project = thread.project || 'vault', list = S.threadsByProject.get(project);
   if (!list) return;   // never read, so nothing on screen to correct; the first read will be current
   const known = list.find((t) => t.id === thread.id);
-  const next = { ...(known || { count: 0 }), id: thread.id, project: thread.project ?? null, title: String(thread.title || 'Thread'), lastAt: thread.lastAt || known?.lastAt || null, archived: thread.archived === true };
+  const next = { ...(known || { count: 0 }), id: thread.id, project: thread.project ?? null, title: String(thread.title || 'Thread'), lastAt: thread.lastAt || known?.lastAt || null, archived: thread.archived === true,
+    lastText: thread.lastText !== undefined ? thread.lastText : known?.lastText ?? null };   // the conversation's second line in the bar
   const rank = (t) => Date.parse(t.lastAt || '') || 0;
   const rest = list.filter((t) => t.id !== 'home' && t.id !== thread.id).concat(next);
   S.threadsByProject.set(project, [...list.filter((t) => t.id === 'home'), ...rest.filter((t) => !t.archived).sort((a, b) => rank(b) - rank(a)), ...rest.filter((t) => t.archived).sort((a, b) => rank(b) - rank(a))]);
@@ -891,13 +899,19 @@ async function issuesFile(proj) {
 const fixerById = (id) => (S.fixers || []).find((f) => f.id === id);
 const fixerTitle = (f) => f.title || (f.issue || '').slice(0, 60) || f.id;
 const githubBuild = f => f?.workflowMode === 'github' || f?.github?.mode === 'github';
-const inspectGithubBuild = f => openProjectSection(f.game || f.project, 'builds', { buildId: f.id, evidence: 'github' });
+/** A run's ticket: the improvement it is a try of (its issue, or its retry chain), on the control panel's ticket page. */
+function openRunTicket(f, opts = {}) {
+  const project = f.game || f.project, e = S.cp.get(project);
+  const id = improvementIdForRun(runsOf(project), e?.issues ?? null, f.id) || 'run:' + f.id;
+  openProjectPage(project, 'ticket', id, opts);
+}
+const inspectGithubBuild = f => openRunTicket(f, { evidence: 'github' });
 function fixerActs(f, opts) {
   const a = []; const st = f.status;
   if (st === 'staged' && githubBuild(f)) a.push({ label: 'Review GitHub delivery', run: () => inspectGithubBuild(f) }, { label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) });
   if (st === 'staged' && !githubBuild(f)) a.push({ label: 'diff', run: () => send('/diff ' + f.id) }, { label: 'preview', run: () => send('/preview ' + f.id) }, { label: 'approve & merge', confirm: 'merge into ' + (opts && opts.target || 'the branch') + ' — sure?', warn: true, run: () => send('/approve ' + f.id) });
   if (st === 'running' || st === 'installing' || st === 'awaiting_input') a.push({ label: 'steer', run: () => { ask.value = '/steer ' + f.id + ' '; focusComposer(); autosize(); } }, { label: 'stop', confirm: 'stop it — sure?', warn: true, run: () => send('/stop ' + f.id) });
-  if (st === 'awaiting_input' || st === 'cancelled' || st === 'interrupted') a.push({ label: 'open build', run: () => openProjectSection(f.game || f.project, 'builds', { buildId: f.id }) });
+  if (st === 'awaiting_input' || st === 'cancelled' || st === 'interrupted') a.push({ label: 'open it', run: () => openRunTicket(f) });
   if (st === 'queued') a.push({ label: 'unqueue', confirm: 'drop it from the queue?', run: () => api.post('/api/fix-unqueue', { id: f.id }).then(() => toast('unqueued')).catch((e) => toast(e.message)) });
   if (st === 'failed') a.push({ label: 'log', run: () => send('/log ' + f.id) }, { label: 'Start replacement build', run: () => api.post('/api/fix-requeue', { id: f.id }).then(() => toast('requeued')).catch((e) => toast(e.message)) });
   if (st === 'merged') a.push({ label: 'what changed', run: () => send('/diff ' + f.id) });
@@ -1248,7 +1262,7 @@ async function notify(title, body, f) {
     // capabilities; tauri-plugin-notification 2 exposes no click callback to the page. A shell release.
     if (n.kind === 'native') { n.api.sendNotification({ title, body }); return; }
     const note = new n.api(title, { body, tag: f ? 'build:' + f.id : undefined });
-    if (f) note.onclick = () => { window.focus(); openProjectSection(f.game || f.project, 'builds', { buildId: f.id }); note.close?.(); };
+    if (f) note.onclick = () => { window.focus(); openRunTicket(f); note.close?.(); };
   } catch { /* no notifications here */ }
 }
 async function setBadge(n) { try { const W = window.__TAURI__ && window.__TAURI__.window; if (W && W.getCurrentWindow) { const w = W.getCurrentWindow(); if (w.setBadgeCount) await w.setBadgeCount(n > 0 ? n : undefined); } } catch { /* unsupported */ } }
@@ -1282,10 +1296,10 @@ function connectEvents() {
     // streamed reply from crossing this connection twice and writing localStorage per token.
     after, exclude: ['text.delta'], onCursor: rememberCursor,
     onReady: () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; refreshStatus(); scheduleProjectRefresh(); },
-    onOffline: () => { evReady = false; setLink('offline'); projectSummaries.markStale(); },
+    onOffline: () => { evReady = false; setLink('offline'); },
     onEvent: (event) => {
       if (/^(run\.updated|vault\.updated|roadmap\.|project\.|goal\.|github\.|build\.)/.test(event.type)) scheduleProjectRefresh(event.projectId || event.payload?.run?.game || event.payload?.project);
-      if (event.runId) projectWorkspace.noteRunEvent(event);   // an open Log follows its build live
+      if (event.runId) projectPages.noteRunEvent(event);   // an open Log follows its try live, on screen or not
       if (event.type === 'run.updated') {
         const run = event.payload.run; if (!run) return; if (run.status === 'done') run.status = 'staged';
         // A record without a GitHub summary keeps the last known one, so the next summary still compares against real history.
@@ -1503,20 +1517,27 @@ ask.addEventListener('keydown', (e) => {
 
 /* ------------------------------------------------------------------ /play: launch a project's dev server through the gateway's sanctioned launcher */
 const openUrl = (u) => { if (window.__TAURI__) api.post('/api/open', { url: u }).catch(() => window.open(u, '_blank')); else window.open(u, '_blank'); };
+/** The project's own dev server, without a chat turn: start (then wait up to a minute for its URL),
+    status (the same wait, when it is starting), or stop. /play and main's ▶ both run it. */
+async function playServer(project, action) {
+  const client = createClient(() => project), read = () => client.get('/api/play?project=' + encodeURIComponent(project));
+  if (action === 'stop') { await client.post('/api/play', { project, action: 'stop' }); return { running: false }; }
+  let r = action === 'status' ? await read() : await client.post('/api/play', { project, action: 'start' });
+  if (r.error) throw new Error(r.error);
+  const t0 = performance.now();
+  while (!r.url && performance.now() - t0 < 60000) { await sleep(1200); r = await read(); if (r.error) throw new Error(r.error); if (!r.running && !r.starting) break; }
+  return r;
+}
 async function playFlow(project, action) {
   S.busy = true; body.classList.add('busy'); activity(); hideChips(); ask.value = ''; autosize(); setMode('talk'); syncMargins();
   const T = newTurn('/play ' + project + (action !== 'start' ? ' ' + action : '')); T.plain = false;
   nibbi.setMood('working'); const fr = feed.getBoundingClientRect(); nibbi.lookAt(innerWidth / 2 + 40, fr.top + 30);
-  const api = (action) => action === 'status' ? createClient(() => project).get('/api/play?project=' + encodeURIComponent(project)) : createClient(() => project).post('/api/play', { project, action });
   let ok = true, text = '', url = null;
   try {
-    if (action === 'stop') { const st = addStep(T, 'stopping the ' + project + ' server'); await api('stop'); markStep(st, 'done'); text = 'Stopped the **' + project + '** server.'; }
+    if (action === 'stop') { const st = addStep(T, 'stopping the ' + project + ' server'); await playServer(project, 'stop'); markStep(st, 'done'); text = 'Stopped the **' + project + '** server.'; }
     else {
       const st = addStep(T, (action === 'status' ? 'checking on' : 'starting') + ' the ' + project + ' dev server');
-      let r = action === 'status' ? await api('status') : await api('start');
-      if (r.error) throw new Error(r.error);
-      const t0 = performance.now();
-      while (!r.url && performance.now() - t0 < 60000) { await sleep(1200); r = await api('status'); if (r.error) throw new Error(r.error); if (!r.running && !r.starting) break; }
+      const r = await playServer(project, action === 'status' ? 'status' : 'start');
       markStep(st, r.url ? 'done' : 'fail');
       if (r.url) { url = r.url; text = '**' + project + '** is up at ' + url + ' — opening it. It runs for an hour, then I put it away.'; openUrl(url); }
       else if (action === 'status') { text = '**' + project + '** isn\'t running.' + (r.playable ? ' Want me to start it?' : ' It has no web dev server (' + (r.kind || 'terminal') + ').'); }
@@ -1532,6 +1553,7 @@ async function playFlow(project, action) {
   addActs(T, acts, { sticky: !!url });
   S.busy = false; body.classList.remove('busy'); nibbi.lookFree(); nibbi.setMood(ok ? 'happy' : 'error'); if (ok) interactions.event('success'); setTimeout(() => { if (!S.busy) nibbi.setMood('idle'); }, ok ? 1500 : 2600); syncMargins();
   $('#sr').textContent = (T.stepLine ? T.stepLine + '. ' : '') + stripMd(text); scheduleIdleTimers();
+  void refreshPlay(project);   // main's ▶ and its build page say what /play just did
 }
 function launchActsFor(text) {
   const names = (S.projects || []).map((p) => p.name);
@@ -1909,30 +1931,105 @@ async function milestonesFor(name) {
 const MODES = ['off', 'suggest', 'stage', 'ship'];
 function autoOf(name) { const a = (S.auto || {})[name]; if (!a) return { on: false, mode: 'off', inflight: 0, pending: 0, staged: 0, spend: 0 }; return { ...a, mode: a.on ? (a.mode || 'stage') : 'off' }; }
 const liveNumber = value => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : null;
+
+/* ------------------------------------------------------------------ the control panel's reads (docs/CONTROL-PANEL.md §3.2, §8.1) */
+function projectRow(name) { return (S.projects || []).find(p => p.name === name && p.kind !== 'brain') || null; }
+function runsOf(project) { return (S.fixers || []).filter(f => (f.game || f.project) === project); }
+function cpEntry(project) {
+  let e = S.cp.get(project);
+  if (!e) { e = { builds: null, issues: null, play: null, list: 'loading', gen: 0, running: null, again: false }; S.cp.set(project, e); }
+  return e;
+}
+const readPlay = project => api.get('/api/play?project=' + encodeURIComponent(project));
+function notePlay(project, status) {
+  cpEntry(project).play = status && typeof status === 'object' ? status : null;
+  const rest = (S.playable || []).filter(p => p.name !== project);   // the chips name what can be played
+  S.playable = status?.playable ? [...rest, { name: project, running: !!status.running, url: status.url }] : rest;
+}
+async function refreshPlay(project) { try { notePlay(project, await readPlay(project)); } catch { /* the last known stays */ } syncMargins(); }
+/** An issues section a command handed back is the list as it now is: it wins over a read still out. */
+function acceptSection(project, section) {
+  if (section?.section !== 'issues' || section.project !== project) return;
+  const e = cpEntry(project); e.issues = section; e.list = 'ready'; e.gen++; if (e.running) e.again = true;
+  syncMargins();
+}
+/** One project's builds and issues sections and its play status, read together. Coalesced: asked for
+    while a read is out, it reads once more after it. A failed read keeps the last good data, and the
+    list says 'unavailable', so up-next issues are not drawn from a list that may be stale. */
+function refreshControlPanel(project) {
+  if (!projectRow(project)) return Promise.resolve();
+  const e = cpEntry(project);
+  if (e.running) { e.again = true; return e.running; }
+  e.running = (async () => {
+    try {
+      do {
+        e.again = false; const gen = ++e.gen;
+        const [builds, issues, play] = await Promise.allSettled([loadProjectSection({ project, section: 'builds' }), loadProjectSection({ project, section: 'issues' }), readPlay(project)]);
+        if (gen !== e.gen) continue;   // a command's own section landed meanwhile; read again behind it
+        if (builds.status === 'fulfilled') e.builds = builds.value.runs;
+        if (issues.status === 'fulfilled') { e.issues = issues.value; e.list = 'ready'; } else e.list = 'unavailable';
+        if (play.status === 'fulfilled') notePlay(project, play.value);
+        syncMargins();
+      } while (e.again);
+    } finally { e.running = null; }
+  })();
+  return e.running;
+}
+/** What builds-model.js takes for one project (CpInput). */
+function cpInput(p, now = Date.now()) {
+  const e = S.cp.get(p.name);
+  return { project: p, runs: runsOf(p.name), sectionRuns: e?.builds ?? null, issues: e?.issues ?? null, list: e?.list ?? 'loading', play: e?.play ?? null,
+    maxConcurrent: S.auto?.[p.name]?.maxConcurrent ?? 2, busy: S.busy, demo: S.demo, now };
+}
+/* main is made again only when something it is made from changed (or a minute passed): syncMargins runs
+   on every busy flip, thread event and status read, for every project in the switcher (mainMemo, at the top). */
+function mainFor(p, now = Date.now()) {
+  const e = S.cp.get(p.name);
+  const key = [S.fixers, e?.builds, e?.issues, e?.list, e?.play, S.auto?.[p.name], p, S.busy, S.demo, Math.floor(now / 60000)];
+  const memo = mainMemo.get(p.name);
+  if (memo && memo.key.every((value, i) => value === key[i])) return memo.vm;
+  const vm = buildMain(cpInput(p, now)); mainMemo.set(p.name, { key, vm });
+  return vm;
+}
+/** The open conversation's second line: the last thing said in it that this window holds, before the
+    daemon's copy. Only the conversation itself counts: nibbi's news (a fixer finishing, a brief) is
+    drawn in the feed but is not in the message log, so the line would change back on the next read. */
+function liveConversationText() {
+  for (let i = S.turns.length - 1; i >= 0; i--) {
+    const T = S.turns[i]; if (typeof T.text !== 'string') continue;
+    const said = (T.done && T.acc) || T.text;
+    if (said.trim()) return said;
+  }
+  return null;
+}
+/** The page on screen as project-pages.js draws it (PagesModel), or null in the chat and on Repository & GitHub. */
+function pagesModel(mains, now = Date.now()) {
+  const v = S.projectView; if (!v || v.page === 'repository') return null;
+  const p = projectRow(v.project); if (!p) return null;
+  const build = mains?.get(p.name) || mainFor(p, now);
+  return { page: v, project: { id: p.name, name: p.name, branch: p.branch || '' }, build, ticket: v.page === 'ticket' ? ticketOf(cpInput(p, now), v.id) : null, busy: S.busy, demo: S.demo, now };
+}
+function syncPage(mains, now) { const model = pagesModel(mains, now); if (model) projectPages.update(model); }
+setInterval(() => { if (S.projectView && S.projectView.page !== 'repository') syncPage(); }, 60000);   // "4m in", "landed 2h ago"
 function syncMargins() {
-  const active = activeProject(), status = S.status;
+  const active = activeProject(), status = S.status, now = Date.now();
   const selected = (S.projects || []).find(p => p.name === active);
+  if (projectRow(active) && !S.cp.has(active)) void refreshControlPanel(active);   // the first read of the project you are in
+  const mains = new Map();
   const projects = (S.projects || []).filter(p => p.kind !== 'brain').map(p => {
-    const sectionData = projectSummaries.get(p.name);
-    const a = (S.auto || {})[p.name], ms = msCache.get(p.name)?.ms;
-    const valid = Array.isArray(ms) && ms.length > 0 && ms.every(m => liveNumber(m.done) !== null && liveNumber(m.total) !== null);
-    const canonical = sectionData?.plans?.counts;
-    const total = canonical ? liveNumber(canonical.total) : valid ? ms.reduce((n, m) => n + m.total, 0) : null;
-    const done = canonical ? liveNumber(canonical.done) : valid && total > 0 ? ms.reduce((n, m) => n + Math.min(m.done, m.total), 0) : null;
-    const goal = (S.goals || {})[p.name];
+    const a = (S.auto || {})[p.name], goal = (S.goals || {})[p.name], main = mainFor(p, now), open = S.thread.project === p.name;
+    mains.set(p.name, main);
     return { id: p.name, name: p.name, active: p.name === active, branch: p.branch || '',
       goal: [goal?.focus, goal?.text].filter(Boolean).join(' · '), mode: a ? autoOf(p.name).mode : 'unknown',
-      inFlight: liveNumber(a?.inflight), pending: liveNumber(a?.pending), staged: liveNumber(a?.staged),
       spend: liveNumber(a?.spend), spendCap: a ? (liveNumber(a.spendCap) ?? 0) : null,
-      done, total: total > 0 ? total : null, planAvailable: sectionData?.plans ? !!(canonical?.total || sectionData.plans.hasNotes) : Array.isArray(ms) ? ms.length > 0 : undefined,
-      playable: (S.playable || []).some(item => item.name === p.name),
-      threads: (S.threadsByProject.get(p.name) || []).filter(t => !t.archived)
-        .map(t => ({ ...t, active: S.thread.project === p.name && S.thread.id === t.id })),
-      sections: Object.fromEntries(['builds','issues','plans'].map(section => [section, describeProjectSection(section, sectionData?.[section])])) };
+      attention: main.attention,
+      conversations: conversationsFor(S.threadsByProject.get(p.name) || [], { activeId: open ? S.thread.id : null, liveText: open ? liveConversationText() : null, project: p.name }),
+      builds: [main] };
   });
   const metadata = marginMetadata({ status, project: selected, busy: S.busy, link: S.link, demo: S.demo, sessionCost: S.sessionCost, sessionTurns: S.sessionTurns });
   projectWorkspace.setBusy(S.busy);
-  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), projectsError: !!S.projectsError, activeProject: active, view: S.projectView, busy: S.busy, progress: S.progress, settings: {
+  if (pagesBusy !== S.busy) { pagesBusy = S.busy; projectPages.setBusy(S.busy); }
+  margins.update({ projects, projectsLoaded: Array.isArray(S.projects), projectsError: !!S.projectsError, activeProject: active, view: S.projectView, busy: S.busy, progress: S.progress, now, settings: {
     microphone: S.micEnabled, microphonePhase: S.micPhase,
     voice: S.voiceOn, sounds: LS.get('sounds', false) === true,
     notifications: LS.get('notifications', true) === true && notificationPermission === 'granted',
@@ -1942,6 +2039,7 @@ function syncMargins() {
     demo: S.demo, calm: calmMotion, systemReduced: systemReducedMotion(),
     glass: glassOn, glassAvailable,
   } });
+  syncPage(mains, now);
 }
 function renderProject() {
   if (S.projectView && Array.isArray(S.projects) && !S.projects.some(p => p.name === S.projectView.project)) closeProjectView(false);
@@ -1958,7 +2056,9 @@ function renderProject() {
 function selectMarginProject(id) {
   const p = (S.projects || []).find(p => p.name === id && p.kind !== 'brain');
   if (!p) throw new Error('This project is no longer available.');
+  const moved = S.project !== p.name;
   S.project = p.name; LS.set('project', p.name); renderProject(); activity();
+  if (moved && S.cp.has(p.name)) void refreshControlPanel(p.name);   // what you left it at may be old; a project never read is read by syncMargins
   if (S.thread.project !== p.name) {
     void loadThreads(p.name).then(() => {
       const remembered = LS.get('thread:' + p.name, 'home');
@@ -1969,19 +2069,27 @@ function selectMarginProject(id) {
   return p.name;
 }
 /* One turn runs at a time. Leaving the conversation that is answering is refused with one sentence,
-   shown by the bar where the click happened; going back to it — the Chat tab from Builds — is not. */
+   shown by the bar where the click happened; going back to it — its own row, from a page — is not. */
 const liveKey = () => S.liveThreadKey || activeThreadKey();   // a local command is busy in the open conversation
 function busyNotice() { const [project, id] = liveKey().split('\u0000'); return notice(NAME + ' is answering in “' + threadTitle(project, id) + '” — switch when it’s done'); }
 const notice = (message) => Object.assign(new Error(message), { kind: 'notice' });   // the bar shows it in ink: waiting is not a failure
+// What the bar sends that the control panel answers (BAR_ACTIONS, plus its form's "ask nibbi instead").
+const PANEL_FROM_BAR = new Set(['openBuild', 'openImprovement', 'backToChat', 'startImprovement', 'queueImprovement', 'playMain', 'askNibbi']);
 async function handleMarginAction(action, id, value) {
   activity();
-  if (['newProject', 'fix', 'plan', 'play', 'review', 'autoMode', 'spendCap'].includes(action) && S.busy) throw notice(NAME + ' is still working — one thing at a time.');
+  if (['newProject', 'autoMode', 'spendCap'].includes(action) && S.busy) throw notice(NAME + ' is still working — one thing at a time.');
+  if (PANEL_FROM_BAR.has(action)) return handleControlPanelAction(action, id, value);
   switch (action) {
-    case 'selectProject':
+    case 'selectProject': {
       if (S.busy && id !== activeProject()) throw busyNotice();
-      if (S.projectView) openProjectSection(id, S.projectView.section); else selectMarginProject(id); return;
-    case 'projectSection': openProjectSection(id, value); return;
-    case 'repository': openProjectSection(id, 'repository'); margins.close(); return;
+      const v = S.projectView, focus = !$('#workspace-sidebar')?.contains(document.activeElement);
+      // A build page follows you to the other project's main; a ticket is this project's, so the chat takes over.
+      if (v && v.project !== id && v.page === 'build') openProjectPage(id, 'build', MAIN, { focus });
+      else if (v && v.project !== id && v.page === 'repository') openProjectPage(id, 'repository');
+      else { if (v && v.project !== id) closeProjectView(false); selectMarginProject(id); }
+      return;
+    }
+    case 'repository': openProjectPage(id, 'repository'); margins.close(); return;
     case 'newProject': {
       // Two ways in, and the daemon has had both: a fresh repository, or one you already have. The field
       // used to be prefilled with "/new ", so registering an existing folder had no door at all.
@@ -1991,9 +2099,6 @@ async function handleMarginAction(action, id, value) {
       return;
     }
     case 'refreshProjects': clearTimeout(projectsRetry); projectsRetry = 0; await refreshProjects(); return;
-    case 'fix': selectMarginProject(id); margins.close(); ask.value = '/fix '; focusComposer(); autosize(); return;
-    case 'plan': case 'play': case 'review':
-      selectMarginProject(id); margins.close(); await send('/' + action + ' ' + id); return;
     case 'autoMode':
       if (!MODES.includes(value)) throw new Error('Unknown automation mode.');
       selectMarginProject(id); margins.close(); await send('/auto ' + id + ' ' + value); return;
@@ -2045,23 +2150,147 @@ async function handleMarginAction(action, id, value) {
   }
 }
 
-function openProjectSection(id, section, detail = {}) {
-  if (!['builds','issues','plans','repository'].includes(section)) return;
-  const project = (S.projects || []).find(p => p.name === id && p.kind !== 'brain');
+/* ------------------------------------------------------------------ the control panel's actions (docs/CONTROL-PANEL.md §5) */
+const DEMO_WORDS = { startImprovement: WORDS.demoStart, buildIssue: WORDS.demoStart, retryRun: WORDS.demoStart, playMain: WORDS.demoPlay, previewRun: WORDS.demoPlay };
+/** Every name the bar and the pages send. Only what starts an agent run waits for nibbi's reply; every
+    daemon write, and play, is refused in demo. Existing calls are reused: handleProjectAction's command
+    paths, /play's server core, the lobby's preview polling. */
+async function handleControlPanelAction(action, project, value) {
+  activity();
+  if (WAITS_FOR_REPLY.includes(action) && S.busy) throw notice(WORDS.busy);
+  if (S.demo && REFUSED_IN_DEMO.includes(action) && value?.action !== 'open') throw notice(DEMO_WORDS[action] || WORDS.demoChange);
+  // Opened from the docked bar, focus stays on its row (a control panel: click down the rows and read);
+  // from the drawer, a notification, a chip or a page, it moves to the page's heading.
+  const focusPage = () => !$('#workspace-sidebar')?.contains(document.activeElement);
+  switch (action) {
+    case 'openBuild': openProjectPage(project, 'build', MAIN, { focus: focusPage() }); return;
+    case 'openImprovement': openProjectPage(project, 'ticket', String(value || ''), { focus: focusPage() }); return;
+    case 'backToChat': closeProjectView(true); return;
+    case 'repository': openProjectPage(project, 'repository'); return;
+    case 'refresh': await refreshControlPanel(project); return;
+    case 'talkAbout': talkAbout(project, value?.improvementId); return;
+    case 'askNibbi': askNibbi(value?.text); return;
+    case 'buildEvidence': case 'githubRead': case 'githubCommand': case 'githubRefresh': return handleProjectAction(action, project, value);
+    case 'playMain': return playProject(project, value?.action);
+    case 'previewRun': return runPreview(project, value?.runId, value?.action);
+    case 'startImprovement': {
+      const text = String(value?.text || '').trim(), { title } = splitImprovementText(text);   // says, in words, what the daemon would refuse
+      return runCommand(project, 'run.dispatch', undefined, { issue: text, title: title.slice(0, 80) });
+    }
+    case 'queueImprovement': {
+      const { title, description } = splitImprovementText(value?.text);
+      return issueCommand(project, revision => ({ action: 'issue.create', title, description, expectedRevision: revision }), { retry: true });
+    }
+    case 'buildIssue': return issueCommand(project, revision => ({ action: 'issue.build', id: value?.issueId, expectedRevision: revision }), { retry: true });   // duplicate-safe on the daemon
+    case 'editImprovement': return issueCommand(project, revision => ({ action: 'issue.edit', id: value?.issueId, title: String(value?.title || '').trim(), description: String(value?.description ?? ''), expectedRevision: revision }), { retry: false });   // a conflict keeps the words on the page
+    case 'completeImprovement': return issueCommand(project, revision => ({ action: 'issue.complete', id: value?.issueId, expectedRevision: revision }), { retry: true });
+    case 'reopenImprovement': return issueCommand(project, revision => ({ action: 'issue.reopen', id: value?.issueId, expectedRevision: revision }), { retry: true });
+    case 'stopRun': return runCommand(project, 'run.stop', value?.runId);
+    case 'steerRun': return runCommand(project, 'run.steer', value?.runId, { text: String(value?.text || '').trim() });
+    case 'retryRun': return runCommand(project, 'run.retry', value?.runId);
+    case 'verifyRun': return runCommand(project, 'run.verify', value?.runId);
+    case 'mergeRun': { const result = await runCommand(project, 'run.merge', value?.runId); sound('land'); return result; }
+    case 'discardRun': return runCommand(project, 'run.discard', value?.runId);
+    default: throw new Error('This control is not available.');
+  }
+}
+async function runCommand(project, command, runId, args = {}) {
+  if (command !== 'run.dispatch' && !runId) throw new Error('This build is no longer available.');
+  const result = await handleProjectAction('buildCommand', project, { command, ...(runId ? { id: runId } : {}), args });
+  return result;
+}
+/** An issues.md write, against the revision the list was read at. A conflict reads the list again and,
+    where the change still means the same thing (create, build, done, reopen), tries once more. */
+async function issueCommand(project, payloadFor, { retry }) {
+  const e = cpEntry(project);
+  if (!e.issues?.revision) await refreshControlPanel(project);
+  if (!e.issues?.revision || e.list !== 'ready') throw notice(WORDS.noList);
+  for (let attempt = 0; ; attempt++) {
+    try { return await handleProjectAction('projectCommand', project, payloadFor(e.issues.revision)); }
+    catch (error) {
+      if (error?.code !== 'REVISION_CONFLICT') throw error;
+      await refreshControlPanel(project);
+      if (!retry || attempt > 0 || !e.issues?.revision) throw error;
+    }
+  }
+}
+/** "ask nibbi about it": back to the chat with the words started for you. A draft already there is the
+    owner's: it stays, and the toast says so (the rule the old composer prefills kept). */
+function talkAbout(project, improvementId) {
+  const p = projectRow(project);
+  const title = p && improvementId ? ticketOf(cpInput(p), improvementId).improvement?.title || '' : '';
+  closeProjectView(false); margins.close();
+  if (ask.value.trim() || pendingImages.length) { focusComposer(); toast('Your draft is still here. Send or clear it before starting something new.'); return; }
+  ask.value = title ? 'about “' + title + '”: ' : ''; focusComposer(); autosize();
+}
+/** The bar's form, "ask nibbi instead": the words go to the composer rather than straight to work. A
+    draft already there is refused in words, so the form keeps what was typed in it. */
+function askNibbi(text) {
+  const words = String(text || '').trim();
+  if (!words) throw notice('say what should change first');
+  if (ask.value.trim() || pendingImages.length) throw notice('there’s a draft in the message field — send or clear it, then ask again');
+  closeProjectView(false); margins.close();
+  ask.value = words; focusComposer(); autosize();
+}
+/** main's ▶ and its build page: the project's own dev server, the non-chat half of /play. */
+async function playProject(project, action) {
+  if (!projectRow(project)) throw new Error('This project is no longer available.');
+  const e = cpEntry(project);
+  if (action === 'open') {
+    if (!e.play?.url) notePlay(project, await readPlay(project));
+    if (!e.play?.url) throw notice('main isn’t playing yet — play it first');
+    openUrl(e.play.url); return;
+  }
+  if (action !== 'start' && action !== 'stop') throw new Error('This control is not available.');
+  if (action === 'start') { e.play = { ...(e.play || { playable: true }), starting: true }; syncMargins(); }
+  try {
+    const r = await playServer(project, action);
+    if (action === 'start') { if (!r.url) throw new Error(r.error || 'it didn’t come up — check the play command in settings'); openUrl(r.url); }
+  } finally { await refreshPlay(project); }
+}
+/** A staged try's own preview (the lobby's Play build, moved): start it and open it when it answers,
+    open it again, or stop it and wait until it has. */
+async function runPreview(project, runId, action) {
+  if (!runId) throw new Error('This build is no longer available.');
+  const status = () => handleProjectAction('previewStatus', project, { id: runId });
+  if (action === 'open') { const st = await status(); if (!st?.url) throw notice('it’s still starting — open it again in a moment'); openUrl(st.url); return; }
+  if (action === 'stop') {
+    await handleProjectAction('buildCommand', project, { id: runId, command: 'preview.stop' });
+    for (let i = 0; i < 20; i++) { const st = await status(); if (!st?.running) break; await sleep(250); }
+    await refreshControlPanel(project); return;
+  }
+  if (action !== 'start') throw new Error('This control is not available.');
+  await handleProjectAction('buildCommand', project, { id: runId, command: 'preview.start' });
+  let st = null;
+  for (let i = 0; i < 20; i++) { st = await status(); if (st?.url || !st?.running) break; await sleep(500); }
+  await refreshControlPanel(project);
+  if (st?.error) throw new Error(st.error);
+  if (!st?.url && !st?.running) throw new Error('the preview stopped before it was ready — check its log and try again');
+  if (!st?.url) throw notice('it’s still starting — press play it again to check on it');
+  openUrl(st.url);
+}
+
+/** Where the main area is (docs/CONTROL-PANEL.md §6): a build's page, an improvement's ticket, or
+    Repository & GitHub. The chat is S.projectView === null. */
+function openProjectPage(id, page, pageId = null, { focus = true } = {}) {
+  if (!['build', 'ticket', 'repository'].includes(page)) return;
+  const project = projectRow(id);
   if (!project) { toast('This project is no longer available.'); return; }
   selectMarginProject(id); margins.close();
-  S.projectView = { project: id, section }; body.classList.add('project-view');
+  S.projectView = { project: id, page, id: page === 'build' ? MAIN : page === 'ticket' ? String(pageId) : null }; body.classList.add('project-view');
   closeDock(false); hideChips(); paletteEl.hidden = true;
-  projectWorkspace.open({ project: id, kind: project.kind, section, ...detail });
+  if (page === 'repository') { projectPages.close(); projectWorkspace.open({ project: id, kind: project.kind, section: 'repository' }); }
+  else { projectWorkspace.showPage(true); const model = pagesModel(); if (model) projectPages.open(model, { focus }); }
   watchProjectSummaries();
   // From idle the hero snaps to the header pose, a scene change like first paint: springing, it shrank
-  // through the section's header for ~600ms while the section itself arrived in 220. From talk it is
+  // through the page's header for ~600ms while the page itself arrived in 220. From talk it is
   // already small, and the short move springs.
   syncMargins(); layout(S.mode !== 'talk');
+  void refreshControlPanel(id);   // a page's keys need allowedActions as they are now
 }
 function closeProjectView(focus = true) {
   if (!S.projectView) return;
-  S.projectView = null; projectWorkspace.close(); body.classList.remove('project-view'); watchProjectSummaries();
+  S.projectView = null; projectPages.close(); projectWorkspace.close(); body.classList.remove('project-view'); watchProjectSummaries();
   syncMargins(); layout(false); if (focus) focusComposer();
 }
 async function handleProjectAction(action, project, value) {
@@ -2073,7 +2302,7 @@ async function handleProjectAction(action, project, value) {
   }
   if (action === 'githubRefresh') {
     const result = await githubCommand(project, 'github.refresh', value || {});
-    projectSummaries.invalidate([project]); return result;
+    void refreshControlPanel(project); return result;
   }
   if (action === 'buildEvidence') {
     const id = encodeURIComponent(value.id);
@@ -2093,20 +2322,19 @@ async function handleProjectAction(action, project, value) {
     const allowed = ['build.prDraft','build.connect','project.promotionReady','project.verifyPromotion','project.issueLink','github.prepare','github.connect','build.publish','build.prCreate','build.prReady','build.prMerge','build.prAdopt','build.verifyMerged','build.cleanup','build.adoptChanges','build.update','build.checkpoint','build.updateBase','build.adoptRemote','project.syncTarget','project.preparePromotion','project.mergePromotion','project.publishBranch'];
     if (!allowed.includes(value.command)) throw new Error('This repository action is unavailable.');
     const result = await githubCommand(project, value.command, value.args || {});
-    if (value.command !== 'github.prepare') { projectSummaries.invalidate([project]); void refreshStatus(); }
+    if (value.command !== 'github.prepare') { void refreshControlPanel(project); void refreshStatus(); }
     return result;
   }
   if (action === 'projectCommand') {
     const result = await projectCommand(project, value);
-    if (result.section?.section) projectSummaries.accept(project, result.section.section, result.section);
-    if (result.plan?.section) projectSummaries.accept(project, result.plan.section, result.plan);
-    projectSummaries.invalidate([project]); void refreshStatus(); return result;
+    acceptSection(project, result.section);   // the list as the write left it, before any read comes back
+    void refreshControlPanel(project); void refreshStatus(); return result;
   }
   if (action === 'buildCommand') {
     const allowed = ['run.stop','run.retry','run.verify','run.discard','run.merge','run.steer','preview.start','preview.stop','run.dispatch'];
     if (!allowed.includes(value.command)) throw new Error('This build action is unavailable.');
-    const result = await api.command(value.command, {id:value.id, ...(value.args || {})}, project);
-    projectSummaries.invalidate([project]); void refreshStatus(); return result;
+    const result = await api.command(value.command, {...(value.id ? {id:value.id} : {}), ...(value.args || {})}, project);
+    void refreshControlPanel(project); void refreshStatus(); return result;
   }
   if (action === 'buildChanges' || action === 'buildLog') {
     closeProjectView(false);
@@ -2123,10 +2351,13 @@ async function handleProjectAction(action, project, value) {
 let projectRefreshTimer = 0, allProjectRefresh = false;
 let projectActivityTimer = 0;
 const projectRefreshIds = new Set();
+/** A live try's "what it is doing now" comes from the builds read, so an open ticket reads it again as it works. */
 function queueProjectActivity(project) {
-  if (projectActivityTimer || S.projectView?.project !== project || S.projectView?.section !== 'builds') return;
-  projectActivityTimer = setTimeout(() => { projectActivityTimer = 0; if (S.projectView?.project === project && S.projectView?.section === 'builds') void projectWorkspace.refresh(); }, 3000);
+  if (projectActivityTimer || S.projectView?.project !== project || S.projectView?.page !== 'ticket') return;
+  projectActivityTimer = setTimeout(() => { projectActivityTimer = 0; if (S.projectView?.project === project && S.projectView?.page === 'ticket') void refreshControlPanel(project); }, 3000);
 }
+/** Events about runs, issues and GitHub read the control panel again for the project you are in and the
+    one on screen. Other projects are read again when you choose them (selectMarginProject). */
 function scheduleProjectRefresh(project) {
   if (project) projectRefreshIds.add(project); else allProjectRefresh = true;
   if (projectRefreshTimer) return;
@@ -2134,8 +2365,8 @@ function scheduleProjectRefresh(project) {
     projectRefreshTimer = 0;
     const ids = allProjectRefresh ? null : [...projectRefreshIds];
     projectRefreshIds.clear(); allProjectRefresh = false;
-    projectSummaries.invalidate(ids);
-    if (S.projectView && (!ids || ids.includes(S.projectView.project))) void projectWorkspace.refresh();
+    for (const p of new Set([activeProject(), S.projectView?.project].filter(Boolean))) if (!ids || ids.includes(p)) void refreshControlPanel(p);
+    if (S.projectView?.page === 'repository' && (!ids || ids.includes(S.projectView.project))) void projectWorkspace.refresh();
   }, 400);
 }
 
@@ -2529,7 +2760,7 @@ let stateTimer = 0;
 function snapshot() {
   return { v: '0.8.0', client: window.__TAURI__ ? 'app' : 'browser', mic: { enabled: listening, phase: micStarting ? 'starting' : wakeVoice.snapshot().phase }, mode: S.mode, link: S.link, project: activeProject(), busy: S.busy, glass: glassOn, review: S.review ? { i: S.review.i, ids: S.review.ids } : null, mood: nibbi.mood(), demo: S.demo, url: location.href,
     turns: S.turns.slice(-30).map((T) => ({ at: T.at, you: T.text || null, said: (T.acc || T.said.textContent || '').slice(0, 600), steps: [...T.steps.querySelectorAll('.step')].map((s) => (s.querySelector(':scope > summary') || s).textContent.trim().slice(0, 80)), acts: [...T.body.querySelectorAll('.acts .chip')].map((c) => c.textContent), error: T.nib.classList.contains('error'), fixerId: T.fixerId || null })),
-    renderer: (() => { try { const r = nibbi.state(); return { character: r.character ?? null, backend: r.backend ?? (r.gl ? 'webgl' : 'canvas2d'), fallbackReason: r.fallbackReason ?? null, engine: r.motion ? 'pocket' : 'legacy', dpr: r.dpr ?? devicePixelRatio }; } catch { return null; } })(), chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectWorkspace.snapshot(), composerCollapsed: !!S.projectView, toast: $('#toast').hidden ? null : $('#toast').textContent };
+    renderer: (() => { try { const r = nibbi.state(); return { character: r.character ?? null, backend: r.backend ?? (r.gl ? 'webgl' : 'canvas2d'), fallbackReason: r.fallbackReason ?? null, engine: r.motion ? 'pocket' : 'legacy', dpr: r.dpr ?? devicePixelRatio }; } catch { return null; } })(), chips: [...chipsEl.querySelectorAll('.chip')].map((c) => c.textContent), agents: [...agentEls.values()].map((a) => (a.fixer.title || a.fixer.id) + ' · ' + a.fixer.status), input: ask.value.slice(0, 200), attachmentCount: pendingImages.length, projectView: projectPages.snapshot() ?? projectWorkspace.snapshot(), composerCollapsed: !!S.projectView, toast: $('#toast').hidden ? null : $('#toast').textContent };
 }
 /* a persisted step: ≤ 1 KB without its diff, diff ≤ 2 KB */
 function stepRow(s) {
