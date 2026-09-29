@@ -384,7 +384,8 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     // what a page holds open goes when its key does (the state moved on under it)
     if (P.confirm && !findAction(P.confirm)?.confirm) P.confirm = null;
     if (P.steerKey && !findAction(P.steerKey)) { P.steerKey = null; }
-    if (P.editing && !(M.ticket.actions || []).some(a => a.action === 'editImprovement')) P.editing = false;
+    // the edit key goes while a try runs: a form with nothing typed closes, one with typed words stays (save waits, and says why)
+    if (P.editing && !(M.ticket.actions || []).some(a => a.action === 'editImprovement') && !editDirty()) P.editing = false;
 
     reconcile(P.head, [ticketTitle(t), closeKey()]);
     reconcile(P.body, [noticeEl(), statusPanel(t), workSection(t), askedSection(t), talkFoot(t)]);
@@ -539,12 +540,19 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     P.editForm = form;
     return form;
   }
+  function editDirty() {
+    const f = P.editForm?._fields; if (!f) return false;
+    return f.title.value.trim() !== f.from[0].trim() || f.desc.value.trim() !== f.from[1].trim();
+  }
   function syncEditForm() {
     const f = P.editForm?._fields; if (!f) return;
-    const changed = f.title.value.trim() && (f.title.value.trim() !== f.from[0].trim() || f.desc.value.trim() !== f.from[1].trim());
+    const changed = f.title.value.trim() && editDirty();
     const pending = P.pending.has('edit-save');
-    f.save.disabled = !changed && !pending;
+    const open = (M.ticket?.actions || []).some(a => a.action === 'editImprovement');
+    f.save.disabled = (!changed || !open) && !pending;
     busyKey(f.save, pending);
+    if (!open && !pending) { f.note.textContent = WORDS.editWaits; f.note.dataset.kind = 'notice'; f.waiting = true; }
+    else if (f.waiting) { f.note.textContent = ''; delete f.note.dataset.kind; f.waiting = false; }
   }
   /** The words as they are now: the edit key's payload carries the issue's own text, else the title. The
       form keeps that payload, and with it the list's revision the words were read at, so a save after

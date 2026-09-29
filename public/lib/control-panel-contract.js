@@ -170,6 +170,7 @@ export const WORDS = Object.freeze({
   unverified: 'it hasn’t passed its checks — verify it before it can merge',
   cantMerge: 'it can’t merge right now',
   gone: 'this improvement is gone',
+  editWaits: 'a try is running on it, so the words can’t change right now — what you typed stays here; save once it stops',
   emptyImprovements: 'nothing to improve yet — or ask nibbi what it would change',
   homeLine: 'the first conversation',
   answering: 'answering',

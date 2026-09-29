@@ -44,7 +44,7 @@ function attempt(runId, n, state, extra = {}) {
 const A = (action, label, key, payload, extra = {}) => ({ action, label, tone: 'seated', payload, confirm: null, blocked: '', key, opens: null, ...extra });
 const confirmStop = (n, branch = 'main') => ({ words: fill(WORDS.confirm.stop, { n, branch }), yes: WORDS.keys.stopYes, no: WORDS.keys.stopNo, armed: true });
 const confirmMerge = (title, branch = 'main') => ({ words: fill(WORDS.confirm.merge, { title, branch }), yes: WORDS.keys.mergeYes, no: WORDS.keys.cancel, armed: false });
-const confirmDiscard = title => ({ words: fill(WORDS.confirm.discard, { title }), yes: WORDS.keys.discardYes, no: WORDS.keys.keep, armed: true });
+const confirmDiscard = (title, words = WORDS.confirm.discard, n = 1) => ({ words: fill(words, { title, n }), yes: WORDS.keys.discardYes, no: WORDS.keys.keep, armed: true });
 const facts = (asked, tries, time, changes, checks) => [{ label: 'build', value: 'main', key: 'fact-build' }, { label: 'asked', value: asked }, { label: 'tries', value: tries }, { label: 'time', value: time }, { label: 'changes', value: changes }, { label: 'checks', value: checks }];
 const asked = (text, extra = {}) => ({ text, description: '', context: '', at: null, source: 'run', ...extra });
 
@@ -125,13 +125,27 @@ const TICKETS = {
   }),
   failed: () => ticket(imp('run:r-fail', 'remember the garden layout', 'failed', { when: { verb: 'failed', at: at(1 * H) }, reason: 'the layout test timed out waiting for the second row' }), {
     statusLine: 'the layout test timed out waiting for the second row — main is unchanged',
-    actions: [A('talkAbout', WORDS.keys.ask, 'ask', { improvementId: 'run:r-fail' }), A('retryRun', WORDS.keys.retry, 'retry', { runId: 'r-fail' }, { tone: 'ink' })],
+    actions: [A('talkAbout', WORDS.keys.ask, 'ask', { improvementId: 'run:r-fail' }), A('discardRun', WORDS.keys.discard, 'discard', { runId: 'r-fail' }, { confirm: confirmDiscard('remember the garden layout', WORDS.confirm.discardFailed) }), A('retryRun', WORDS.keys.retry, 'retry', { runId: 'r-fail' }, { tone: 'ink' })],
     attempts: [attempt('r-fail', 1, 'failed', { startedAt: at(85 * m), endedAt: at(61 * m), summary: 'Added a layout store and a test for it. The layout test timed out: the second row never drew.', reason: 'the layout test timed out waiting for the second row', steps: steps('done', 'done', 'failed', 'waiting'), checks: [{ name: 'npm test', ok: false, note: 'garden-layout.test.js: timed out after 30s' }] })],
     factsList: facts('2h ago', '1', '24m', '3 files · +73 −9', 'failed'),
   }),
+  'failed-issue': () => {
+    const i = imp('issue:watering', 'watering shortcuts on the keyboard', 'failed', { when: { verb: 'failed', at: at(20 * m) }, reason: 'npm test: 2 failed' });
+    return ticket(i, {
+      statusLine: 'npm test: 2 failed — main is unchanged',
+      actions: [A('talkAbout', WORDS.keys.ask, 'ask', { improvementId: 'issue:watering' }),
+        A('editImprovement', WORDS.keys.edit, 'edit', { issueId: 'watering', title: i.title, description: 'W waters the row under the cursor.', revision: 'rev-1' }, { opens: 'form' }),
+        A('completeImprovement', WORDS.keys.markDone, 'mark-done', { issueId: 'watering' }),
+        A('discardRun', WORDS.keys.discard, 'discard', { runId: 'r-water' }, { confirm: confirmDiscard(i.title, WORDS.confirm.discardTry) }),
+        A('retryRun', WORDS.keys.retry, 'retry', { runId: 'r-water' }, { tone: 'ink' })],
+      attempts: [attempt('r-water', 1, 'failed', { reason: 'npm test: 2 failed', steps: steps('done', 'done', 'failed', 'waiting'), checks: [{ name: 'npm test', ok: false, note: 'keys.test.js: 2 failed' }] })],
+      factsList: facts('from issues.md', '1', '24m', '3 files · +67 −9', 'failed'),
+      askedVM: asked(i.title, { source: 'issue', description: 'W waters the row under the cursor.' }),
+    });
+  },
   interrupted: () => ticket(imp('run:r-int', 'grow moss between the stones', 'interrupted', { when: { verb: 'stopped', at: at(5 * H) } }), {
     statusLine: 'the backend stopped mid-run — its work is kept; try again when you’re ready',
-    actions: [A('talkAbout', WORDS.keys.ask, 'ask', { improvementId: 'run:r-int' }), A('retryRun', WORDS.keys.retry, 'retry', { runId: 'r-int' }, { tone: 'ink' })],
+    actions: [A('talkAbout', WORDS.keys.ask, 'ask', { improvementId: 'run:r-int' }), A('discardRun', WORDS.keys.discard, 'discard', { runId: 'r-int' }, { confirm: confirmDiscard('grow moss between the stones', WORDS.confirm.discardFailed) }), A('retryRun', WORDS.keys.retry, 'retry', { runId: 'r-int' }, { tone: 'ink' })],
     attempts: [attempt('r-int', 1, 'interrupted', { startedAt: at(5.2 * H), endedAt: at(5 * H), reason: 'the backend restarted', steps: steps('done', 'done', 'waiting', 'waiting'), checks: [{ name: 'npm test', ok: null, note: '' }] })],
   }),
   stopped: () => ticket(imp('run:r-stop', 'let the rain fall sideways', 'stopped', { when: { verb: 'stopped', at: at(1 * d) } }), {
@@ -342,6 +356,8 @@ test('each ticket key sends its payload; asking twice sends only on yes; forms s
       ['unverified', 'verify', { name: 'verifyRun', value: { runId: 'r-unver' } }],
       ['failed', 'ask', { name: 'talkAbout', value: { improvementId: 'run:r-fail' } }],
       ['failed', 'retry', { name: 'retryRun', value: { runId: 'r-fail' } }],
+      ['failed-issue', 'mark-done', { name: 'completeImprovement', value: { issueId: 'watering' } }],
+      ['failed-issue', 'retry', { name: 'retryRun', value: { runId: 'r-water' } }],
       ['interrupted', 'retry', { name: 'retryRun', value: { runId: 'r-int' } }],
       ['stopped', 'retry', { name: 'retryRun', value: { runId: 'r-stop' } }],
       ['discarded', 'retry', { name: 'retryRun', value: { runId: 'r-disc' } }],
@@ -362,7 +378,7 @@ test('each ticket key sends its payload; asking twice sends only on yes; forms s
     assert.equal(await h.page.locator('[data-cp-key="close"]').getAttribute('aria-label'), WORDS.keys.close);
 
     // ask twice: the first press opens the question on its "no", and sends nothing
-    for (const [name, key, want] of [['building', 'stop', { name: 'stopRun', value: { runId: 'r-build-2' } }], ['ready', 'merge', { name: 'mergeRun', value: { runId: 'r-ready' } }], ['ready', 'discard', { name: 'discardRun', value: { runId: 'r-ready' } }]]) {
+    for (const [name, key, want] of [['building', 'stop', { name: 'stopRun', value: { runId: 'r-build-2' } }], ['ready', 'merge', { name: 'mergeRun', value: { runId: 'r-ready' } }], ['ready', 'discard', { name: 'discardRun', value: { runId: 'r-ready' } }], ['failed', 'discard', { name: 'discardRun', value: { runId: 'r-fail' } }], ['failed-issue', 'discard', { name: 'discardRun', value: { runId: 'r-water' } }]]) {
       await h.open(name); await h.settle(); await h.clear();
       const opener = h.page.locator(`[data-cp-key="${key}"]`);
       await opener.click();
@@ -825,5 +841,50 @@ test('short windows fit; live work pulses, and nothing moves under reduced motio
       await calm.open('building'); await calm.settle();
       assert.deepEqual(await calm.page.evaluate(() => document.getAnimations().filter(a => a.animationName && a.effect?.target?.closest?.('.cp-page')).map(a => a.animationName)), [], 'Calm motion stills it too');
     } finally { await calm.context.close(); }
+  } finally { await browser.close(); }
+});
+
+test('the words being edited survive a try starting under them; a form with nothing typed still closes', async () => {
+  const browser = await launch();
+  try {
+    const h = await harness(browser, { width: 1180, height: 820 });
+    try {
+      // a try starts: the ticket loses its edit key (the words can't change while it runs)
+      const running = () => { const t = TICKETS['up-next'](); t.improvement.state = 'building'; t.actions = t.actions.filter(a => a.action !== 'editImprovement'); return t; };
+      await h.open('up-next'); await h.settle();
+      await h.page.locator('[data-cp-key="edit"]').click();
+      await h.page.locator('[data-cp-key="edit-title"]').fill('seedlings leave room at the fence');
+      await h.update('up-next', { ticket: running() });
+      assert.equal(await h.page.locator('.cp-edit').count(), 1, 'typed words keep the form open');
+      assert.equal(await h.page.locator('[data-cp-key="edit-title"]').inputValue(), 'seedlings leave room at the fence', 'and keep what was typed');
+      assert.equal(await h.page.locator('[data-cp-key="edit-save"]').isDisabled(), true, 'save waits while the try runs');
+      assert.equal(await h.page.locator('.cp-edit .cp-page-note').innerText(), WORDS.editWaits, 'and says why');
+      await h.update('up-next');
+      assert.equal(await h.page.locator('[data-cp-key="edit-save"]').isDisabled(), false, 'the key is back: save can go');
+      assert.equal(await h.page.locator('.cp-edit .cp-page-note').innerText(), '', 'and the waiting note goes');
+      await h.page.locator('[data-cp-key="edit-cancel"]').click();
+      // nothing typed: the form closes with the key, as before
+      await h.page.locator('[data-cp-key="edit"]').click();
+      await h.update('up-next', { ticket: running() });
+      assert.equal(await h.page.locator('.cp-edit').count(), 0, 'an untouched form closes');
+      assert.deepEqual(h.errors, []);
+    } finally { await h.context.close(); }
+  } finally { await browser.close(); }
+});
+
+test('on touch, the crumb back to main and the history links are 44px however wide the window is', async () => {
+  const browser = await launch();
+  try {
+    const h = await harness(browser, { width: 1024, height: 768 }, { touch: true });
+    try {
+      await h.open('up-next'); await h.settle();
+      const crumb = await h.page.locator('.cp-page .cp-crumb').first().boundingBox();
+      assert.ok(crumb && crumb.height >= 43.9, 'crumb is ' + JSON.stringify(crumb));
+      await h.open('build'); await h.settle();
+      const links = await h.page.locator('.cp-page .cp-hist-link:visible').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+      assert.ok(links.length > 0, 'the build page has history links to measure');
+      for (const height of links) assert.ok(height >= 44, 'a history link is ' + height + 'px');
+      assert.deepEqual(h.errors, []);
+    } finally { await h.context.close(); }
   } finally { await browser.close(); }
 });
