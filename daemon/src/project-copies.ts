@@ -65,26 +65,29 @@ function playOf(cfg: GameCfg, copy: CopyRecord): CopyPlay {
   const kind = url ? 'url' : cfg.play || previewCommand(copy.worktree) ? 'server' : 'none';
   return { running: preview.running, starting: !!(preview.running && preview.starting), url: preview.running ? preview.url ?? null : null, playable: kind === 'server', kind, error: preview.error ?? null };
 }
-async function viewOf(cfg: GameCfg, copy: CopyRecord): Promise<CopyView> {
+// The store before git: a read still out when the backend closes must not open the store again after it.
+async function viewOf(cfg: GameCfg, copy: CopyRecord, play: CopyPlay = playOf(cfg, copy)): Promise<CopyView> {
   const { health, dirtyFiles } = await copyHealth(cfg, copy);
   let ahead = 0, behind = 0;
   try { [behind, ahead] = (await git(cfg.repo, 'rev-list', '--left-right', '--count', `refs/heads/${copy.base}...refs/heads/${copy.branch}`)).split(/\s+/).map(Number); }
   catch { /* the branch is gone: health says so */ }
-  return { ...copy, ahead, behind, health, dirtyFiles, play: playOf(cfg, copy) };
+  return { ...copy, ahead, behind, health, dirtyFiles, play };
 }
 const retiredView = (copy: CopyRecord): RetiredCopy => ({ id: copy.id, name: copy.name, branch: copy.branch, retiredAt: copy.retiredAt ?? copy.updatedAt, retiredHead: copy.retiredHead, ships: copy.ships });
 /** GET /api/project-copies?project= — git facts only; the client groups runs by copyId itself. */
 export async function copiesView(project: string): Promise<CopiesRead> {
   if (project === 'vault') throw new HttpError(400, 'The brain has no builds');
   const cfg = games()[project]; if (!cfg) throw new HttpError(404, 'Unknown project');
-  const github = isGithub(project);
-  let branch = '', sha = '';
-  try { branch = mainBranch(cfg); sha = await git(cfg.repo, 'rev-parse', '--verify', branch + '^{commit}'); } catch { /* an empty or detached repository */ }
-  const copies = await Promise.all(liveCopies(project).map(copy => viewOf(cfg, copy)));
+  // every store read happens before the first await (see viewOf)
+  const github = isGithub(project), live = liveCopies(project), retired = retiredCopies(project).slice(0, 20).map(retiredView);
   const ships = allCopies().filter(copy => copy.project === project).flatMap(copy => copy.ships.map(ship => ({ ...ship, copyId: copy.id, name: copy.name })))
     .sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20);
+  const plays = live.map(copy => playOf(cfg, copy));
+  let branch = '', sha = '';
+  try { branch = mainBranch(cfg); sha = await git(cfg.repo, 'rev-parse', '--verify', branch + '^{commit}'); } catch { /* an empty or detached repository */ }
+  const copies = await Promise.all(live.map((copy, i) => viewOf(cfg, copy, plays[i])));
   return { project, mode: github ? 'github' : 'local', disabled: github ? 'github' : hasCheck(cfg.check) ? '' : 'no_check', limit: COPY_RULES.limit,
-    main: { branch, sha }, copies, retired: retiredCopies(project).slice(0, 20).map(retiredView), ships, fetchedAt: Date.now() };
+    main: { branch, sha }, copies, retired, ships, fetchedAt: Date.now() };
 }
 export async function copyView(project: string, id: string): Promise<CopyView> { return viewOf(projectConfig(project), liveCopy(project, id)); }
 
