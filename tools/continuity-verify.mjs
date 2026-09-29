@@ -237,9 +237,9 @@ async function aRebuiltListKeepsYourPlace() {
   await context.close();
 }
 
-/* One turn runs at a time, but the Chat tab during a reply asks for the conversation that is
-   answering — it used to be refused with a toast, so Builds could not be left while nibbi spoke.
-   Leaving for another thread is still refused, now in the bar where the click happened. */
+/* One turn runs at a time, but the open conversation's own row during a reply asks for the
+   conversation that is answering — it used to be refused with a toast, so a page could not be left
+   while nibbi spoke. Leaving for another thread is still refused, in the bar where the click happened. */
 async function returningToTheAnsweringThread() {
   const thread = fixture.createThread('Tide tables');
   const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
@@ -247,12 +247,12 @@ async function returningToTheAnsweringThread() {
   await page.locator(`[data-thread-id="${thread.id}"]`).waitFor({ timeout: 10_000 });
   await page.evaluate(() => { void window.nibbiApp.send('fix the lock bug'); });
   await page.locator('.bubble.live').waitFor({ timeout: 10_000 });
-  await page.locator('.margin-tab[data-margin-tab="builds"]').click();
+  await page.locator('[data-bar-build="main"]').click();
   await page.locator('#project-workspace:not([hidden])').waitFor();
-  await page.locator('.margin-tab[data-margin-tab="chat"]').click();
+  await page.locator('[data-thread-id="home"]').click();
   await page.waitForFunction(() => document.querySelector('#project-workspace').hidden, null, { timeout: 5_000 });
   const during = await page.evaluate(() => ({ busy: window.nibbiApp.state().busy, live: document.querySelectorAll('.bubble.live').length }));
-  assert.deepEqual(during, { busy: true, live: 1 }, 'the Chat tab leaves Builds while the reply is still arriving, and the reply is still there');
+  assert.deepEqual(during, { busy: true, live: 1 }, 'the open conversation\'s row leaves main\'s page while the reply is still arriving, and the reply is still there');
   await page.locator(`[data-thread-id="${thread.id}"]`).click();
   const refusal = page.locator('.margin-error:not([hidden])');
   await refusal.waitFor({ timeout: 5_000 });
@@ -301,7 +301,7 @@ async function draftsBelongToTheirThread() {
   await context.close();
 }
 
-/* A file pasted into a workspace field is that field's, not an attachment. And a file that cannot
+/* A file pasted into a page's field is that field's, not an attachment. And a file that cannot
    be attached says why, with the number, instead of vanishing. */
 async function attachmentsSayWhy() {
   const context = await browser.newContext({ viewport: { width: 1180, height: 820 } });
@@ -313,12 +313,14 @@ async function attachmentsSayWhy() {
   }, files);
   const png = n => Array.from({ length: n }, (_, i) => ({ name: 'shot-' + i + '.png', type: 'image/png', size: 64 }));
   const toast = () => page.locator('#toast').innerText();
-  await page.locator('.margin-tab[data-margin-tab="issues"]').click();
-  await page.locator('#project-workspace input[type="search"]').focus();
+  // The field on main's build page where an improvement is written (the Issues search box it replaces is gone).
+  await page.locator('[data-bar-build="main"]').click();
+  await page.locator('#project-workspace .cp-page[data-cp-page="build"] [data-cp-key="add"]').click();
+  await page.locator('#project-workspace textarea').focus();
   await paste(png(1));
   await page.waitForTimeout(300);
-  assert.equal(await page.locator('#attach').isHidden(), true, 'a paste into a workspace field is not attached to the message');
-  await page.locator('.project-close').click();
+  assert.equal(await page.locator('#attach').isHidden(), true, 'a paste into a page\'s field is not attached to the message');
+  await page.locator('.project-close:visible').click();
   await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
   await page.locator('#ask').focus();
   await paste([{ name: 'notes.txt', type: 'text/plain', size: 12 }]);
@@ -605,5 +607,5 @@ try {
   await aSlowCheckDoesNotWriteOverSignIn();
   await touchTargetsOnTheNewControls();
   assert.deepEqual(errors, [], 'No unexpected browser errors');
-  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, a tidy survives a reload, news does not hold a reload in Home, a message is drawn once, a message before the list goes where it is shown, a rebuilt list keeps focus, the Chat tab returns to a reply in progress, drafts belong to their thread, attachments say why they were refused, a thread is renamed and archived from its row, earlier history loads without moving the reader or splitting a reply from its message, a late read is dropped, an unreachable project list says so and retries, a first run offers a way in, an existing folder can be registered and the conversation goes with it, a slow sign-in check does not write over sign-in, and the new controls are 44px on touch.');
+  console.log('Continuity checks passed: a first boot reads the project home, a reload returns to its thread, a new thread takes its name live, a tidy survives a reload, news does not hold a reload in Home, a message is drawn once, a message before the list goes where it is shown, a rebuilt list keeps focus, the open conversation’s row returns to a reply in progress, drafts belong to their thread, attachments say why they were refused, a thread is renamed and archived from its row, earlier history loads without moving the reader or splitting a reply from its message, a late read is dropped, an unreachable project list says so and retries, a first run offers a way in, an existing folder can be registered and the conversation goes with it, a slow sign-in check does not write over sign-in, and the new controls are 44px on touch.');
 } finally { await browser?.close(); await fixture.close(); }
