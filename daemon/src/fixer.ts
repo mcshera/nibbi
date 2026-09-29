@@ -22,6 +22,8 @@ import { isGithubBuild, reserveBuildBinding, prepareBuildBinding, githubBuildSum
 import { boundedInput, summarizeResult, diffFor } from './tool-transcript.js';
 import { recordDelivery } from './progress.js';
 import { coalesceText } from './event-text.js';
+import { copyById, copyPreviewId, patchCopy, requireLiveCopy, refuse, COPY_WORDS, fill, type CopyRecord } from './copy-records.js';
+import { verifiedFastForward, refreshInstall } from './verified-merge.js';
 export { games, mergeTarget, registerProject, createProject, type GameCfg } from './projects.js';
 export { previewStart, previewStop, playStart, playStop, playStatus } from './previews.js';
 
@@ -38,8 +40,14 @@ export interface Fixer {
   remoteMerge?: { sha: string; pr: number; url: string; at: string };
   mergeIntent?: { candidate: string; targetSha: string; integration: string };
   verification?: { status: 'passed' | 'failed' | 'unverified'; command?: string; at?: string; commitSha?: string; detail?: string };
+  /** Phase 2: the copy this run lands in (docs/BUILDS-AS-COPIES.md §2.4.3). Unset: main. */
+  copyId?: string;
+  /** A copy run whose checks passed: waiting to land (its copy plays or is busy), or failed to land (the copy is unchanged). */
+  landing?: { state: 'waiting' | 'failed'; reason?: string; detail?: string; at: string };
+  /** Set when the copy it landed in shipped to main: the run is done then (D1). */
+  shipped?: { at: string; sha: string; copyId: string };
 }
-export interface FixerOpts { model?: string; provider?: ProviderId; context?: string; difficulty?: string; task?: string; taskId?: string; title?: string; redispatches?: number; group?: string; issueIds?: string[] }
+export interface FixerOpts { model?: string; provider?: ProviderId; context?: string; difficulty?: string; task?: string; taskId?: string; title?: string; redispatches?: number; group?: string; issueIds?: string[]; copyId?: string }
 export interface AutoCfg { on: boolean; maxConcurrent: number; autoMerge: boolean; mode?: 'off'|'suggest'|'stage'|'ship'; note?: string; at?: string; onAt?: string; spendCap?: number; model?: string; focus?: string }
 export function autoConfig(): Record<string, AutoCfg> {
   const store = runtime(); const saved = store.get<Record<string, AutoCfg>>('config', 'auto'); if (saved) return saved;
@@ -91,11 +99,12 @@ export function acquireBuildDeliveryLease(id: string): (() => void) & { signal: 
   const release = Object.assign(() => { if (deliveryLeases.get(id) === lease) deliveryLeases.delete(id); finish(); }, { signal: lease.abort.signal });
   return release;
 }
-const hasCheck = (command?: string): boolean => !!command?.trim() && !/^(true|:|echo\b.*)$/.test(command.trim());
+export const hasCheck = (command?: string): boolean => !!command?.trim() && !/^(true|:|echo\b.*)$/.test(command.trim());
 
 function replacementOptions(f: FixerOpts): FixerOpts {
   return { model: f.model, provider: f.provider, context: f.context, difficulty: f.difficulty,
-    task: f.task, taskId: f.taskId, title: f.title, redispatches: f.redispatches, group: f.group, issueIds: f.issueIds ? [...f.issueIds] : undefined };
+    task: f.task, taskId: f.taskId, title: f.title, redispatches: f.redispatches, group: f.group, issueIds: f.issueIds ? [...f.issueIds] : undefined,
+    ...(f.copyId ? { copyId: f.copyId } : {}) };
 }
 /** Common directory and checked-out branch are checked before every backend-owned write. */
 export async function assertBuildWorktree(f: Fixer): Promise<void> {
@@ -140,7 +149,10 @@ export async function runBuildAttempt(id: string, kind: BuildAttempt['kind'], ac
     catch (error) { failure = error; f.status = control.abort.signal.aborted ? (shuttingDown ? 'interrupted' : 'cancelled') : 'failed'; f.summary = (error as Error).message; f.endedAt = new Date().toISOString(); save(f); }
     finally { live.delete(id); }
   })();
-  await control.done; if (failure) throw failure; return runtime().get<Fixer>('fixers', id)!;
+  await control.done; if (failure) throw failure;
+  const ended = runtime().get<Fixer>('fixers', id)!;
+  if (ended.copyId && ended.status === 'staged') await landOnCopy(id).catch(() => undefined);   // a verified copy run lands on its own (D5)
+  return runtime().get<Fixer>('fixers', id)!;
 }
 
 /** Advertise lifecycle commands only when their existing guards allow an attempt. Verification remains independent of status. */
@@ -153,13 +165,17 @@ export function allowedRunActions(f: Fixer): string[] {
   if (!running && ['done', 'staged', 'failed', 'interrupted'].includes(f.status) && hasCheck(cfg?.check) && existsSync(f.worktree)) actions.push('run.verify');
   if (!running && !['merged', 'discarded', 'superseded', 'queued'].includes(f.status)) actions.push('run.discard');
   actions.push(...allowedPreviewActions(f.id, f.worktree));
-  if (!isGithubBuild(f.id) && f.workflowMode !== 'github' && !running && ['staged', 'done'].includes(f.status) && f.verification?.status === 'passed' && f.commitSha && f.targetBranch && hasCheck(cfg?.check) && existsSync(f.worktree)) actions.push('run.merge');
+  // A copy's run lands on its own once its checks pass (D5); the reviewed step for a copy is Ship to main.
+  if (!f.copyId && !isGithubBuild(f.id) && f.workflowMode !== 'github' && !running && ['staged', 'done'].includes(f.status) && f.verification?.status === 'passed' && f.commitSha && f.targetBranch && hasCheck(cfg?.check) && existsSync(f.worktree)) actions.push('run.merge');
   return actions;
 }
 
 export function queueFix(game: string, issue: string, opts: FixerOpts = {}, executionKind: 'provider' | 'adopt' = 'provider'): Fixer {
   if (shuttingDown) throw new Error('Backend is shutting down');
   const cfg = games()[game]; if (!cfg) throw new Error('Unknown project');
+  // A copy is resolved from its record before anything is written; its git health is checked when the run starts.
+  const copy = opts.copyId ? requireLiveCopy(game, opts.copyId) : undefined;
+  if (copy && connectionFor(game)?.workflowMode === 'github') throw refuse('githubMode', { project: game });
   if (!issue.trim()) throw new Error('A task is required');
   const provider = opts.provider ?? projectSettings(game).fixer.provider;
   const model = opts.model ?? projectSettings(game).fixer.model;
@@ -172,11 +188,11 @@ export function queueFix(game: string, issue: string, opts: FixerOpts = {}, exec
   if (issueIds.length && listFixers().some(f => f.game === game && f.issueIds?.some(id => issueIds.includes(id)) && (active.has(f.status) || ['queued', 'staged', 'done'].includes(f.status)))) throw new Error('This issue already has an active or staged run');
   const selected = replacementOptions(opts);
   const connection = connectionFor(game);
-  const f: Fixer = { ...selected, id, game, project: game, repo: cfg.repo, issue, provider, model, executionKind,
+  const f: Fixer = { ...selected, ...(copy ? { copyId: copy.id } : {}), id, game, project: game, repo: cfg.repo, issue, provider, model, executionKind,
     workflowMode: connection?.workflowMode === 'github' ? 'github' : 'local',
     branch: 'nibbi/' + id, worktree: join(config.workDir, id), status: 'queued',
     startedAt: new Date().toISOString(), title: opts.title || issue.slice(0, 50), taskId, issueIds,
-    targetBranch: connection?.workflowMode === 'github' ? connection.integrationBranch : cfg.targetBranch ?? mergeTarget(cfg.repo), skillRefs: skills.map(skill => ({ id: skill.id, revision: skill.revision })),
+    targetBranch: copy ? copy.branch : connection?.workflowMode === 'github' ? connection.integrationBranch : cfg.targetBranch ?? mergeTarget(cfg.repo), skillRefs: skills.map(skill => ({ id: skill.id, revision: skill.revision })),
     verification: { status: 'unverified' } };
   if (f.workflowMode === 'github') reserveBuildBinding(game, id, f.branch);
   beginAttempt(f, executionKind === 'adopt' ? 'adopt' : 'initial', issue); save(f); return f;
@@ -193,7 +209,8 @@ export function drainQueues(notify: (text: string) => Promise<void>, rateLimited
     const abort = new AbortController(); f.status = 'installing'; save(f);
     const control = { abort, done: Promise.resolve() } as { abort: AbortController; handle?: AgentHandle; done: Promise<void> };
     live.set(f.id, control);
-    control.done = executeFixer(f, control, notify).finally(() => { live.delete(f.id); });
+    // A copy's run lands in its copy once it is staged; waitForFixer waits for that too.
+    control.done = executeFixer(f, control, notify).finally(() => { live.delete(f.id); }).then(() => landOnCopy(f.id).then(() => undefined, () => undefined));
     count++;
   }
   return count;
@@ -224,6 +241,11 @@ async function executeFixer(f: Fixer, control: { abort: AbortController; handle?
           try { f.baseSha = (await prepareBuildBinding(f.game, f.id, f.branch))!.baseSha; }
           catch (error) { remoteBaseUnavailable = true; throw error; }
         } else f.baseSha = await git(cfg.repo, 'rev-parse', '--verify', f.targetBranch! + '^{commit}');
+        if (f.copyId) {
+          const copy = copyById(f.copyId);
+          if (!copy || copy.status === 'retired') throw refuse(copy ? 'retired' : 'copyGone', { name: copy?.name });
+          if (f.targetBranch !== copy.branch || f.baseSha !== copy.headSha) throw refuse('changedOutside', { name: copy.name });
+        }
         save(f); await git(cfg.repo, 'worktree', 'add', '-b', f.branch, f.worktree, f.baseSha!);
       }
     });
@@ -306,9 +328,12 @@ export async function reconcileFixers(): Promise<void> {
     if (!isGithubBuild(f.id) && f.workflowMode !== 'github' && f.mergeIntent && f.status !== 'merged' && f.repo && f.targetBranch) {
       try {
         await git(f.repo, 'merge-base', '--is-ancestor', f.mergeIntent.candidate, f.targetBranch);
-        f.status = 'merged'; f.endedAt = new Date().toISOString(); save(f);
-        try { completeTask(f.game, f.taskId); completeLinkedIssues(f.game, f.issueIds); } catch { /* Preserve successful Git outcome. */ }
-        noteDelivery(f);
+        f.status = 'merged'; f.endedAt = new Date().toISOString(); delete f.landing; save(f);
+        // A copy's run is done when its copy ships (D1): finishShip completes it, not the landing.
+        if (!f.copyId) {
+          try { completeTask(f.game, f.taskId); completeLinkedIssues(f.game, f.issueIds); } catch { /* Preserve successful Git outcome. */ }
+          noteDelivery(f);
+        }
         runtime().emit({ type: 'run.merge_recovered', runId: f.id, projectId: f.game, payload: { candidate: f.mergeIntent.candidate } });
       } catch {
         runtime().emit({ type: 'run.merge_interrupted', runId: f.id, projectId: f.game, payload: { message: 'No completed merge found. Retained work needs review.' } });
@@ -320,10 +345,11 @@ export async function shutdownFixers(): Promise<void> { shuttingDown = true; for
 export async function waitForFixer(id: string): Promise<void> { await live.get(id)?.done; }
 
 /** Progress is a rollup of the verified merge; a failure to record it never undoes the merge. */
-function noteDelivery(f: Fixer): void {
+export function noteDelivery(f: Fixer): void {
   try { recordDelivery({ run: f }); } catch (error) { runtime().emit({ type: 'progress.record_failed', runId: f.id, projectId: f.game, payload: { message: (error as Error).message } }); }
 }
-export type IntegrateResult = { ok: boolean; reason?: 'conflict' | 'checkfail' | 'gone' | 'unverified' | 'busy' | 'changed'; detail?: string };
+export type IntegrateResult = { ok: boolean; reason?: 'conflict' | 'checkfail' | 'gone' | 'unverified' | 'busy' | 'changed' | 'waiting'; detail?: string; conflicts?: string[] };
+/** Lands a verified run in its destination: main (no copyId), exactly as before phase 2, or its copy — inside the copy's own worktree. */
 export async function integrate(input: Fixer): Promise<IntegrateResult> {
   if (isGithubBuild(input.id) || input.workflowMode === 'github') return { ok: false, reason: 'unverified', detail: 'This Build uses GitHub. Review and merge its PR; local integration cannot complete it.' };
   const cfg = games()[input.game]; if (!cfg) return { ok: false, reason: 'gone', detail: 'Unknown project' };
@@ -332,31 +358,62 @@ export async function integrate(input: Fixer): Promise<IntegrateResult> {
     if (!f || !['staged', 'done'].includes(f.status) || live.has(f.id) || deliveryLeases.has(f.id)) return { ok: false, reason: 'busy', detail: 'Run is not fully staged' };
     if (!f.targetBranch || !f.commitSha || f.verification?.status !== 'passed' || !hasCheck(cfg.check)) return { ok: false, reason: 'unverified', detail: 'A verified pinned commit is required. Legacy work is retained for review.' };
     if (cfg.repo !== f.repo || !existsSync(f.worktree)) return { ok: false, reason: 'gone', detail: 'Worktree or original project is unavailable' };
-    let integration = '';
-    try {
-      if (mergeTarget(cfg.repo) !== f.targetBranch || await git(cfg.repo, 'status', '--porcelain')) return { ok: false, reason: 'changed', detail: 'Target branch changed or has local edits' };
-      if (await git(f.worktree, 'status', '--porcelain') || await git(f.worktree, 'rev-parse', 'HEAD') !== f.commitSha) return { ok: false, reason: 'changed', detail: 'Staged worktree changed after verification' };
-      const targetSha = await git(cfg.repo, 'rev-parse', f.targetBranch);
-      integration = join(config.workDir, 'merge-' + randomUUID());
-      await git(cfg.repo, 'worktree', 'add', '--detach', integration, targetSha);
-      try { await git(integration, 'merge', '--no-edit', f.commitSha); }
-      catch (error) { return { ok: false, reason: 'conflict', detail: 'Target unchanged. Integration worktree retained: ' + integration }; }
-      if (cfg.install && cfg.install !== 'true') await sandboxCommand(integration, cfg.install, { domains: cfg.installDomains ?? ['registry.npmjs.org'], readableRoots: [cfg.repo] });
-      try { await sandboxCommand(integration, cfg.check, { readableRoots: [cfg.repo] }); }
-      catch (error) { return { ok: false, reason: 'checkfail', detail: (error as Error).message }; }
-      const candidate = await git(integration, 'rev-parse', 'HEAD');
-      if (await git(integration, 'status', '--porcelain')) return { ok: false, reason: 'changed', detail: 'Verification changed tracked/untracked files; inspect ' + integration };
-      if (mergeTarget(cfg.repo) !== f.targetBranch || await git(cfg.repo, 'rev-parse', 'HEAD') !== targetSha || await git(cfg.repo, 'status', '--porcelain')) return { ok: false, reason: 'changed', detail: 'Target changed during verification; no merge performed' };
-      f.mergeIntent = { candidate, targetSha, integration }; save(f);
-      await git(cfg.repo, 'merge', '--ff-only', candidate);
-      f.status = 'merged'; f.endedAt = new Date().toISOString(); save(f);
+    let copy: CopyRecord | undefined;
+    if (f.copyId) {
+      copy = copyById(f.copyId);
+      if (!copy || copy.project !== f.game || copy.status === 'retired') return { ok: false, reason: 'gone', detail: copy ? fill(COPY_WORDS.retired, { name: copy.name }) : COPY_WORDS.copyGone };
+      if (copy.status !== 'ready') return { ok: false, reason: 'busy', detail: copy.name + ' is busy — it lands once ' + copy.name + ' is ready' };
+      if (f.targetBranch !== copy.branch) return { ok: false, reason: 'changed', detail: 'This try was aimed at another branch' };
+      if (previewStatus(copyPreviewId(copy.project, copy.id)).running) return { ok: false, reason: 'waiting', detail: copy.name + ' is playing — it lands when ' + copy.name + ' stops playing' };
+    }
+    const playing = copy ? copyPreviewId(copy.project, copy.id) : '';
+    const result = await verifiedFastForward(cfg,
+      copy ? { checkout: copy.worktree, branch: copy.branch, expectHead: copy.headSha, retainOnFailure: false } : { checkout: cfg.repo, branch: f.targetBranch, retainOnFailure: true },
+      f.commitSha, {
+        preflight: async () => await git(f.worktree, 'status', '--porcelain') || await git(f.worktree, 'rev-parse', 'HEAD') !== f.commitSha ? 'Staged worktree changed after verification' : undefined,
+        hold: copy ? () => previewStatus(playing).running ? copy!.name + ' is playing — it lands when ' + copy!.name + ' stops playing' : undefined : undefined,
+        onIntent: intent => { f.mergeIntent = intent; save(f); },
+      });
+    if (!result.ok) return { ok: false, reason: result.reason, detail: result.detail, ...(result.conflicts.length ? { conflicts: result.conflicts } : {}) };
+    const at = new Date().toISOString();
+    f.status = 'merged'; f.endedAt = at; delete f.landing; save(f);
+    if (!copy) {
       try { completeTask(f.game, f.taskId); completeLinkedIssues(f.game, f.issueIds); } catch (error) { runtime().emit({ type: 'roadmap.update_failed', runId: f.id, projectId: f.game, payload: { message: (error as Error).message } }); }
       noteDelivery(f);
       // No forced cleanup: the original evidence branch/worktree remains recoverable.
-      await git(cfg.repo, 'worktree', 'remove', integration).catch(() => undefined);
       return { ok: true };
-    } catch (error) { return { ok: false, reason: 'changed', detail: (error as Error).message }; }
+    }
+    // In the copy, not yet done: its issues, task and delivery wait for the copy to ship (D1).
+    const before = copy.headSha;
+    patchCopy(copy.id, record => { record.headSha = result.candidate; record.lastVerifiedSha = result.candidate; record.lastVerifiedAt = at; record.lastLandedAt = at; });
+    const installError = await refreshInstall(cfg, copy.worktree, before, result.candidate);
+    if (installError) patchCopy(copy.id, record => { record.error = installError; });
+    return { ok: true };
   });
+}
+const landings = new Map<string, Promise<IntegrateResult | undefined>>();
+/** Auto-land (D5): a staged copy run whose checks passed lands in its copy. Waiting (its copy plays, or is busy) keeps it
+    staged with landing.state 'waiting'; any other refusal fails the run and leaves the copy as it was. One landing per run at a time. */
+export function landOnCopy(runId: string): Promise<IntegrateResult | undefined> {
+  const running = landings.get(runId); if (running) return running;
+  const landing = (async (): Promise<IntegrateResult | undefined> => {
+    const f = runtime().get<Fixer>('fixers', runId);
+    if (shuttingDown || !f?.copyId || !['staged', 'done'].includes(f.status) || f.verification?.status !== 'passed' || live.has(f.id) || deliveryLeases.has(f.id)) return undefined;
+    const copy = copyById(f.copyId); if (!copy || copy.status === 'retired') return undefined;
+    const result = await integrate(f);
+    if (result.ok) return result;
+    // Retired while it waited for the lock: the run stays as it is (the model settles it).
+    const target = copyById(f.copyId); if (!target || target.status === 'retired') return result;
+    const current = runtime().get<Fixer>('fixers', runId), at = new Date().toISOString();
+    if (!current || !['staged', 'done'].includes(current.status) || current.copyId !== f.copyId) return result;
+    if (result.reason === 'waiting' || result.reason === 'busy') {
+      current.landing = { state: 'waiting', ...(result.reason === 'busy' ? { reason: 'busy' } : {}), detail: result.detail, at }; save(current); return result;
+    }
+    current.status = 'failed'; current.summary = 'It didn’t land in ' + copy.name + ': ' + (result.detail ?? result.reason);
+    current.landing = { state: 'failed', reason: result.reason, detail: result.detail, at }; current.endedAt = at; save(current);
+    return result;
+  })().finally(() => { landings.delete(runId); });
+  landings.set(runId, landing); return landing;
 }
 /** Explicit owner recovery of a retained, clean commit; never adopts unfinished edits. */
 export async function verifyRetained(id: string): Promise<string> {
