@@ -11,7 +11,7 @@ import { installMarginUI } from './lib/margin-ui.js';
 import { emptyLine } from './lib/empty.js';
 import { installProjectWorkspace } from './lib/project-workspace.js';
 import { installProjectPages } from './lib/project-pages.js';
-import { buildMain, ticketOf, improvementIdForRun, conversationsFor, splitImprovementText } from './lib/builds-model.js';
+import { buildMain, ticketOf, improvementIdForRun, mergeRuns, conversationsFor, splitImprovementText } from './lib/builds-model.js';
 import { MAIN, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS } from './lib/control-panel-contract.js';
 import { projectCommand, loadProjectSection, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { marginMetadata } from './lib/margin-metadata.js';
@@ -899,10 +899,14 @@ async function issuesFile(proj) {
 const fixerById = (id) => (S.fixers || []).find((f) => f.id === id);
 const fixerTitle = (f) => f.title || (f.issue || '').slice(0, 60) || f.id;
 const githubBuild = f => f?.workflowMode === 'github' || f?.github?.mode === 'github';
-/** A run's ticket: the improvement it is a try of (its issue, or its retry chain), on the control panel's ticket page. */
+/** A run's ticket: the improvement it is a try of (its issue, or its retry chain), on the control panel's ticket page.
+    Every run this window knows of counts — the live records, the last builds read and the run itself — so a
+    try is never taken for its own chain because one read had not caught up with it yet. */
 function openRunTicket(f, opts = {}) {
   const project = f.game || f.project, e = S.cp.get(project);
-  const id = improvementIdForRun(runsOf(project), e?.issues ?? null, f.id) || 'run:' + f.id;
+  const runs = mergeRuns(runsOf(project), e?.builds ?? null);
+  if (!runs.some(r => r.id === f.id)) runs.push(f);
+  const id = improvementIdForRun(runs, e?.issues ?? null, f.id) || 'run:' + f.id;
   openProjectPage(project, 'ticket', id, opts);
 }
 const inspectGithubBuild = f => openRunTicket(f, { evidence: 'github' });
@@ -1279,6 +1283,7 @@ function refreshBadge() {
 
 /* ------------------------------------------------------------------ host event stream: exact history of what fixers did, even while the window was closed */
 let evSource = null, evReady = false, evReplay = [];
+const fixerEventAt = new Map();   // run id → the event that last wrote its record here (refreshStatus keeps what is newer than its snapshot)
 /* The cursor only has to survive the window closing, so it is written on a trailing tick rather
    than on every event: a busy minute used to mean a synchronous localStorage write per event. */
 let cursorPending = null, cursorTimer = 0;
@@ -1304,7 +1309,7 @@ function connectEvents() {
         const run = event.payload.run; if (!run) return; if (run.status === 'done') run.status = 'staged';
         // A record without a GitHub summary keeps the last known one, so the next summary still compares against real history.
         const previous = fixerById(run.id); if (run.github === undefined && previous?.github) run.github = previous.github;
-        S.fixers = [...(S.fixers || []).filter((f) => f.id !== run.id), run];
+        S.fixers = [...(S.fixers || []).filter((f) => f.id !== run.id), run]; fixerEventAt.set(run.id, event.id);
         renderAgents(S.fixers, S.auto); renderProject(); refreshBadge();
         const ev = { ...run, id: run.id, kind: 'fixer', project: run.game, to: run.status, ts: event.at };
         // Binding refreshes re-emit the record with its current status every minute; only a status change is news. The replay buffer keeps every record for the away summary.
@@ -2353,7 +2358,10 @@ async function refreshStatus() {
     const r = await fetch('/api/snapshot', { cache: 'no-store' });
     if (!r.ok) throw new Error('Snapshot unavailable');
     const snap = await r.json(); if (read !== statusRead) return;
-    S.fixers = snap.fixers || []; S.auto = snap.auto || {}; S.goals = snap.goals || {}; S.snapshotCursor = snap.cursor;
+    // A snapshot read out while an event came in lands older than the event: the records the event stream has
+    // moved past the snapshot's cursor stay as the events left them (a retried run, a new one, a status).
+    const newer = Number.isSafeInteger(snap.cursor) ? (S.fixers || []).filter(f => (fixerEventAt.get(f.id) ?? -Infinity) > snap.cursor) : [];
+    S.fixers = [...(snap.fixers || []).filter(f => !newer.some(n => n.id === f.id)), ...newer]; S.auto = snap.auto || {}; S.goals = snap.goals || {}; S.snapshotCursor = snap.cursor;
     S.progress = snap.progress && typeof snap.progress === 'object' ? snap.progress : undefined;
     S.status = snap.status || null;
     if (S.status) {
