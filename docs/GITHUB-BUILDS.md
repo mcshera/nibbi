@@ -2,6 +2,8 @@
 
 Builds can deliver changes through a GitHub branch and pull request. Each Build keeps its own repository, branch and target. Updating a Build creates a new execution attempt on the same branch and PR; starting a replacement creates a separate Build and branch.
 
+Copies of main (dev, dev1 …; `docs/BUILDS-AS-COPIES.md`) are local-only for now. In a GitHub-connected project the builds card's `+` opens its form in its *can't* state with the reason, and the daemon refuses every copy command but retire (so a copy made before connecting can still be taken off the machine). Publishing `nibbi/copy/*` and a promotion pull request per copy are deferred.
+
 ## Connect a project
 
 Open the project gear and choose **Repository & GitHub**. Inspect the local repository, fetch and push remotes, GitHub account, repository visibility and branch targets. Save the reviewed connection with an explicit integration branch and release branch. The default GitHub branch, checked-out local branch and Build destination are separate facts.
