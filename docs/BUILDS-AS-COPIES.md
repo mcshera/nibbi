@@ -956,6 +956,7 @@ The three builders' departures (each said in their commit) and the integrator's.
 | app.js cards | `mainFor` → `cardFor` | `cardFor` memoises `buildsCard`; the page's build is found in `card.builds` rather than a second `buildOf` pass |
 | app.js reads | a failed copies read keeps the last good one | and a `copy.updated` that lands while a read is out wins over it (the read runs again), without discarding that read's builds and issues |
 | app.js pages | a copy page whose copy is gone → the gone page | a copy page before the project's copies were first read is not drawn at all, then opens when they land — never "gone" before anyone looked |
+| project-copies.ts `copiesView` | the read, as listed in §2.4.2 | every store read (records, ships, each copy's play) before its first git await: a read cut off by shutdown otherwise opened the store again after close (2 of 2 probe runs left a `runtime.sqlite` in a removed fixture folder; 0 of 5 after) |
 | app.js events | `copy.updated` → `acceptCopy` | a record whose head moved (a landing, a catch-up) reads again at once rather than after the 400ms event debounce: ahead and behind trail the "2 in" beside them by one read, 51–67ms over 8 landings measured on the copies fixture |
 | app.js ship | refresh | also reads `/api/projects` again: main's last commit, on its page's play foot, moved |
 | app.js refusals | the daemon's words | "… is busy — …" ones are a notice (ink), not an error |
@@ -969,4 +970,5 @@ Open after the build:
 
 - Playing a copy while main's ▶ is still waiting for its address stops main, and main's ▶ then reports it didn't come up; it should say it was stopped for the copy.
 - A page's notice ("shipped 2 to main …") stays on the copy's page until the next action there, across closing and reopening it.
+- `/api/projects` (read-models.ts `projectsView`) reads the store (`connectionFor`) after its git calls, the shape the copies read had; a request cut off by shutdown can open the store again after close. Not seen in the suites.
 
