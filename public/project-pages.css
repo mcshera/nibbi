@@ -91,7 +91,7 @@
 .cp-page .cp-copyline { margin: 0; font-size: var(--type-control); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 /* the crumb back to main: a small seated pill inside a key whose box is the whole target */
 .cp-page .cp-crumb {
-  display: inline-flex; align-items: center; min-height: 32px; margin-block: -4px; padding: 0; border: 0; background: none;
+  display: inline-flex; align-items: center; min-height: var(--cp-link); margin-block: calc((24px - var(--cp-link)) / 2); padding: 0; border: 0; background: none;   /* the pill is 24; the box is the target (32, or 44 on touch) and takes no extra room */
   color: var(--ink-2); cursor: pointer; font: 500 var(--type-fine)/1 var(--font); -webkit-tap-highlight-color: transparent;
 }
 .cp-page .cp-crumb-pill {
@@ -362,7 +362,7 @@
 .cp-page .cp-hist-what { min-width: 0; }
 .cp-page .cp-hist-line { display: flex; align-items: baseline; gap: 0 8px; margin: 0; min-width: 0; font-size: var(--type-control); line-height: 22px; color: var(--ink-2); }
 .cp-page .cp-hist-word { flex: none; font-size: var(--type-fine); font-weight: 500; }
-.cp-page .cp-hist-link { display: inline-block; min-width: 0; max-width: 100%; min-height: 22px; margin-block: -5px; padding-block: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); line-height: 22px; }   /* 32px target on a 22px line */
+.cp-page .cp-hist-link { display: inline-block; min-width: 0; max-width: 100%; min-height: 22px; margin-block: calc((22px - var(--cp-link)) / 2); padding-block: calc((var(--cp-link) - 22px) / 2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); line-height: 22px; }   /* 32px target on a 22px line */
 .cp-page .cp-hist[data-state]:not([data-state="in"]) .cp-hist-link { color: var(--ink-3); }
 .cp-page .cp-hist-empty { padding: 4px 0; }
 
