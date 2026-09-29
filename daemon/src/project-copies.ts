@@ -2,8 +2,8 @@
 // with main, play it, retire it, and recover any of that after a crash. Landing a run in a copy is fixer.ts'
 // integrate(); every merge — landing, ship, catch up — is verified-merge.ts' one sequence.
 // Nothing here moves a branch from outside the checkout that has it checked out.
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runtime } from './store.js';
 import { games, mergeTarget, type GameCfg } from './projects.js';
@@ -17,7 +17,7 @@ import { completeTask } from './roadmap.js';
 import { completeLinkedIssues } from './project-issues.js';
 import { buildIsActive, hasCheck, landOnCopy, listFixers, noteDelivery, saveFixer, type Fixer } from './fixer.js';
 import { previewCommand, previewStatus, startPreview, stopAndWait, ownedPreviews } from './previews.js';
-import { changedPaths, firstLine, refreshInstall, verifiedFastForward, type MergeFailure } from './verified-merge.js';
+import { changedPaths, firstLine, refreshInstall, statusEntries, verifiedFastForward, type MergeFailure } from './verified-merge.js';
 import {
   COPY_RULES, COPY_WORDS, CopyRefusal, allCopies, copyBranch, copyById, copyPath, copyPreviewId, fill, liveCopies, notReadyWords,
   patchCopy, pruneTombstones, refuse, removeCopyRecord, requireLiveCopy, retiredCopies, saveCopy,
@@ -142,15 +142,30 @@ function installCopy(cfg: GameCfg, copy: CopyRecord): void {
     try {
       if (cfg.install && cfg.install !== 'true') await sandboxCommand(copy.worktree, cfg.install, { signal: abort.signal, domains: cfg.installDomains ?? ['registry.npmjs.org'], readableRoots: [cfg.repo] });
       abort.signal.throwIfAborted();
-      // An install that changes files nibbi tracks would ship them.
+      // A copy whose install changes files in it would never be clean: nothing could land or ship. It is broken.
       const dirty = await changedPaths(copy.worktree);
       if (dirty.length) throw new Error('its install changed files in it: ' + dirty.slice(0, 5).join(', '));
       if (copyById(copy.id)?.status === 'creating') patchCopy(copy.id, record => { record.status = 'ready'; record.error = null; });
     } catch (error) {
-      if (copyById(copy.id)?.status === 'creating') patchCopy(copy.id, record => { record.status = 'broken'; record.error = abort.signal.aborted ? COPY_WORDS.stoppedWhileMaking : firstLine(error); });
+      if (copyById(copy.id)?.status === 'creating') {
+        // What its own install changed goes back first, so retire (never forced) can remove the broken copy.
+        await putBackInstall(copy).catch(() => undefined);
+        patchCopy(copy.id, record => { record.status = 'broken'; record.error = abort.signal.aborted ? COPY_WORDS.stoppedWhileMaking : firstLine(error); });
+      }
     } finally { work.delete(copy.id); }
   })();
   work.set(copy.id, { abort, done });
+}
+/** A copy still being made whose install changed files in it: each goes back as its checkout had it — a tracked file restored,
+    a new one removed. Nothing of the owner's is in a copy before it is made; what git ignores (its node_modules) stays. */
+async function putBackInstall(copy: CopyRecord): Promise<void> {
+  const entries = await statusEntries(copy.worktree);
+  const tracked = entries.filter(entry => entry.code !== '??').map(entry => entry.path);
+  if (tracked.length) await git(copy.worktree, 'restore', '--worktree', '--', ...tracked);
+  for (const entry of entries.filter(entry => entry.code === '??')) {
+    const target = join(copy.worktree, entry.path);
+    if (within(copy.worktree, target)) rmSync(target, { force: true });
+  }
 }
 /** Tests and the fixtures: wait until a copy's background install has finished. */
 export async function waitForCopy(id: string): Promise<void> { await work.get(id)?.done; }

@@ -44,6 +44,18 @@ export async function changedPaths(cwd: string): Promise<string[]> {
   const out = (await execute(cwd, 'git', ['-c', 'core.hooksPath=/dev/null', 'status', '--porcelain', '--untracked-files=all'])).stdout;
   return out.split('\n').filter(Boolean).map(line => line.slice(3));
 }
+/** `status --porcelain -z`: each entry's two-letter code and its path, read without quoting. `ignored` lists what git ignores
+    too ('!!'; a folder that is ignored whole is one entry ending in '/'), and untracked folders as one entry each. */
+export async function statusEntries(cwd: string, options: { ignored?: boolean } = {}): Promise<Array<{ code: string; path: string }>> {
+  const out = (await execute(cwd, 'git', ['-c', 'core.hooksPath=/dev/null', 'status', '--porcelain', '-z', ...(options.ignored ? ['--ignored'] : ['--untracked-files=all'])])).stdout;
+  const fields = out.split('\0'), entries: Array<{ code: string; path: string }> = [];
+  for (let i = 0; i < fields.length; i++) {
+    if (!fields[i]) continue;
+    entries.push({ code: fields[i].slice(0, 2), path: fields[i].slice(3) });
+    if (/^[RC]/.test(fields[i])) i++;   // a rename's original path follows it
+  }
+  return entries;
+}
 const clean = async (cwd: string): Promise<boolean> => !(await git(cwd, 'status', '--porcelain'));
 const isMergeWorktree = (path: string): boolean => /^merge-[0-9a-f-]{36}$/.test(basename(path)) && within(config.workDir, path);
 

@@ -436,6 +436,7 @@ and `status --porcelain`, before and after.
 | 21 | **Auto ship never ships a copy** nor lands a copy's run | `auto ship leaves copies alone` (schedulerCycle with mode ship, as auto.test.ts drives it) |
 | 22 | **The read tells the truth**: ahead/behind by rev-list, health moved/dirty/missing | `the read says ahead, behind and health` |
 | 23 | **Retire never drops a commit nibbi didn't make**: a copy whose branch or folder moved outside nibbi is refused, nothing removed; an owner's commit kept on a branch of theirs outlives the retire | `retire keeps commits nibbi didn't make` |
+| 24 | **A copy broken by its install can still be retired**: what the install changed is put back, the folder is clean, retire removes it and the name is free | `an install that changes files makes a broken copy, and retire still removes it` |
 
 ---
 
@@ -945,6 +946,7 @@ The three builders' departures (each said in their commit) and the integrator's.
 | copy.retire | remove the worktree if git lists it | refuses with `notNibbis` unless git lists the folder with the copy's branch checked out there and nowhere else; a folder already gone but still listed gets a plain `worktree remove` first; a run waiting to land stays as it is. **Refuses a copy that moved outside nibbi** — its branch, or its folder's HEAD, isn't `headSha` — before anything changes: `retireMoved` names the commits past `headSha` (≤ 5), else the `moved` words; `branch -D` checks the branch is still at `headSha` right before it runs. `-D` alone dropped an owner's commit on the copy's branch (review F1) |
 | issue.create with `copyId` | store it after the write | checks the copy (live, ready, not GitHub) before anything is written; in GitHub mode `issue.build` ignores a stored copy and builds on main |
 | copy.play | live and ready | also refuses unless its health is ok, the model's play rule |
+| copy.create, a broken copy | fail or abort → `broken` | what its own install changed in the new copy goes back first (a tracked file restored with `git restore --worktree`, a new one removed; what git ignores stays), so retire, never forced, can remove it. Before, a lockless `npm install` project — the install nibbi itself picks for a package.json with no lockfile — left a broken copy whose `package-lock.json` retire refused as a file "nibbi didn't make", holding its name and one of the five for good (review F2). Such a project's copies are still broken until main has a lockfile committed |
 | recovery | — | startup doesn't wait for `landWaiting`; passed copy runs that never got a landing attempt try once; a copy stuck `retiring` goes back to `broken` if it has an error, else `ready` |
 | builds-model.js `buildMain` | main's BuildVM | phase 1's `blocked` and `play` shapes when the input has no `copies` key (phase 1's suite compares them whole); with one, `buildsCard(input).builds[0]` |
 | margin-ui.js name rule | import `copyNameProblem` | its own copy (the bar imports only the contract); a test holds the two to the same words |

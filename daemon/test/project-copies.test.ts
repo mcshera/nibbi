@@ -416,6 +416,28 @@ test('retire leaves a copy with files nibbi didn’t make', async () => {
   assert.equal(await exists(repo, 'refs/heads/nibbi/copy/dev'), false); assert.equal((await git(repo, 'worktree', 'list', '--porcelain')).includes('copies/retire-dirty/dev'), false);
 });
 
+test('an install that changes files makes a broken copy, and retire still removes it', async () => {
+  // A lockless npm project's shape: its install writes a lockfile main doesn't have (a stand-in for `npm install`).
+  const repo = await project('install-dirty', { install: 'mkdir -p node_modules && touch node_modules/stamp && echo {} > package-lock.json' });
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n'); await git(repo, 'add', '.'); await git(repo, 'commit', '-m', 'ignore installs');
+  const made = await copies.createCopy('install-dirty', 'dev'); await copies.waitForCopy(made.id);
+  const copy = copyOf(made.id);
+  assert.equal(copy.status, 'broken'); assert.equal(copy.error, 'its install changed files in it: package-lock.json');
+  // What its install changed is put back as the checkout had it; what git ignores is left for retire.
+  assert.equal(await git(copy.worktree, 'status', '--porcelain'), ''); assert.equal(existsSync(join(copy.worktree, 'package-lock.json')), false);
+  const main = await snapshot(repo);
+  await copies.retireCopy('install-dirty', copy.id, copy.headSha);
+  assert.equal(copyOf(copy.id).status, 'retired'); assert.equal(existsSync(copy.worktree), false); assert.equal(await exists(repo, 'refs/heads/nibbi/copy/dev'), false);
+  assert.deepEqual(await snapshot(repo), main);
+  // An install that rewrites a file main tracks: broken too, put back, and the name is free again after retire.
+  updateProject('install-dirty', { install: 'echo more >> README.md' });
+  const again = await copies.createCopy('install-dirty', 'dev'); await copies.waitForCopy(again.id);
+  assert.equal(copyOf(again.id).status, 'broken'); assert.equal(copyOf(again.id).error, 'its install changed files in it: README.md');
+  assert.equal(await git(again.worktree, 'status', '--porcelain'), ''); assert.equal(readFileSync(join(again.worktree, 'README.md'), 'utf8'), readFileSync(join(repo, 'README.md'), 'utf8'));
+  await copies.retireCopy('install-dirty', again.id, copyOf(again.id).headSha); assert.equal(copyOf(again.id).status, 'retired');
+  assert.deepEqual(await snapshot(repo), main);
+});
+
 test('retire keeps commits nibbi didn’t make', async () => {
   const repo = await project('retire-moved'); const copy = await makeCopy('retire-moved');
   const holders = (commit: string): Promise<string> => git(repo, 'for-each-ref', '--contains', commit, '--format=%(refname)');
