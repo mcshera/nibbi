@@ -1,4 +1,4 @@
-/* The control panel's pages, phase 1: the build page (main) and the ticket page (an improvement).
+/* The control panel's pages: the build page (main, and in phase 2 a copy: dev, dev1 …) and the ticket page (an improvement).
    Ported from the lab's round five Console (design/sidebar-lab/options/tree-console.css, tc- → cp-),
    every rule scoped under .cp-page, which renders inside the #project-workspace frame.
 
@@ -366,9 +366,67 @@
 .cp-page .cp-hist[data-state]:not([data-state="in"]) .cp-hist-link { color: var(--ink-3); }
 .cp-page .cp-hist-empty { padding: 4px 0; }
 
+/* ---------------------------------------------------------------- phase 2: main's copies, and a copy's page */
+/* main: "copies of main", a row per copy (the improvement row's grid, a branch glyph in the dot's column) */
+.cp-page .cp-copy-glyph { color: var(--ink-3); }
+.cp-page .cp-copies-why { margin: 10px 0 0; max-width: 62ch; font-size: var(--type-fine); color: var(--ink-3); }
+/* the timeline's own rows (made · shipped · caught up): words in ink-2, the sha in mono */
+.cp-page .cp-hist-text { min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.cp-page .cp-hist-text .cp-mono { color: var(--ink-3); }
+/* the head: kicker, the name with its headline in a pill, the copy line; Ship to main top right */
+.cp-page .cp-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.cp-page .cp-head-state {
+  display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: var(--r-pill);
+  font-size: var(--type-fine); font-weight: 500; background: var(--paper-raised); box-shadow: var(--cp-ring);
+}
+.cp-page .cp-head-state[data-tone="quiet"] { color: var(--ink-2); }
+.cp-page .cp-head-detail { font-size: var(--type-fine); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.cp-page .cp-head-why { margin: 2px 0 0; max-width: 62ch; font-size: var(--type-fine); line-height: 1.45; color: var(--ink-3); }
+.cp-page .cp-page-head > .cp-head-ship { flex: none; margin-top: calc(44px - var(--cp-key) / 2); }   /* centred on the h1, as the × is */
+/* Ship to main, asked on the page: what ships, what stays, the checks, then yes */
+.cp-page .cp-ship { margin: 0 0 20px; padding: 18px 20px 20px; border-radius: var(--r-panel); background: var(--notice-bed); box-shadow: 0 0 0 1px var(--veil-edge); }
+.cp-page .cp-ship-title { margin: 0; font-size: var(--type-field); font-weight: 600; line-height: 1.3; letter-spacing: -.01em; color: var(--ink); }
+.cp-page .cp-ship-lead { margin: 4px 0 0; max-width: 70ch; font-size: var(--type-control); line-height: var(--leading-body); color: var(--ink-2); }
+.cp-page .cp-ship-list { list-style: none; margin: 14px 0 0; padding: 0; border-radius: var(--r-well); background: var(--paper-raised); box-shadow: var(--cp-ring), var(--e-highlight); overflow: hidden; }
+.cp-page .cp-ship-item + .cp-ship-item { border-top: 1px solid var(--line); }
+.cp-page .cp-ship-open {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: baseline; gap: 10px; width: 100%; min-height: 44px;
+  padding: 11px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: background-color var(--t1) var(--ease); -webkit-tap-highlight-color: transparent;
+}
+.cp-page .cp-ship-open:active { background: var(--veil-press); }
+.cp-page .cp-ship-open:focus-visible { outline: var(--focus-ring); outline-offset: -2px; border-radius: var(--r-well); }
+@media (hover: hover) { .cp-page .cp-ship-open:hover:not(:active) { background: var(--veil-hover); } }
+.cp-page .cp-ship-word { font-weight: 500; }
+.cp-page .cp-ship-text { min-width: 0; font-size: var(--type-control); font-weight: 500; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.cp-page .cp-ship-meta { font-size: var(--type-fine); color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cp-page .cp-ship-stays { margin: 10px 0 0; font-size: var(--type-fine); line-height: 1.45; color: var(--ink-3); overflow-wrap: anywhere; }
+.cp-page .cp-ship-checks { margin-top: 16px; }
+.cp-page .cp-ship-checks .cp-checks { flex-direction: row; flex-wrap: wrap; column-gap: 24px; }
+.cp-page .cp-ship-checks .cp-check-name { flex: none; }
+.cp-page .cp-ship-checks .cp-check-note { flex-basis: auto; }   /* one line per check: its name, its verdict, when and on what */
+.cp-page .cp-ship-check-line { margin: 4px 0 0; font-size: var(--type-fine); line-height: 1.45; color: var(--ink-2); }
+.cp-page .cp-ship-facts { margin: 6px 0 0; font-size: var(--type-fine); line-height: 1.45; color: var(--ink-3); }
+.cp-page .cp-ship-moved { margin-top: 8px; }
+.cp-page .cp-ship-keys { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+/* the notice's one way on ("see main") */
+.cp-page .cp-notice-link { flex: none; }
+/* the tiles: the last catch-up that didn't go through, under "against main"; catch up as its key */
+.cp-page .cp-tile-note { margin: 4px 0 0; font-size: var(--type-fine); line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.cp-page .cp-tile-note[data-tone="error"] { color: var(--fail-quiet); }
+.cp-page .cp-tile-extra .cp-act { margin-top: 4px; }
+/* catch up, asked while the copy plays */
+.cp-page .cp-catch-confirm { margin: 16px 0 0; }
+/* retire, quiet at the foot */
+.cp-page .cp-retire { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; margin-top: 32px; padding-top: 14px; border-top: 1px solid var(--line); }
+.cp-page .cp-retire > .cp-retire-note { flex: 1 1 280px; font-size: var(--type-fine); }
+.cp-page .cp-retire > .cp-retire-why { flex: 1 1 100%; margin: 0; font-size: var(--type-fine); line-height: 1.45; color: var(--ink-2); }
+.cp-page .cp-retire > .cp-retire-error { flex: 1 1 100%; }
+.cp-page .cp-retire > .cp-confirm { flex: 1 1 100%; margin: 0; }
+
 /* ---------------------------------------------------------------- motion, only where it is allowed */
 @media (prefers-reduced-motion: no-preference) {
-  body:not(.calm) .cp-page :is(.cp-confirm, .cp-steer, .cp-edit, .cp-add) { animation: arrive var(--t3) var(--ease); }
+  body:not(.calm) .cp-page :is(.cp-confirm, .cp-steer, .cp-edit, .cp-add, .cp-ship) { animation: arrive var(--t3) var(--ease); }
   body:not(.calm) .cp-page .cp-dot.cp-page-live, body:not(.calm) .cp-page .cp-step[data-status="running"]::before { animation: pulse 1.2s var(--ease) infinite; }
   body:not(.calm) .cp-page .cp-page-word.cp-page-live { animation: cp-page-pulse 1.2s var(--ease) infinite; }
   body:not(.calm) .cp-page .cp-act-ink:active:not(:disabled, [aria-disabled="true"]) { transform: scale(.96); }   /* the page's one primary */
@@ -422,6 +480,17 @@
   .cp-page .cp-hist:not(:last-child)::after { left: 7.5px; }
   .cp-page .cp-hist-link { min-height: var(--touch); margin-block: -11px; padding-block: 11px; }
   .cp-page .cp-talk-key { margin-left: 0; }
+  /* a copy: Ship to main takes its own row under the title, full width — a thumb's key, never squeezed beside the name */
+  .cp-page.cp-copy-page .cp-page-head { flex-wrap: wrap; }
+  .cp-page.cp-copy-page .cp-page-head > .cp-title { flex: 1 1 0; }
+  .cp-page.cp-copy-page .cp-page-head > .project-close { order: 1; }
+  .cp-page.cp-copy-page .cp-page-head > .cp-head-ship { order: 2; flex: 1 1 100%; margin-top: 2px; }
+  .cp-page .cp-ship { padding: 16px; }
+  .cp-page .cp-ship-open { grid-template-columns: 26px minmax(0, 1fr); row-gap: 2px; }
+  .cp-page .cp-ship-meta { grid-column: 2; white-space: normal; }
+  .cp-page .cp-ship-keys .cp-act { flex: 1 1 auto; }
+  .cp-page .cp-tile-note { grid-column: 1 / -1; }
+  .cp-page .cp-retire > .cp-retire-note { flex-basis: 100%; }
 }
 @media (max-height: 520px) {
   .cp-page .cp-page-head { padding-bottom: 8px; }

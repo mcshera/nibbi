@@ -7,12 +7,15 @@
 //
 //   CI=1 node --test tests/project-pages-ui.test.mjs
 //   CP_PAGES_SHOTS=<dir> writes the screenshots there (default output/playwright/project-pages)
+//
+// Phase 2 (docs/BUILDS-AS-COPIES.md §4.4): a copy's page in every headline, the gone page, main's copies and a
+// copy's ticket, from literal VMs in the contract's shapes (PHASE2 and COPY_TICKETS), and every copy key pressed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
 import { chromium } from 'playwright';
-import { WORDS, STATE_WORDS, STATE_TONES, GROUPS } from '../public/lib/control-panel-contract.js';
+import { WORDS, STATE_WORDS, STATE_TONES, GROUPS, COPY_STATE_WORDS, COPY_STATE_TONES, COPY_LIVE } from '../public/lib/control-panel-contract.js';
 
 const root = resolve('public');
 const SHOTS = process.env.CP_PAGES_SHOTS || resolve('output/playwright/project-pages');
@@ -196,10 +199,123 @@ const BUILDS = {
 };
 const project = { id: 'paper-garden', name: 'paper-garden', branch: 'codex/tighter-chat-spacing' };
 function model(name, over = {}) {
+  if (PHASE2[name]) { const e = PHASE2[name]; return { page: { project: 'paper-garden', page: 'build', id: e.id }, project, build: e.build(), builds: [], ticket: null, busy: false, demo: false, now: NOW, ...over }; }
+  if (COPY_TICKETS[name]) { const t = COPY_TICKETS[name](); return { page: { project: 'paper-garden', page: 'ticket', id: t.improvement.id }, project, build: PHASE2['copy-ready'].build(), builds: [], ticket: t, busy: false, demo: false, now: NOW, ...over }; }
   if (BUILDS[name]) return { page: { project: 'paper-garden', page: 'build', id: 'main' }, project, build: BUILDS[name](), ticket: null, busy: false, demo: name === 'build-demo', now: NOW, ...over };
   const t = TICKETS[name]();
   return { page: { project: 'paper-garden', page: 'ticket', id: t.improvement.id }, project, build: build(), ticket: t, busy: false, demo: false, now: NOW, ...over };
 }
+
+/* ------------------------------------------------------------------------------------------ phase 2: copies, as builds-model.js makes them (BUILDS-AS-COPIES §4.2) */
+const C = WORDS.copy;
+const DEV_ID = 'copy-5b0c8f1e-2d4a-4e7b-9c3f-1a2b3c4d5e6f', DEV1_ID = 'copy-9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b';
+const HEAD = '787c4f2e9a1b3c5d7f9e0a1b2c3d4e5f6a7b8c9d', MOVED = '3f9a1c07b2d4e6f8a0b1c2d3e4f5a6b7c8d9e0f1', BASE = 'eb6a2391c0d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8';
+const agoWords = t => { const s = (NOW - Date.parse(t)) / 1000; return s < 90 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`; };
+const busyWords = (name, status) => fill(C.notReady, { name, status: C.statusWords[status] });
+const DEV = {
+  tap: imp('run:d-tap', 'double-tap on join starts two games', 'in', { when: { verb: 'landed', at: at(3 * m) }, build: 'dev' }),
+  lobby: imp('run:d-lobby', 'remember the last lobby', 'in', { when: { verb: 'landed', at: at(2 * H) }, build: 'dev' }),
+  music: imp('issue:music', 'queue music between rounds', 'up_next', { context: 'you asked for it', build: 'dev' }),
+  timer: imp('run:d-timer', 'tighten the round timer', 'building', { live: true, when: { verb: 'started', at: at(12 * m) }, context: 'try 1', build: 'dev' }),
+};
+const madeRow = (ago_ = 5 * d) => ({ kind: 'made', at: at(ago_), text: fill(C.made, { sha: BASE.slice(0, 7) }), tone: 'quiet', improvementId: null, sha: BASE });
+const DEV_HISTORY = [
+  { kind: 'landed', at: at(3 * m), text: DEV.tap.title, tone: 'pass', improvementId: DEV.tap.id, sha: HEAD },
+  { kind: 'started', at: at(40 * m), text: DEV.tap.title, tone: 'quiet', improvementId: DEV.tap.id, sha: '' },
+  { kind: 'failed', at: at(90 * m), text: DEV.tap.title, tone: 'error', improvementId: DEV.tap.id, sha: '' },
+  { kind: 'landed', at: at(2 * H), text: DEV.lobby.title, tone: 'pass', improvementId: DEV.lobby.id, sha: 'a41e0c2' },
+  madeRow(),
+];
+/** A copy's BuildVM, every field the contract names. `o` sets the facts a state differs by. */
+function copyVM(o = {}) {
+  const name = o.name ?? 'dev', copyId = o.copyId ?? DEV_ID, head = o.head ?? HEAD, ahead = o.ahead ?? 0, behind = o.behind ?? 0, status = o.status ?? 'ready';
+  const improvements = o.improvements ?? [];
+  const n = s => improvements.filter(i => i.state === s).length, g = id => improvements.filter(i => i.group === id).length;
+  const counts = { waiting: g('waiting'), needsYou: n('needs_you'), ready: n('ready'), building: g('building'), upNext: n('up_next'), in: n('in'), inToday: n('in'), failed: n('failed'), interrupted: n('interrupted') };
+  const play = { playable: true, running: false, starting: false, url: null, blocked: '', note: fill(C.playNote, { name, sha: head.slice(0, 7) }), lastCommit: '', stops: 'main', kind: 'server', playedAt: null, ...o.play };
+  const verified = o.verified === undefined ? { sha: head, at: at(3 * m), command: 'npm test' } : o.verified;
+  const checks = [{ name: 'npm test', ok: verified ? true : null, note: verified ? `verified 3m ago on ${head.slice(0, 7)}` : `not run on ${name} yet` }];
+  const ins = improvements.filter(i => i.state === 'in'), stays = improvements.filter(i => i.state !== 'in');
+  const shipWhy = o.shipWhy ?? '', blocked = { start: '', queue: '', play: play.blocked, ship: shipWhy, catchUp: '', retire: '', ...o.blocked };
+  const payload = { copyId, expectedHead: head };
+  const unshipped = ins.length === 0 ? '' : ins.length === 1 ? C.retireUnshippedOne : fill(C.retireUnshippedMany, { n: ins.length });
+  const state = o.state;
+  return {
+    id: name, name, kind: 'copy', copyId, branch: `nibbi/copy/${name}`, line: C.line,
+    word: fill(COPY_STATE_WORDS[state], { n: counts.building || counts.upNext, badge: o.badge ?? '' }), state, tone: COPY_STATE_TONES[state], live: COPY_LIVE.includes(state),
+    note: ahead > 0 ? fill(C.lineAhead, { ahead }) : C.line, count: [counts.in && `${counts.in} in`, play.running && C.playing].filter(Boolean).join(' · '),
+    detail: o.detail ?? '', copyLine: fill(C.copyLine, { ahead, behind }), ahead, behind, head: head.slice(0, 7), status, health: o.health ?? 'ok', healthWords: o.healthWords ?? '',
+    verified, checks, madeAt: o.madeAt ?? at(5 * d), madeFrom: { branch: 'main', sha: BASE.slice(0, 7) },
+    badge: { text: '', tone: 'quiet' }, attention: { text: '', tone: 'quiet' }, counts, play,
+    check: { command: 'npm test', real: true }, github: o.github ?? null, improvements, settled: [], list: 'ready', blocked,
+    ship: {
+      ready: !shipWhy, why: shipWhy, ships: ins, stays, lead: shipWhy || (ins.length === 1 ? C.shipLeadOne : fill(C.shipLeadMany, { n: ins.length })),
+      checks, checksLine: fill(C.shipChecks, { command: 'npm test' }),
+      facts: [play.playedAt ? fill(C.shipPlayed, { name, ago: agoWords(play.playedAt) }) : fill(C.shipNotPlayed, { name }), behind ? '' : fill(C.shipLevel, { name })].filter(Boolean),
+      yes: ins.length === 1 ? C.shipYesOne : fill(C.shipYesMany, { n: ins.length }), no: C.shipNo, payload,
+    },
+    catchUp: {
+      needed: behind > 0, blocked: blocked.catchUp || (behind > 0 ? '' : fill(C.catchUpLevel, { name })),
+      confirm: play.running && behind > 0 ? { words: fill(C.catchUpPlaying, { name }), yes: C.catchUpYes, no: C.catchUpNo, armed: false } : null,
+      payload: { ...payload, stopPlay: !!play.running }, last: o.last ?? null,
+    },
+    retire: {
+      blocked: blocked.retire, note: fill(C.retireNote, { name }), unshipped: ins.length, payload,
+      confirm: { words: fill(C.retireConfirm, { name, unshipped }) + (play.running ? C.retirePlaying : ''), yes: fill(C.retireYes, { name }), no: fill(C.retireNo, { name }), armed: true },
+    },
+    history: o.history ?? DEV_HISTORY, copies: [],
+  };
+}
+const githubVM = { mode: 'github', repository: 'owner/paper-garden', integrationBranch: 'v2', releaseBranch: 'main' };
+const allBusy = (name, status) => { const w = busyWords(name, status); return { shipWhy: w, blocked: { start: w, queue: w, play: w, catchUp: w, retire: status === 'broken' ? '' : w } }; };
+const readyDev = (o = {}) => copyVM({ state: 'ready_to_ship', ahead: 3, improvements: [DEV.music, DEV.tap, DEV.lobby], detail: '2 in · 1 up next', play: { playedAt: at(1 * m), stops: '' }, ...o });
+const behindDev = (o = {}) => copyVM({ state: 'behind', ahead: 2, behind: 1, improvements: [DEV.tap, DEV.lobby], detail: '2 in', shipWhy: fill(C.shipBehind, { name: 'dev' }), play: { playedAt: at(20 * m) }, ...o });
+const conflictWords = fill(C.catchUpConflict, { name: 'dev', files: 'src/lobby.js' });
+/** name → the page it opens: a copy's page in every headline, the gone page, and main with its copies. */
+const PHASE2 = {
+  'copy-nothing': { id: 'dev', build: () => copyVM({ state: 'nothing', verified: null, madeAt: at(1 * H), shipWhy: fill(C.shipNothing, { name: 'dev' }), history: [madeRow(1 * H)] }) },
+  'copy-ready': { id: 'dev', build: () => readyDev() },
+  'copy-ready-play': { id: 'dev', build: () => readyDev({ state: 'ready_to_play', play: { playedAt: null, stops: 'main' } }) },
+  'copy-ready-playing': { id: 'dev', build: () => readyDev({ play: { running: true, url: 'http://127.0.0.1:5174/', playedAt: at(1 * m), stops: '' } }) },
+  'copy-shipping': { id: 'dev', build: () => readyDev({ state: 'shipping', status: 'shipping', ...allBusy('dev', 'shipping') }) },
+  'copy-behind': { id: 'dev', build: () => behindDev() },
+  'copy-catching': { id: 'dev', build: () => behindDev({ state: 'catching_up', status: 'catching_up', ...allBusy('dev', 'catching_up') }) },
+  'copy-conflict': { id: 'dev', build: () => behindDev({ last: { at: at(1 * m), ok: false, words: conflictWords }, history: [{ kind: 'catch_up_failed', at: at(1 * m), text: fill(C.catchUpFailed, { why: 'main and dev both changed src/lobby.js' }), tone: 'error', improvementId: null, sha: '' }, ...DEV_HISTORY] }) },
+  'copy-playing': { id: 'dev', build: () => behindDev({ play: { running: true, url: 'http://127.0.0.1:5174/', playedAt: at(2 * m), stops: '' } }) },
+  'copy-retiring': { id: 'dev', build: () => readyDev({ state: 'retiring', status: 'retiring', ...allBusy('dev', 'retiring') }) },
+  'copy-building': { id: 'dev', build: () => copyVM({ state: 'building', ahead: 1, improvements: [DEV.timer, DEV.lobby], detail: '1 in', play: { playedAt: at(1 * H) }, blocked: { retire: fill(C.retireBuilding, { name: 'dev' }) } }) },
+  'copy-making': { id: 'dev', build: () => copyVM({ state: 'making', status: 'creating', verified: null, madeAt: at(10_000), history: [madeRow(10_000)], ...allBusy('dev', 'creating') }) },
+  'copy-broken': { id: 'dev', build: () => copyVM({ state: 'broken', status: 'broken', verified: null, healthWords: fill(C.broken, { name: 'dev', error: 'npm install exited 1' }), ...allBusy('dev', 'broken') }) },
+  'copy-changed': { id: 'dev', build: () => { const w = fill(C.dirty, { name: 'dev' }); return readyDev({ state: 'changed', health: 'dirty', healthWords: w, shipWhy: w, blocked: { start: w, queue: w, play: w, catchUp: w } }); } },
+  'copy-other-branch': { id: 'dev', build: () => readyDev({ shipWhy: fill(C.shipCheckoutOther, { branch: 'codex/tighter-chat-spacing', base: 'main' }) }) },
+  'copy-github': { id: 'dev', build: () => { const w = fill(C.githubMode, { project: 'paper-garden' }); return copyVM({ state: 'ready_to_play', ahead: 1, improvements: [DEV.lobby], github: githubVM, shipWhy: w, blocked: { start: w, queue: w, play: w, catchUp: w }, play: { blocked: w } }); } },
+  'copy-gone': { id: 'dev', build: () => null },
+  'main-copies': { id: 'main', build: () => build({
+    kind: 'main', copyId: null, state: 'live', tone: 'quiet', live: false,
+    improvements: [...BUILD_IMPS.slice(0, 7), imp('run:d-old', 'a lobby you can leave', 'in', { when: { verb: 'shipped', at: at(5 * H) }, context: fill(C.shippedContext, { name: 'dev' }) }), BUILD_IMPS[7]],
+    play: { ...build().play, stops: 'dev' }, history: [{ kind: 'shipped', at: at(5 * H), text: fill(C.shippedLine, { name: 'dev', n: 2 }), tone: 'quiet', improvementId: null, sha: '9f1c2ab7d3e4' }],
+    copies: [
+      { name: 'dev', copyId: DEV_ID, word: COPY_STATE_WORDS.ready_to_ship, tone: 'attention', live: false, note: fill(C.lineAhead, { ahead: 3 }) },
+      { name: 'dev1', copyId: DEV1_ID, word: COPY_STATE_WORDS.behind, tone: 'attention', live: false, note: C.line },
+    ],
+  }) },
+  'main-copies-empty': { id: 'main', build: () => build({ kind: 'main', copies: [], history: [] }) },
+  'main-copies-github': { id: 'main', build: () => build({ kind: 'main', copies: [], history: [], line: fill(WORDS.mainLineOther, { branch: 'v2' }), branch: 'v2', github: githubVM }) },
+};
+/** A copy's improvement, on its ticket: it lives in dev (the crumb draws dev's branch), landing on its own. */
+function copyTicket(i, statusLine, actions) {
+  const t = ticket(i, { statusLine, actions, attempts: [attempt(i.id.slice(4), 1, i.state, { target: 'nibbi/copy/dev', sha: HEAD.slice(0, 7), live: i.live, initialTab: 'changes' })] });
+  t.facts = [{ label: 'build', value: 'dev', key: 'fact-build' }, ...t.facts.slice(1)];
+  return { ...t, build: 'dev', buildKind: 'copy', copyId: DEV_ID, branch: 'nibbi/copy/dev' };
+}
+const COPY_TICKETS = {
+  'ticket-copy-landing': () => copyTicket(imp('run:d-tap', DEV.tap.title, 'landing', { live: true, build: 'dev' }), fill(C.landing, { name: 'dev' }),
+    [A('discardRun', WORDS.keys.discard, 'discard', { runId: 'd-tap' }, { confirm: confirmDiscard(DEV.tap.title) })]),
+  'ticket-copy-waiting': () => copyTicket(imp('run:d-tap', DEV.tap.title, 'waiting_to_land', { build: 'dev' }), fill(C.waitingToLand, { name: 'dev' }),
+    [A('playCopy', fill(WORDS.copyKeys.stopPlayingCopy, { name: 'dev' }), 'stop-copy', { copyId: DEV_ID, action: 'stop' }, { tone: 'ink' }), A('discardRun', WORDS.keys.discard, 'discard', { runId: 'd-tap' }, { confirm: confirmDiscard(DEV.tap.title) })]),
+  'ticket-copy-in': () => copyTicket(imp('run:d-lobby', DEV.lobby.title, 'in', { when: { verb: 'landed', at: at(2 * H) }, build: 'dev' }), fill(C.inCopy, { name: 'dev', when: '2h' }),
+    [A('buildEvidence', WORDS.keys.changes, 'see-changes', { id: 'd-lobby', kind: 'changes', attemptId: 'd-lobby-attempt' }, { tab: 'changes' })]),
+};
 
 /* ------------------------------------------------------------------------------------------ the harness */
 const LOG = [
@@ -887,4 +1003,503 @@ test('on touch, the crumb back to main and the history links are 44px however wi
       assert.deepEqual(h.errors, []);
     } finally { await h.context.close(); }
   } finally { await browser.close(); }
+});
+
+/* ------------------------------------------------------------------------------------------ phase 2: a copy's page, main's copies, a copy's ticket */
+const inkKeys = page => page.locator('.cp-page .cp-act-ink:visible').evaluateAll(els => els.map(el => el.dataset.cpKey));
+const focused = page => page.evaluate(() => document.activeElement?.dataset.cpKey || document.activeElement?.tagName || null);
+const noSends = calls => calls.filter(c => !['buildEvidence', 'githubRead', 'githubRefresh'].includes(c.name));
+const withIntent = { page: { project: 'paper-garden', page: 'build', id: 'dev', intent: 'ship' } };
+const fresh = async (h, name, over = {}) => { await h.page.evaluate(() => pages.close()); await h.open(name, over); await h.settle(); };
+const toBottom = page => page.locator('.cp-page-body').evaluate(el => { el.scrollTop = el.scrollHeight; });
+
+test('phase 2: every copy page, the gone page and main with its copies draw at 1180×820 and 390×844', async () => {
+  const browser = await launch();
+  try {
+    for (const [viewport, touch] of [[DESKTOP, false], [PHONE, true]]) {
+      const h = await harness(browser, viewport, { touch });
+      try {
+        for (const name of Object.keys(PHASE2)) {
+          await h.open(name); await h.settle();
+          await h.page.locator('.cp-page-body').evaluate(el => { el.scrollTop = 0; });   // a page keeps its scroll: start each state at its top
+          const mdl = model(name), b = mdl.build;
+          const root = await h.page.locator('.cp-page').evaluate(el => ({ page: el.dataset.cpPage, id: el.dataset.cpId, copy: el.classList.contains('cp-copy-page') }));
+          assert.deepEqual([root.page, root.id], ['build', PHASE2[name].id], name);
+          if (b?.kind === 'copy') {
+            assert.equal(root.copy, true, `${name}: a copy's page`);
+            const head = h.page.locator('.cp-head-state');
+            assert.equal(await head.innerText(), b.word, `${name}: the headline says ${b.word}`);
+            assert.equal(await head.getAttribute('data-tone'), b.tone, `${name}: in its tone`);
+            assert.equal(await head.evaluate(el => el.classList.contains('cp-page-live')), b.live, `${name}: pulses only while work is happening`);
+            assert.equal(await h.page.locator('.cp-copyline').innerText(), b.copyLine);
+            assert.equal(await h.page.locator('.cp-kicker').innerText(), WORDS.copy.kicker);
+            assert.equal(await h.page.locator('.cp-kicker [data-glyph="branch"]').count(), 1, 'a copy wears the branch glyph');
+            assert.equal(await h.page.locator('.cp-page-head [data-cp-key="ship"]').count(), 1, `${name}: ship to main sits in the head`);
+            assert.equal(await h.page.locator('.cp-retire').count(), 1, `${name}: retire is at the foot`);
+            assert.equal(await h.page.locator('.cp-history .cp-section-title').innerText(), 'history');
+            const text = await h.page.locator('.cp-page').innerText();
+            for (const w of new Set([...Object.values(b.blocked), b.ship.why, b.healthWords].filter(Boolean)))
+              assert.ok(text.split(w).length - 1 <= 1, `${name}: “${w}” is said at most once`);
+          } else if (b) {
+            assert.equal(root.copy, false);
+            assert.equal(await h.page.locator('.cp-page-head [data-cp-key="ship"]').count(), 0, 'main has no ship');
+            assert.equal(await h.page.locator('.cp-copies .cp-section-title').innerText(), WORDS.copy.copiesTitle);
+          } else {
+            assert.equal(await h.page.locator('.cp-page h1').innerText(), WORDS.copy.gone);
+            assert.equal(await h.page.locator('.cp-gone').innerText(), WORDS.copy.goneNote);
+            assert.deepEqual(await h.page.locator('.cp-page button').evaluateAll(els => els.map(el => el.dataset.cpKey)), ['close'], 'the gone page keeps only ×');
+          }
+          assert.ok((await inkKeys(h.page)).length <= 1, `${name}: at most one ink key at ${viewport.width}`);
+          assert.deepEqual(await overflow(h.page), { page: false, body: false }, `${name}: nothing scrolls sideways at ${viewport.width}`);
+          if (touch) assert.deepEqual(await shortKeys(h.page), [], `${name}: every key is 44 tall at 390 touch`);
+          await shot(h.page, name, viewport);
+          if (['copy-ready', 'copy-conflict', 'copy-building', 'main-copies'].includes(name)) { await toBottom(h.page); await shot(h.page, `${name}-foot`, viewport); }
+        }
+        // what a copy's page opens: the ship panel (by openShip's intent), catch up asked while it plays, the armed retire strip, + improvement
+        await fresh(h, 'copy-ready', withIntent);
+        assert.equal(await h.page.locator('.cp-ship').isVisible(), true);
+        assert.deepEqual(await inkKeys(h.page), ['ship-yes']);
+        if (touch) assert.deepEqual(await shortKeys(h.page), []);
+        assert.deepEqual(await overflow(h.page), { page: false, body: false });
+        await shot(h.page, 'copy-ready-ship', viewport);
+        await fresh(h, 'copy-behind', withIntent);
+        await shot(h.page, 'copy-behind-ship', viewport);
+        await fresh(h, 'copy-playing'); await h.page.locator('[data-cp-key="catch-up"]').click();
+        assert.equal(await h.page.locator('.cp-catch-confirm').isVisible(), true);
+        if (touch) assert.deepEqual(await shortKeys(h.page), []);
+        await shot(h.page, 'copy-playing-catch-up', viewport);
+        await fresh(h, 'copy-ready'); await h.page.locator('[data-cp-key="retire"]').click();
+        assert.equal(await h.page.locator('.cp-retire .armed').count(), 1);
+        assert.deepEqual(await inkKeys(h.page), [], 'an armed question leaves no ink key, only its red yes');
+        if (touch) assert.deepEqual(await shortKeys(h.page), []);
+        await shot(h.page, 'copy-ready-retire', viewport);
+        await fresh(h, 'copy-behind'); await h.page.locator('[data-cp-key="add"]').click(); await h.page.locator('[data-cp-key="add-field"]').fill('a louder lobby bell');
+        assert.deepEqual(await inkKeys(h.page), ['play'], 'play keeps the ink; start now is seated beside it');
+        await shot(h.page, 'copy-behind-adding', viewport);
+        for (const name of Object.keys(COPY_TICKETS)) {
+          await h.open(name); await h.settle();
+          assert.ok((await inkKeys(h.page)).length <= 1, name);
+          assert.deepEqual(await overflow(h.page), { page: false, body: false }, name);
+          if (touch) assert.deepEqual(await shortKeys(h.page), [], name);
+          await shot(h.page, name, viewport);
+        }
+        assert.deepEqual(h.errors, []);
+      } finally { await h.context.close(); }
+    }
+  } finally { await browser.close(); }
+});
+
+test('phase 2: ship to main asks twice on the page — the list, the checks, then yes; openShip opens it; a new head redraws it', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  const sent = async () => noSends(await h.calls());
+  try {
+    await h.open('copy-ready'); await h.settle(); await h.clear();
+    const ship = h.page.locator('[data-cp-key="ship"]');
+    assert.deepEqual(await inkKeys(h.page), ['ship'], 'ready and closed: ship to main is the ink key');
+    assert.equal(await ship.getAttribute('title'), fill(WORDS.copy.shipTitle, { name: 'dev' }));
+    await ship.click();
+    assert.equal(await h.page.locator('.cp-ship').isVisible(), true, 'the first press opens the panel');
+    assert.equal(await ship.getAttribute('aria-expanded'), 'true');
+    assert.equal(await focused(h.page), 'ship-no', 'focus is on its not yet');
+    assert.deepEqual(await sent(), [], 'and sends nothing');
+    assert.deepEqual(await inkKeys(h.page), ['ship-yes'], 'open: its yes takes the ink');
+    assert.equal(await h.page.locator('.cp-ship-title').innerText(), fill(WORDS.copy.shipTitle, { name: 'dev' }));
+    assert.equal(await h.page.locator('.cp-ship-lead').innerText(), fill(WORDS.copy.shipLeadMany, { n: 2 }));
+    assert.deepEqual(await h.page.locator('.cp-ship-open').evaluateAll(els => els.map(el => [el.querySelector('.cp-ship-word').textContent, el.querySelector('.cp-ship-text').textContent, el.querySelector('.cp-ship-meta').textContent])),
+      [['in', DEV.tap.title, 'landed 3m ago'], ['in', DEV.lobby.title, 'landed 2h ago']], 'what goes into main');
+    assert.equal(await h.page.locator('.cp-ship-open .cp-ship-word').first().getAttribute('data-tone'), 'pass');
+    assert.equal(await h.page.locator('.cp-ship-stays').innerText(), fill(WORDS.copy.shipStays, { name: 'dev', list: `“${DEV.music.title}” (up next)` }));
+    assert.deepEqual(await h.page.locator('.cp-ship .cp-check').evaluateAll(els => els.map(el => el.innerText.replace(/\s+/g, ' ').trim())), [`npm test passed verified 3m ago on ${HEAD.slice(0, 7)}`]);
+    assert.equal(await h.page.locator('.cp-ship-check-line').innerText(), fill(WORDS.copy.shipChecks, { command: 'npm test' }));
+    assert.equal(await h.page.locator('.cp-ship-facts').innerText(), [fill(WORDS.copy.shipPlayed, { name: 'dev', ago: 'just now' }), fill(WORDS.copy.shipLevel, { name: 'dev' })].join(' · '));
+    assert.equal(await h.page.locator('[data-cp-key="ship-yes"]').innerText(), fill(WORDS.copy.shipYesMany, { n: 2 }));
+    // no, Escape and the head key all close it; focus goes back to ship
+    await h.page.locator('[data-cp-key="ship-no"]').click();
+    assert.equal(await h.page.locator('.cp-ship').count(), 0); assert.equal(await focused(h.page), 'ship');
+    await ship.click(); await h.page.keyboard.press('Escape');
+    assert.equal(await h.page.locator('.cp-ship').count(), 0, 'Escape closes it'); assert.equal(await focused(h.page), 'ship');
+    await ship.click(); await ship.click();
+    assert.equal(await h.page.locator('.cp-ship').count(), 0, 'the key that opened it closes it');
+    // an item opens its ticket
+    await ship.click(); await h.page.locator(`[data-cp-key="ship-${DEV.lobby.id}"]`).click();
+    await h.page.waitForFunction(() => window.calls.length === 1);
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['openImprovement', DEV.lobby.id]]);
+    await h.clear();
+    // survives an update; a new head while it is open: it lists the new head, says so, and focus goes to not yet
+    await h.update('copy-ready', { now: NOW + 30_000 });
+    assert.equal(await h.page.locator('.cp-ship').isVisible(), true, 'an open panel survives an update');
+    await h.page.locator('[data-cp-key="ship-yes"]').focus();
+    await h.page.evaluate(mdl => pages.update(mdl), model('copy-ready', { build: readyDev({ head: MOVED, improvements: [DEV.music, imp('run:d-bell', 'ring a bell when a round ends', 'in', { when: { verb: 'landed', at: at(1 * m) } }), DEV.tap, DEV.lobby] }) }));
+    assert.equal(await h.page.locator('.cp-ship-moved').innerText(), fill(WORDS.copy.headMoved, { name: 'dev' }));
+    assert.equal(await h.page.locator('.cp-ship-open').count(), 3, 'the list is the new head’s');
+    assert.equal(await focused(h.page), 'ship-no', 'focus goes back to not yet');
+    assert.deepEqual(await sent(), []);
+    // yes: held while it is out (a second press does nothing, the panel stays as it was asked), then the notice
+    await h.page.evaluate(() => { window.hold = { name: 'shipCopy' }; });
+    await h.page.locator('[data-cp-key="ship-yes"]').click();
+    assert.equal(await h.page.locator('[data-cp-key="ship-yes"]').getAttribute('aria-busy'), 'true');
+    await h.page.locator('[data-cp-key="ship-yes"]').click({ force: true });
+    await h.update('copy-shipping');
+    assert.equal(await h.page.locator('.cp-head-state').innerText(), 'shipping', 'the headline moves on');
+    assert.equal(await h.page.locator('.cp-ship-open').count(), 3, 'while its yes is out the panel stays as it was asked');
+    await h.page.evaluate(() => { window.hold.release(); window.hold = null; });
+    await h.page.locator('.cp-ship').waitFor({ state: 'detached' });
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['shipCopy', { copyId: DEV_ID, expectedHead: MOVED }]], 'one shipCopy, with the head the panel listed');
+    assert.equal(await h.page.locator('.cp-notice span').innerText(), fill(WORDS.copy.shipDoneMany, { n: 3 }));
+    assert.equal(await focused(h.page), 'see-main');
+    await h.clear(); await h.page.locator('[data-cp-key="see-main"]').click();
+    await h.page.waitForFunction(() => window.calls.length === 1);
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['openBuild', 'main']]);
+    // a refusal is said in the notice, in the verdict colour, and the panel stays
+    await h.open('copy-ready'); await h.settle(); await h.clear();
+    await h.page.evaluate(m => { window.fail.shipCopy = { message: m }; }, fill(WORDS.copy.shipCheckoutDirty, {}));
+    await ship.click(); await h.page.locator('[data-cp-key="ship-yes"]').click();
+    await h.page.locator('.cp-notice[data-kind="error"]').waitFor();
+    assert.equal(await h.page.locator('.cp-notice').innerText(), WORDS.copy.shipCheckoutDirty);
+    assert.equal(await h.page.locator('.cp-ship').isVisible(), true);
+    assert.equal(await focused(h.page), 'ship-no');
+    await h.page.evaluate(() => { delete window.fail.shipCopy; });
+    // openShip: the page opens with the panel open and focus on not yet — once; an update with the same intent doesn't reopen it
+    await h.page.evaluate(() => pages.close());
+    await h.open('copy-ready', withIntent, true); await h.settle();
+    assert.equal(await h.page.locator('.cp-ship').isVisible(), true);
+    assert.equal(await focused(h.page), 'ship-no');
+    assert.equal(await h.page.evaluate(() => pages.snapshot().confirming), 'shipCopy');
+    await h.page.keyboard.press('Escape');
+    await h.update('copy-ready', { ...withIntent, now: NOW + 60_000 });
+    assert.equal(await h.page.locator('.cp-ship').count(), 0, 'closed stays closed');
+    assert.equal(await h.page.evaluate(() => pages.snapshot().confirming), null);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: one ink key on a copy’s page, in every combination', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  try {
+    const cases = [
+      ['copy-ready', null, ['ship'], 'ready, closed: ship to main'],
+      ['copy-ready', 'ship', ['ship-yes'], 'ready, open: its yes'],
+      ['copy-ready-playing', null, ['ship'], 'ready while it plays: still ship (play is running)'],
+      ['copy-ready-play', null, ['ship'], 'ready to play is only a word: ship can still go'],
+      ['copy-behind', null, ['play'], 'can’t ship: play'],
+      ['copy-behind', 'ship', ['play'], 'can’t ship, panel open by openShip: its yes is disabled, play keeps the ink'],
+      ['copy-playing', null, [], 'can’t ship and it plays: nothing'],
+      ['copy-playing', 'add', ['add-start'], 'then the form’s start now'],
+      ['copy-playing', 'catch-up', ['catch-up-yes'], 'catch up asked while it plays: its yes'],
+      ['copy-ready', 'retire', [], 'retire asked: an armed question, no ink'],
+      ['copy-making', null, [], 'busy being made: nothing'],
+      ['copy-nothing', null, ['play'], 'nothing to ship: play'],
+      ['copy-nothing', 'add', ['play'], 'nothing to ship, form open: play keeps it'],
+    ];
+    for (const [i, [name, open, want, why]] of cases.entries()) {
+      await h.open(name, { page: { project: 'paper-garden', page: 'build', id: `dev-case-${i}`, intent: open === 'ship' ? 'ship' : undefined } }); await h.settle();
+      if (open === 'add') { await h.page.locator('[data-cp-key="add"]').click(); await h.page.locator('[data-cp-key="add-field"]').fill('a louder bell'); }
+      if (open === 'catch-up') await h.page.locator('[data-cp-key="catch-up"]').click();
+      if (open === 'retire') await h.page.locator('[data-cp-key="retire"]').click();
+      assert.deepEqual(await inkKeys(h.page), want, `${name}${open ? ` (${open} open)` : ''}: ${why}`);
+    }
+    await h.open('copy-behind', withIntent); await h.settle();
+    assert.equal(await h.page.locator('[data-cp-key="ship-yes"]').isDisabled(), true);
+    assert.equal(await h.page.locator('[data-cp-key="ship-yes"]').getAttribute('title'), fill(WORDS.copy.shipBehind, { name: 'dev' }));
+    assert.equal(await h.page.locator('.cp-ship-lead').innerText(), fill(WORDS.copy.shipBehind, { name: 'dev' }), 'the panel leads with why');
+    assert.equal(await h.page.locator('[data-cp-key="ship"]').isDisabled(), false, 'the head key stays live while its panel is open: it closes it');
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: ship to main is disabled with its why, said once — unless the headline already says it; the demo backstop', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  try {
+    for (const [name, why, line] of [
+      ['copy-behind', fill(WORDS.copy.shipBehind, { name: 'dev' }), false],
+      ['copy-nothing', fill(WORDS.copy.shipNothing, { name: 'dev' }), false],
+      ['copy-shipping', fill(WORDS.copy.notReady, { name: 'dev', status: WORDS.copy.statusWords.shipping }), false],
+      ['copy-other-branch', fill(WORDS.copy.shipCheckoutOther, { branch: 'codex/tighter-chat-spacing', base: 'main' }), true],
+      ['copy-changed', fill(WORDS.copy.dirty, { name: 'dev' }), true],
+      ['copy-github', fill(WORDS.copy.githubMode, { project: 'paper-garden' }), true],
+    ]) {
+      await h.open(name); await h.settle(); await h.clear();
+      const ship = h.page.locator('[data-cp-key="ship"]');
+      assert.equal(await ship.isDisabled(), true, `${name}: ship is disabled`);
+      assert.equal(await ship.getAttribute('title'), why, `${name}: its title says why`);
+      assert.equal(await h.page.locator('.cp-head-why').count(), line ? 1 : 0, `${name}: the why ${line ? 'shows once under the copy line' : 'is the headline already'}`);
+      if (line) assert.equal(await h.page.locator('.cp-head-why').innerText(), why);
+      assert.ok((await h.page.locator('.cp-page').innerText()).split(why).length - 1 <= 1, `${name}: the reason is said at most once`);
+      await ship.dispatchEvent('click');
+      assert.equal(await h.page.locator('.cp-ship').count(), 0, `${name}: a disabled ship opens nothing`);
+      assert.deepEqual(noSends(await h.calls()), []);
+    }
+    // a GitHub-mode project's copy: every key disabled with the reason, except retire
+    await h.open('copy-github'); await h.settle();
+    const gh = fill(WORDS.copy.githubMode, { project: 'paper-garden' });
+    assert.equal(await h.page.locator('[data-cp-key="play"]').getAttribute('title'), gh);
+    assert.equal((await h.page.locator('.cp-page').innerText()).split(gh).length - 1, 1, 'one reason stops ship and play: it is said once, under the copy line');
+    assert.equal(await h.page.locator('.cp-preview-hint').count(), 0);
+    await h.page.locator('[data-cp-key="add"]').click();
+    for (const k of ['add-start', 'add-queue']) assert.equal(await h.page.locator(`[data-cp-key="${k}"]`).getAttribute('title'), gh);
+    assert.equal(await h.page.locator('[data-cp-key="retire"]').isDisabled(), false, 'retire still works, to clean up');
+    // demo: the page's backstop refuses ship, play and catch up in words even when the model forgot
+    await h.open('copy-ready', { demo: true }); await h.settle();
+    assert.equal(await h.page.locator('[data-cp-key="ship"]').getAttribute('title'), WORDS.demoChange);
+    assert.equal(await h.page.locator('[data-cp-key="play"]').getAttribute('title'), WORDS.demoPlay);
+    assert.equal(await h.page.locator('[data-cp-key="retire"]').isDisabled(), true);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: catch up goes at once, asks first while the copy plays, and says what didn’t go through', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  const sent = async () => noSends(await h.calls());
+  try {
+    await h.open('copy-behind'); await h.settle(); await h.clear();
+    const tiles = await h.page.locator('.cp-tile').evaluateAll(els => els.map(el => el.innerText.replace(/\s+/g, ' ').trim()));
+    assert.deepEqual(tiles, ['improvements 2 2 in', `checks on dev passed verified 3m ago on ${HEAD.slice(0, 7)}`, 'against main 2 ahead 1 behind — main moved on catch up']);
+    assert.equal(await h.page.locator('.cp-tile [data-tone="pass"]').innerText(), 'passed', 'passed is the verdict colour');
+    const catchUp = h.page.locator('[data-cp-key="catch-up"]');
+    await catchUp.click();
+    await h.page.waitForFunction(() => window.calls.some(c => c.name === 'catchUpCopy'));
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['catchUpCopy', { copyId: DEV_ID, expectedHead: HEAD, stopPlay: false }]], 'not playing: one press, no question');
+    await h.page.locator('.cp-notice:not([hidden])').waitFor();
+    assert.equal(await h.page.locator('.cp-notice').innerText(), fill(WORDS.copy.catchUpDone, { name: 'dev' }));
+    // a refusal: the daemon's words, in the verdict colour
+    await h.clear();
+    await h.page.evaluate(m => { window.fail.catchUpCopy = { message: m }; }, conflictWords);
+    await catchUp.click();
+    await h.page.locator('.cp-notice[data-kind="error"]').waitFor();
+    assert.equal(await h.page.locator('.cp-notice').innerText(), conflictWords);
+    await h.page.evaluate(() => { delete window.fail.catchUpCopy; });
+    // the last catch-up that didn't go through stays said under the tile, and in the history
+    await h.open('copy-conflict'); await h.settle();
+    const note = h.page.locator('.cp-tile-note');
+    assert.equal(await note.innerText(), conflictWords);
+    assert.equal(await note.evaluate(el => getComputedStyle(el).color), await probe(h.page, '--fail-quiet'));
+    assert.match(await h.page.locator('.cp-hist[data-kind="catch_up_failed"]').innerText(), /couldn’t catch up — main and dev both changed src\/lobby\.js/);
+    // while it plays: the page asks (it stops playing first); no and Escape close it; yes sends stopPlay
+    await h.open('copy-playing'); await h.settle(); await h.clear();
+    await catchUp.click();
+    assert.equal(await h.page.locator('.cp-catch-confirm .cp-confirm-words').innerText(), fill(WORDS.copy.catchUpPlaying, { name: 'dev' }));
+    assert.equal(await catchUp.getAttribute('aria-expanded'), 'true');
+    assert.equal(await focused(h.page), 'catch-up-no');
+    assert.deepEqual(await sent(), [], 'the first press sends nothing');
+    await h.page.locator('[data-cp-key="catch-up-no"]').click();
+    assert.equal(await h.page.locator('.cp-catch-confirm').count(), 0); assert.equal(await focused(h.page), 'catch-up');
+    await catchUp.click(); await h.page.keyboard.press('Escape');
+    assert.equal(await h.page.locator('.cp-catch-confirm').count(), 0); assert.equal(await focused(h.page), 'catch-up');
+    await catchUp.click();
+    await h.update('copy-playing', { now: NOW + 30_000 });
+    assert.equal(await h.page.locator('.cp-catch-confirm').count(), 1, 'the question survives an update');
+    await h.page.locator('[data-cp-key="catch-up-yes"]').click();
+    await h.page.waitForFunction(() => window.calls.some(c => c.name === 'catchUpCopy'));
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['catchUpCopy', { copyId: DEV_ID, expectedHead: HEAD, stopPlay: true }]]);
+    assert.equal(await h.page.locator('.cp-catch-confirm').count(), 0, 'answered, it closes');
+    // it stopped playing under an open question: the question goes (its words would be wrong)
+    await catchUp.click(); await h.update('copy-behind');
+    assert.equal(await h.page.locator('.cp-catch-confirm').count(), 0);
+    assert.equal(await focused(h.page), 'catch-up');
+    // catching up: the key waits, in words
+    await h.open('copy-catching'); await h.settle();
+    assert.equal(await catchUp.isDisabled(), true);
+    assert.equal(await catchUp.getAttribute('title'), fill(WORDS.copy.notReady, { name: 'dev', status: WORDS.copy.statusWords.catching_up }));
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: retire asks with an armed strip, refuses while building, says a refusal where it was asked, and the page becomes gone', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  const sent = async () => noSends(await h.calls());
+  try {
+    await h.open('copy-ready'); await h.settle(); await h.clear();
+    assert.equal(await h.page.locator('.cp-retire-note').innerText(), fill(WORDS.copy.retireNote, { name: 'dev' }));
+    const retire = h.page.locator('[data-cp-key="retire"]');
+    assert.equal(await retire.innerText(), fill(WORDS.copy.retireKey, { name: 'dev' }));
+    await retire.click();
+    assert.equal(await h.page.locator('.cp-retire .cp-confirm-words').innerText(), fill(WORDS.copy.retireConfirm, { name: 'dev', unshipped: fill(WORDS.copy.retireUnshippedMany, { n: 2 }) }));
+    assert.equal(await focused(h.page), 'retire-no');
+    assert.equal(await h.page.locator('[data-cp-key="retire-yes"]').evaluate(el => el.classList.contains('armed')), true, 'its yes is the red one');
+    assert.equal(await h.page.locator('[data-cp-key="retire-no"]').innerText(), fill(WORDS.copy.retireNo, { name: 'dev' }));
+    assert.deepEqual(await sent(), []);
+    assert.equal(await h.page.evaluate(() => pages.snapshot().confirming), 'retireCopy');
+    await h.page.locator('[data-cp-key="retire-no"]').click();
+    assert.equal(await h.page.locator('.cp-retire .cp-confirm').count(), 0); assert.equal(await focused(h.page), 'retire');
+    await retire.click(); await h.page.keyboard.press('Escape');
+    assert.equal(await h.page.locator('.cp-retire .cp-confirm').count(), 0); assert.equal(await focused(h.page), 'retire');
+    // one question at a time: opening the ship panel closes the retire strip
+    await retire.click(); await h.page.locator('[data-cp-key="ship"]').click();
+    assert.deepEqual([await h.page.locator('.cp-ship').count(), await h.page.locator('.cp-retire .cp-confirm').count()], [1, 0]);
+    await h.page.keyboard.press('Escape');
+    // a refusal: said at the foot, where it was asked
+    const dirty = fill(WORDS.copy.retireDirty, { name: 'dev', files: 'notes.txt' });
+    await h.page.evaluate(m => { window.fail.retireCopy = { message: m }; }, dirty);
+    await retire.click(); await h.page.locator('[data-cp-key="retire-yes"]').click();
+    await h.page.locator('.cp-retire-error').waitFor();
+    assert.equal(await h.page.locator('.cp-retire-error').innerText(), dirty);
+    assert.equal(await focused(h.page), 'retire');
+    assert.equal(await h.page.locator('.cp-notice').isHidden(), true, 'not in the notice at the top, out of sight');
+    await h.page.evaluate(() => { delete window.fail.retireCopy; });
+    // yes: one retireCopy with the head the strip was asked at; then the page becomes the gone page
+    await h.clear(); await retire.click();
+    assert.equal(await h.page.locator('.cp-retire-error').count(), 0, 'asking again clears the refusal');
+    await h.page.locator('[data-cp-key="retire-yes"]').click();
+    await h.page.waitForFunction(() => window.calls.some(c => c.name === 'retireCopy'));
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['retireCopy', { copyId: DEV_ID, expectedHead: HEAD }]]);
+    await h.update('copy-gone');
+    assert.equal(await h.page.locator('.cp-page h1').innerText(), WORDS.copy.gone);
+    assert.deepEqual(await h.page.locator('.cp-page button').evaluateAll(els => els.map(el => el.dataset.cpKey)), ['close']);
+    assert.equal(await h.page.evaluate(() => document.activeElement?.tagName), 'H1', 'focus lands on the gone page’s title');
+    // building: retire is disabled and says why; pressing it asks nothing
+    await h.open('copy-building'); await h.settle(); await h.clear();
+    assert.equal(await retire.isDisabled(), true);
+    assert.equal(await retire.getAttribute('title'), fill(WORDS.copy.retireBuilding, { name: 'dev' }));
+    assert.equal(await h.page.locator('.cp-retire-why').innerText(), fill(WORDS.copy.retireBuilding, { name: 'dev' }));
+    await retire.dispatchEvent('click');
+    assert.equal(await h.page.locator('.cp-retire .cp-confirm').count(), 0);
+    // a try starts under an open strip: the strip goes and the words say why
+    await h.open('copy-ready'); await h.settle(); await retire.click();
+    await h.update('copy-building');
+    assert.equal(await h.page.locator('.cp-retire .cp-confirm').count(), 0);
+    assert.equal(await h.page.locator('.cp-retire-why').innerText(), fill(WORDS.copy.retireBuilding, { name: 'dev' }));
+    assert.deepEqual(await sent(), []);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: a copy plays one at a time, and its + improvement lands in it', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  const sent = async () => noSends(await h.calls());
+  try {
+    await h.open('copy-nothing'); await h.settle(); await h.clear();
+    const play = h.page.locator('[data-cp-key="play"]');
+    assert.equal(await play.innerText(), fill(WORDS.copy.play, { name: 'dev' }));
+    assert.equal(await h.page.locator('.cp-preview-hint').innerText(), `not played yet · ${fill(WORDS.copy.oneAtATime, { other: 'main' })}`);
+    assert.match(await h.page.locator('.cp-preview-foot').innerText(), new RegExp(`${fill(WORDS.copy.playNote, { name: 'dev', sha: HEAD.slice(0, 7) })}[\\s\\S]*made from main 1h ago · ${BASE.slice(0, 7)}`));
+    assert.equal((await h.page.locator('.cp-tile').nth(1).innerText()).replace(/\s+/g, ' ').trim(), 'checks on dev not run yet npm test runs when an improvement lands or dev catches up', 'a fresh copy says when its checks run');
+    await play.click();
+    await h.page.waitForFunction(() => window.calls.length === 1);
+    await h.open('copy-playing'); await h.settle();
+    assert.equal(await h.page.locator('.cp-preview-big').innerText(), 'dev is playing');
+    assert.match(await h.page.locator('.cp-preview-bar').innerText(), /127\.0\.0\.1:5174/);
+    await h.page.locator('[data-cp-key="play-open"]').click(); await h.page.locator('[data-cp-key="play-stop"]').click();
+    await h.page.waitForFunction(() => window.calls.length === 3);
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['playCopy', { copyId: DEV_ID, action: 'start' }], ['playCopy', { copyId: DEV_ID, action: 'open' }], ['playCopy', { copyId: DEV_ID, action: 'stop' }]]);
+    // a project that plays at a fixed address: a copy can't have its own, in words
+    const fixed = fill(WORDS.copy.fixedAddress, { project: 'paper-garden' });
+    await h.page.evaluate(mdl => pages.update(mdl), model('copy-ready', { build: readyDev({ play: { playable: false, kind: 'url', blocked: fixed } }) }));
+    assert.match(await h.page.locator('.cp-preview-stage').innerText(), new RegExp(`this one can’t be played[\\s\\S]*${fixed}`));
+    // + improvement: its placeholder and hint name the copy; start now and up next carry its copyId
+    await h.open('copy-behind'); await h.settle(); await h.clear();
+    await h.page.locator('[data-cp-key="add"]').click();
+    assert.equal(await h.page.locator('[data-cp-key="add-field"]').getAttribute('placeholder'), fill(WORDS.copy.formPlaceholder, { name: 'dev' }));
+    assert.equal(await h.page.locator('.cp-add-hint').innerText(), fill(WORDS.copy.formHint, { name: 'dev' }));
+    await h.page.keyboard.type('a louder lobby bell'); await h.page.keyboard.press('Enter');
+    await h.page.locator('.cp-add').waitFor({ state: 'detached' });
+    await h.page.locator('[data-cp-key="add"]').click(); await h.page.keyboard.type('confetti when a round is won');
+    await h.page.locator('[data-cp-key="add-queue"]').click();
+    await h.page.locator('.cp-add').waitFor({ state: 'detached' });
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['startImprovement', { text: 'a louder lobby bell', copyId: DEV_ID }], ['queueImprovement', { text: 'confetti when a round is won', copyId: DEV_ID }]]);
+    await h.open('copy-nothing'); await h.settle();
+    assert.equal(await h.page.locator('.cp-imps-empty').innerText(), WORDS.copy.emptyImprovements);
+    // the history: a try's verb in its verdict's colour and a link to it; the copy's own rows with the sha in mono
+    await h.open('copy-ready'); await h.settle(); await h.clear();
+    assert.deepEqual(await h.page.locator('.cp-history .cp-hist').evaluateAll(els => els.map(el => [el.dataset.kind, el.querySelector('.cp-hist-word')?.textContent ?? '', el.querySelector('.cp-hist-link, .cp-hist-text').textContent])), [
+      ['landed', 'landed', DEV.tap.title], ['started', 'started', DEV.tap.title], ['failed', 'failed', DEV.tap.title], ['landed', 'landed', DEV.lobby.title], ['made', '', fill(WORDS.copy.made, { sha: BASE.slice(0, 7) })],
+    ]);
+    assert.equal(await h.page.locator('.cp-hist[data-kind="made"] .cp-mono').innerText(), BASE.slice(0, 7));
+    assert.equal(await h.page.locator('.cp-hist[data-kind="failed"] .cp-hist-word').getAttribute('data-tone'), 'error');
+    await h.page.locator(`[data-cp-key="hist-landed-${DEV.lobby.id}-${at(2 * H)}"]`).click();
+    await h.page.waitForFunction(() => window.calls.length === 1);
+    assert.deepEqual((await sent()).map(c => [c.name, c.value]), [['openImprovement', DEV.lobby.id]]);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: main’s page lists its copies, says why none can be made, and its history carries each ship', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  try {
+    await h.open('build'); await h.settle();
+    assert.equal(await h.page.locator('.cp-copies').count(), 0, 'a phase-1 view model draws no copies section');
+    await h.open('main-copies'); await h.settle(); await h.clear();
+    assert.deepEqual(await h.page.locator('.cp-copy').evaluateAll(els => els.map(el => [el.dataset.cpKey, el.querySelector('.cp-imp-text').textContent, el.querySelector('.cp-imp-sub').textContent, el.querySelector('.cp-imp-state').textContent])), [
+      ['copy-dev', 'dev', fill(WORDS.copy.lineAhead, { ahead: 3 }), COPY_STATE_WORDS.ready_to_ship], ['copy-dev1', 'dev1', WORDS.copy.line, COPY_STATE_WORDS.behind],
+    ]);
+    assert.equal(await h.page.locator('.cp-copy [data-glyph="branch"]').count(), 2);
+    await h.page.locator('[data-cp-key="copy-dev1"]').click();
+    await h.page.waitForFunction(() => window.calls.length === 1);
+    assert.deepEqual((await h.calls()).map(c => [c.name, c.value]), [['openBuild', 'dev1']]);
+    assert.equal(await h.page.locator('.cp-preview-hint').innerText(), fill(WORDS.copy.oneAtATime, { other: 'dev' }), 'main says what its play would stop');
+    const rows = await h.page.locator('.cp-history .cp-hist').evaluateAll(els => els.map(el => [el.querySelector('.cp-hist-word')?.textContent ?? '', el.querySelector('.cp-hist-link, .cp-hist-text').textContent]));
+    assert.deepEqual(rows.slice(0, 3), [['landed', 'save the first garden'], ['shipped', 'a lobby you can leave'], ['', `${fill(WORDS.copy.shippedLine, { name: 'dev', n: 2 })} 9f1c2ab`]], 'each ship sits where it fell in time');
+    await h.open('main-copies-empty'); await h.settle();
+    assert.equal(await h.page.locator('.cp-copies .cp-imps-empty').innerText(), WORDS.copy.copiesEmpty);
+    await h.open('main-copies-github'); await h.settle();
+    assert.equal(await h.page.locator('.cp-copies .cp-imps-empty').innerText(), fill(WORDS.copy.githubMode, { project: 'paper-garden' }));
+    await h.page.evaluate(mdl => pages.update(mdl), model('main-copies-empty', { build: { ...PHASE2['main-copies-empty'].build(), check: { command: '', real: false } } }));
+    assert.equal(await h.page.locator('.cp-copies .cp-imps-empty').innerText(), WORDS.copy.noCheck);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: a copy’s ticket — the crumb is the copy, and its keys are the copy’s', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  try {
+    await h.open('ticket-copy-landing'); await h.settle(); await h.clear();
+    const crumb = h.page.locator('[data-cp-key="crumb"]');
+    assert.equal(await crumb.innerText(), 'dev');
+    assert.equal(await crumb.locator('[data-glyph="branch"]').count(), 1, 'a copy’s crumb wears the branch glyph');
+    assert.equal(await crumb.getAttribute('title'), 'open dev’s build page');
+    assert.equal(await h.page.locator('.cp-status .cp-state').innerText(), STATE_WORDS.landing);
+    assert.equal(await h.page.locator('.cp-status-line').innerText(), fill(WORDS.copy.landing, { name: 'dev' }));
+    assert.equal(await h.page.locator('.cp-work .cp-section-meta').innerText(), '1 try · try 1 landing');
+    await crumb.click(); await h.page.locator('[data-cp-key="fact-build"]').click();
+    await h.page.waitForFunction(() => window.calls.filter(c => c.name === 'openBuild').length === 2);
+    assert.deepEqual(noSends(await h.calls()).map(c => [c.name, c.value]), [['openBuild', 'dev'], ['openBuild', 'dev']]);
+    await h.open('ticket-copy-waiting'); await h.settle(); await h.clear();
+    assert.deepEqual(await inkKeys(h.page), ['stop-copy']);
+    assert.equal(await h.page.locator('.cp-work .cp-section-meta').innerText(), '1 try · try 1 waiting to land');
+    assert.equal(await h.page.locator('[data-cp-key="stop-copy"] [data-glyph="stop"]').count(), 1);
+    await h.page.locator('[data-cp-key="stop-copy"]').click();
+    await h.page.waitForFunction(() => window.calls.some(c => c.name === 'playCopy'));
+    assert.deepEqual(noSends(await h.calls()).map(c => [c.name, c.value]), [['playCopy', { copyId: DEV_ID, action: 'stop' }]]);
+    await h.open('ticket-copy-waiting', { demo: true }); await h.settle();
+    assert.equal(await h.page.locator('[data-cp-key="stop-copy"]').getAttribute('title'), WORDS.demoPlay, 'demo refuses a copy’s play in words');
+    await h.open('ready'); await h.settle();
+    assert.equal(await h.page.locator('[data-cp-key="crumb"]').innerText(), 'main', 'main’s ticket keeps main’s crumb');
+    assert.equal(await h.page.locator('[data-cp-key="crumb"] [data-glyph="trunk"]').count(), 1);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
+});
+
+test('phase 2: Escape on a copy’s page takes back the question first, then the form, then leaves the event alone', async () => {
+  const browser = await launch();
+  const h = await harness(browser, DESKTOP);
+  const escape = () => h.page.evaluate(() => { const el = document.activeElement && document.querySelector('.cp-page').contains(document.activeElement) ? document.activeElement : document.querySelector('.cp-page-body'); return el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+  try {
+    await h.open('copy-ready'); await h.settle();
+    await h.page.locator('[data-cp-key="add"]').click(); await h.page.keyboard.type('a draft');
+    await h.page.locator('[data-cp-key="ship"]').click();
+    assert.equal(await escape(), false, 'the ship panel takes it');
+    assert.deepEqual([await h.page.locator('.cp-ship').count(), await h.page.locator('.cp-add').count()], [0, 1]);
+    assert.equal(await focused(h.page), 'ship');
+    assert.equal(await escape(), false, 'then the form');
+    assert.equal(await h.page.locator('.cp-add').count(), 0);
+    assert.equal(await escape(), true, 'then it goes on to the frame');
+    // one question at a time, and each survives an update as the same node
+    await h.page.locator('[data-cp-key="ship"]').click();
+    await h.page.evaluate(() => { window.heldPanel = document.querySelector('.cp-ship'); });
+    await h.update('copy-ready', { now: NOW + 5_000 });
+    assert.equal(await h.page.evaluate(() => window.heldPanel.isConnected), true, 'the open panel is the same node after an update');
+    await h.page.locator('[data-cp-key="retire"]').click();
+    assert.deepEqual([await h.page.locator('.cp-ship').count(), await h.page.locator('.cp-retire .cp-confirm').count()], [0, 1], 'retire closes the ship panel');
+    // leaving the page drops its question
+    await h.open('build'); await h.settle(); await h.open('copy-ready'); await h.settle();
+    assert.equal(await h.page.locator('.cp-retire .cp-confirm').count(), 0);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.context.close(); await browser.close(); }
 });
