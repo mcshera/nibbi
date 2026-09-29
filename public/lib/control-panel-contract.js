@@ -197,6 +197,8 @@ export const WORDS = Object.freeze({
   confirm: Object.freeze({
     merge: 'merge “{title}” into {branch}? nibbi runs the checks again on the merged code first.',
     discard: 'discard “{title}”? it leaves review — its branch and worktree are kept.',
+    discardFailed: 'discard “{title}”? it leaves the failed list — its branch and worktree are kept.',
+    discardTry: 'discard try {n} of “{title}”? it goes back to up next — its branch and worktree are kept.',
     stop: 'stop try {n}? what it has done so far stays in its worktree — {branch} is unchanged.',
   }),
 });

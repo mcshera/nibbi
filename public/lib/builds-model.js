@@ -501,12 +501,17 @@ function actionsOf(ctx, rec, attempts) {
   };
   const retry = () => add(key(ctx, 'retryRun', WORDS.keys.retry, 'retry', { runId }, { tone: 'ink' }));
   const stop = () => add(key(ctx, 'stopRun', WORDS.keys.stop, 'stop', { runId }, { confirm: { words: fill(WORDS.confirm.stop, { n: latest?.n ?? 1, branch: target }), yes: WORDS.keys.stopYes, no: WORDS.keys.stopNo, armed: true } }));
-  const discard = () => gated('run.discard', 'discardRun', WORDS.keys.discard, 'discard', { runId }, { confirm: { words: fill(WORDS.confirm.discard, { title }), yes: WORDS.keys.discardYes, no: WORDS.keys.keep, armed: true } });
+  const discard = (words = WORDS.confirm.discard) => gated('run.discard', 'discardRun', WORDS.keys.discard, 'discard', { runId }, { confirm: { words: fill(words, { title, n: latest?.n ?? 1 }), yes: WORDS.keys.discardYes, no: WORDS.keys.keep, armed: true } });
   const unverified = latest && latest.checks[0]?.ok !== true;
-
-  if (state === 'up_next' && rec.fromIssue && rec.item) {
+  // the issue's own keys: its words and its checkbox in issues.md, whatever its last try did
+  const openItem = rec.kind === 'issue' && !!rec.item && rec.item.done !== true;
+  const itemKeys = () => {
     add(key(ctx, 'editImprovement', WORDS.keys.edit, 'edit', { issueId: rec.issueId, title: str(rec.item.text) || title, description: str(rec.item.description), revision: ctx.revision }, { opens: 'form' }));
     add(key(ctx, 'completeImprovement', WORDS.keys.markDone, 'mark-done', { issueId: rec.issueId }));
+  };
+
+  if (state === 'up_next' && rec.fromIssue && rec.item) {
+    itemKeys();
     add(key(ctx, 'buildIssue', WORDS.keys.buildNow, 'build-now', { issueId: rec.issueId }, { tone: 'ink' }));
   } else if (state === 'up_next' && runId) {
     add(key(ctx, 'stopRun', WORDS.keys.cancelQueued, 'cancel', { runId }));
@@ -531,8 +536,12 @@ function actionsOf(ctx, rec, attempts) {
   } else if (state === 'in') {
     if (latest?.tabs.includes('changes')) add(key(ctx, 'buildEvidence', WORDS.keys.changes, 'see-changes', { id: runId, kind: 'changes', attemptId: latest.attemptId ?? undefined }, { tab: 'changes' }));
   } else if (state === 'failed' || state === 'interrupted') {
+    // try again is not the only way out: a failed try can be put away (the issue goes back to up next,
+    // a free-text one to settled), and an issue can be reworded or closed without another try
     ask();
     if (unverified && may('run.verify')) add(key(ctx, 'verifyRun', WORDS.keys.verify, 'verify', { runId }));
+    if (openItem) itemKeys();
+    if (runId) discard(openItem ? WORDS.confirm.discardTry : WORDS.confirm.discardFailed);
     if (runId) retry();
   } else if (state === 'stopped' || state === 'discarded') {
     if (runId) retry();

@@ -1,7 +1,7 @@
 // The control panel's behaviour in the real built app (docs/CONTROL-PANEL.md §8.5): the Cards bar and the
 // Console pages over real routes and real Git, never the live app. projectWorkflowFixture gives isolated
 // state, deterministic providers and a real project check, so a run really stages and really merges.
-// Twelve checks at 1180x820 and 390x844 touch, on paper-garden; each prints PASS or FAIL and a failure
+// Thirteen checks at 1180x820 and 390x844 touch, on paper-garden; each prints PASS or FAIL and a failure
 // does not stop the rest. Screenshots in output/playwright/control-panel/. Run by `npm run verify`.
 //
 // It also carries what tools/kanban-verify.mjs protected before the Issues board left the UI: a thing
@@ -259,6 +259,54 @@ try {
         } finally { release(); }
         await page.waitForFunction(() => !nibbiApp.state().busy, null, { timeout: 20_000 });
       }, page);
+
+      await check('13 a failed try is not stuck: discard puts it away', async () => {
+        const at = new Date(Date.now() - 60_000).toISOString();
+        for (const [id, extra] of [['cp-failed-free', { title: 'Paint the fence' }], ['cp-failed-issue', { title: 'Seedlings overlap', issueIds: ['seedling-overlap'] }]]) {
+          const r = { id, game: PROJECT, project: PROJECT, repo: join(process.env.NIBBI_PROJECTS_DIR, PROJECT), issue: extra.title, branch: 'nibbi/' + id, targetBranch: 'main', worktree: join(process.env.NIBBI_WORK_DIR, id), status: 'failed', startedAt: at, endedAt: at, provider: 'claude', executionKind: 'provider', workflowMode: 'local', attemptId: 'attempt-' + id, verification: { status: 'unverified' }, summary: 'tests broke', ...extra };
+          fixture.runtime.put('fixers', id, r, { type: 'run.updated', projectId: PROJECT, runId: id, payload: { run: r } });
+        }
+        const keysOf = ticket => ticket.locator('.cp-actions [data-cp-key]').evaluateAll(els => els.map(el => el.dataset.cpKey));
+        const discardReady = () => page.waitForFunction(() => { const k = document.querySelector('#project-workspace .cp-page [data-cp-key="discard"]'); return k && !k.disabled; }, null, { timeout: 10_000 });
+        async function discard(ticket, id) {
+          const before = commands.length;
+          await ticket.locator('[data-cp-key="discard"]').click();
+          await ticket.locator('.cp-confirm:not([hidden])').waitFor();
+          await page.waitForTimeout(300);
+          assert.equal(fixture.runtime.get('fixers', id).status, 'failed', 'the first press only asks');
+          assert.deepEqual(commands.slice(before), [], 'and sends nothing');
+          await ticket.locator('[data-cp-key="confirm-yes"]').click();
+          await until('the discard', () => fixture.runtime.get('fixers', id).status === 'discarded');
+          assert.deepEqual(commands.slice(before), ['run.discard'], 'the second press discards, once');
+        }
+        // a free-text try leaves the failed list for main's settled ones
+        await (await row(page, 'run:cp-failed-free')).click();
+        const free = await ready(page, 'ticket', 'run:cp-failed-free');
+        await discardReady();
+        assert.deepEqual(await keysOf(free), ['ask', 'discard', 'retry']);
+        await shot(page, 'failed-ticket-1180');
+        await discard(free, 'cp-failed-free');
+        await page.waitForFunction(() => document.querySelector('#project-workspace .cp-page')?.dataset.state === 'discarded');
+        await page.locator('.project-close:visible').click();
+        await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
+        const fold = bar(page, '[data-cp-fold]:not([aria-expanded="true"])'); if (await fold.count()) await fold.first().click();
+        await page.waitForFunction(() => !document.querySelector('#workspace-sidebar [data-bar-improvement="run:cp-failed-free"]'));
+        await bar(page, '[data-bar-build="main"]').click();
+        const build = await ready(page, 'build', 'main');
+        assert.equal(await build.locator('.cp-hist[data-state="discarded"] [data-cp-key="hist-run:cp-failed-free"]').count(), 1, 'the build page keeps it with the settled ones');
+        // an issue's failed try: its words and its checkbox stay; put away, the issue is up next again
+        await (await row(page, 'issue:seedling-overlap')).click();
+        const issue = await ready(page, 'ticket', 'issue:seedling-overlap');
+        await page.waitForFunction(() => document.querySelector('#project-workspace .cp-page')?.dataset.state === 'failed');
+        await discardReady();
+        assert.deepEqual(await keysOf(issue), ['ask', 'edit', 'mark-done', 'discard', 'retry']);
+        await discard(issue, 'cp-failed-issue');
+        await page.waitForFunction(() => document.querySelector('#project-workspace .cp-page')?.dataset.state === 'up_next');
+        assert.equal(await bar(page, '[data-bar-improvement="issue:seedling-overlap"]').getAttribute('data-state'), 'up_next');
+        assert.deepEqual(await keysOf(issue), ['edit', 'mark-done', 'build-now']);
+        await page.locator('.project-close:visible').click();
+        await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
+      }, page);
     } finally { await context.close(); }
   }
 
@@ -327,4 +375,4 @@ try {
   await fixture.close();
 }
 if (failed) { console.error(`Control panel checks: ${failed} failed, ${passed} passed.`); process.exitCode = 1; }
-else console.log(`Control panel checks passed (${passed}): chat by default, a build row and an improvement row open their pages, + improvement starts or keeps in place, a staged ticket asks twice and merges, plans are unreachable, × and Escape come back, starting waits for the reply in words, 44px at 390 touch, every control presses, and only building words move.`);
+else console.log(`Control panel checks passed (${passed}): chat by default, a build row and an improvement row open their pages, + improvement starts or keeps in place, a staged ticket asks twice and merges, a failed one can be put away, plans are unreachable, × and Escape come back, starting waits for the reply in words, 44px at 390 touch, every control presses, and only building words move.`);

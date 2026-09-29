@@ -98,7 +98,8 @@ test('interrupted is not a verdict: its own word in ink, in the failed group, ne
   assert.equal(m.counts.failed, 0); assert.equal(m.counts.interrupted, 1);
   const t = ticketOf(input({ runs: [run('i', { status: 'interrupted' })] }), 'run:i');
   assert.equal(t.statusLine, 'the backend stopped mid-run — its work is kept; try again when you’re ready');
-  assert.deepEqual(keys(t), ['ask', 'retry']); assert.deepEqual(inks(t), ['retry']);
+  assert.deepEqual(keys(t), ['ask', 'discard', 'retry']); assert.deepEqual(inks(t), ['retry']);
+  assert.equal(action(t, 'discard').blocked, WORDS.reading, 'discard waits on the read that says the run allows it');
   // a failed one outranks it in the badge, in the verdict colour
   assert.deepEqual(buildMain(input({ runs: [run('i', { status: 'interrupted' }), run('f', { status: 'failed' })] })).badge, { text: '1 failed', tone: 'error' });
 });
@@ -298,7 +299,7 @@ test('a run whose issue left issues.md is its own chain in the bar; the old issu
   assert.equal(t.gone, false); assert.equal(t.improvement.id, 'issue:gone-one'); assert.equal(t.improvement.state, 'failed');
   assert.equal(t.improvement.context, 'its note is gone from issues.md'); assert.equal(t.improvement.title, 'seedlings overlap');
   assert.equal(t.statusLine, 'No changes produced; nothing to stage — main is unchanged');
-  assert.deepEqual(keys(t), ['ask', 'retry']);
+  assert.deepEqual(keys(t), ['ask', 'discard', 'retry'], 'its note is gone, so there are no words to edit or box to tick');
   // nothing names it any more: gone, only × stays
   const gone = ticketOf(input({ issues }), 'issue:nobody');
   assert.equal(gone.gone, true); assert.equal(gone.statusLine, WORDS.gone); assert.deepEqual(gone.actions, []); assert.deepEqual(gone.attempts, []);
@@ -346,8 +347,10 @@ test('failed says its reason and that main is unchanged; try again is the ink ke
   const t = ticketOf(input({ runs: [r1, r2], sectionRuns: [read(r2, ['run.retry', 'run.verify', 'run.discard'])] }), 'run:f1');
   assert.equal(t.statusLine, 'Command failed: npm test — main is unchanged');
   assert.equal(t.improvement.reason, 'Command failed: npm test');
-  assert.deepEqual(keys(t), ['ask', 'verify', 'retry']); assert.deepEqual(inks(t), ['retry']);
+  assert.deepEqual(keys(t), ['ask', 'verify', 'discard', 'retry']); assert.deepEqual(inks(t), ['retry']);
   assert.deepEqual(action(t, 'retry').payload, { runId: 'f2' }); assert.deepEqual(action(t, 'ask').payload, { improvementId: 'run:f1' });
+  assert.deepEqual(action(t, 'discard').payload, { runId: 'f2' });
+  assert.deepEqual(action(t, 'discard').confirm, { words: 'discard “title f1”? it leaves the failed list — its branch and worktree are kept.', yes: 'confirm discard', no: 'keep it', armed: true });
   const last = t.attempts[1];
   assert.equal(last.summary, '', 'its summary is the reason'); assert.equal(last.reason, 'Command failed: npm test');
   assert.deepEqual(last.steps.map(s => s.state), ['done', 'done', 'failed', 'waiting']);
@@ -356,6 +359,35 @@ test('failed says its reason and that main is unchanged; try again is the ink ke
   assert.equal(t.facts.find(f => f.label === 'time').value, '34m', 'the sum of both tries');
   // work that failed before the check
   assert.deepEqual(ticketOf(input({ runs: [run('w', { status: 'failed', summary: 'Provider reported a failed run' })] }), 'run:w').attempts[0].steps.map(s => s.state), ['done', 'failed', 'waiting', 'waiting']);
+});
+
+test('a failed or interrupted try is not stuck: discard puts it away, and an issue keeps its words and its checkbox (§4.5)', () => {
+  const issues = { status: 'ready', revision: REV, items: [item('i', 'rows drift', { description: 'After a storm.' })] };
+  for (const status of ['failed', 'interrupted']) {
+    const r = run('r', { status, issueIds: ['i'], summary: 'tests broke' });
+    const t = ticketOf(withRead(r, ['run.retry', 'run.discard'], { issues }), 'issue:i');
+    assert.equal(t.improvement.state, status);
+    assert.deepEqual(keys(t), ['ask', 'edit', 'mark-done', 'discard', 'retry'], status); assert.deepEqual(inks(t), ['retry']);
+    assert.deepEqual(action(t, 'edit').payload, { issueId: 'i', title: 'rows drift', description: 'After a storm.', revision: REV });
+    assert.deepEqual(action(t, 'mark-done').payload, { issueId: 'i' });
+    assert.deepEqual(action(t, 'discard').payload, { runId: 'r' });
+    assert.equal(action(t, 'discard').confirm.words, 'discard try 1 of “rows drift”? it goes back to up next — its branch and worktree are kept.');
+    assert.equal(action(t, 'discard').confirm.armed, true, 'it asks twice, on the red key');
+    // put away, the issue is up next again with its own keys; a free-text chain settles
+    const after = ticketOf(withRead({ ...r, status: 'discarded' }, [], { issues }), 'issue:i');
+    assert.equal(after.improvement.state, 'up_next'); assert.deepEqual(keys(after), ['edit', 'mark-done', 'build-now']);
+    const free = run('free', { status });
+    assert.deepEqual(keys(ticketOf(withRead(free, ['run.retry', 'run.discard']), 'run:free')), ['ask', 'discard', 'retry']);
+    const settled = buildMain(withRead({ ...free, status: 'discarded' }, []));
+    assert.deepEqual([settled.improvements.length, settled.settled.map(v => [v.id, v.state])], [0, [['run:free', 'discarded']]], 'it leaves the failed fold for settled');
+  }
+  // a daemon that won't discard it: no discard key; the list unread: the issue's keys say so
+  const r = run('r', { status: 'failed', issueIds: ['i'] });
+  assert.deepEqual(keys(ticketOf(withRead(r, ['run.retry'], { issues }), 'issue:i')), ['ask', 'edit', 'mark-done', 'retry']);
+  const unread = ticketOf(withRead(r, ['run.retry'], { issues: { ...issues, revision: '' } }), 'issue:i');
+  assert.deepEqual(['edit', 'mark-done'].map(k => action(unread, k).blocked), [WORDS.noList, WORDS.noList]);
+  // a done issue whose last try failed is done: reopen, nothing else
+  assert.deepEqual(keys(ticketOf(withRead(r, ['run.retry', 'run.discard'], { issues: { ...issues, items: [item('i', 'rows drift', { done: true })] } }), 'issue:i')), ['reopen']);
 });
 
 test('stopped and discarded offer try again alone; done offers reopen; in offers its changes (§4.5)', () => {
