@@ -1404,7 +1404,7 @@ function postAwayBubble(evs) {
   const first = Math.min(...done.map((e) => e.ts)); const ago = Math.round((Date.now() - first) / 3600000);
   const grp = (st) => done.filter((e) => e.to === st);
   const parts = [];
-  if (grp('awaiting_input').length) parts.push(grp('awaiting_input').length + (grp('awaiting_input').length === 1 ? ' needs' : ' need') + ' input (' + grp('awaiting_input').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
+  if (grp('awaiting_input').length) parts.push(grp('awaiting_input').length + (grp('awaiting_input').length === 1 ? ' needs' : ' need') + ' you (' + grp('awaiting_input').map((e) => md.esc(e.title || e.id)).join(', ') + ')');   // the bar's word for it
   if (grp('merged').length) parts.push(grp('merged').length + ' merged (' + grp('merged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('staged').length) parts.push(grp('staged').length + ' staged for review (' + grp('staged').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
   if (grp('failed').length) parts.push(grp('failed').length + ' failed (' + grp('failed').map((e) => md.esc(e.title || e.id)).join(', ') + ')');
