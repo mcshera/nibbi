@@ -295,7 +295,8 @@ async function worktrees(cfg: GameCfg): Promise<Array<{ path: string; branch: st
 }
 const samePath = (a: string, b: string): boolean => canonicalPath(a) === canonicalPath(b);
 async function checkedOutAt(cfg: GameCfg, branch: string): Promise<string[]> { return (await worktrees(cfg)).filter(entry => entry.branch === branch).map(entry => entry.path); }
-/** copy.retire — the copy's own worktree and branch come off the machine, never forced; the record stays as a tombstone. */
+/** copy.retire — the copy's own worktree and branch come off the machine, never forced, and only while they hold nothing but what
+    nibbi put there; the record stays as a tombstone. */
 export async function retireCopy(project: string, id: string, expectedHead: string): Promise<{ copy: RetiredCopy }> {
   const cfg = projectConfig(project);
   return withRepoLock(cfg.repo, async () => {
@@ -304,6 +305,7 @@ export async function retireCopy(project: string, id: string, expectedHead: stri
     if (listFixers().some(run => run.copyId === id && (buildIsActive(run.id) || ACTIVE.has(run.status) || run.status === 'queued'))) throw refuse('retireBuilding', { name: copy.name });
     if (expectedHead !== copy.headSha) throw refuse('headMoved', { name: copy.name });
     if (!within(config.workDir, copy.worktree)) throw refuse('notNibbis', { name: copy.name });
+    const moved = await movedRefusal(cfg, copy); if (moved) throw moved;
     patchCopy(id, record => { record.status = 'retiring'; });
     try {
       await stopAndWait(copyPreviewId(project, id));
@@ -328,9 +330,25 @@ async function removeCopyWorktree(cfg: GameCfg, copy: CopyRecord): Promise<void>
   if (!listed || at.length !== 1 || !samePath(at[0], copy.worktree)) throw refuse('notNibbis', { name: copy.name });
   await git(cfg.repo, 'worktree', 'remove', copy.worktree);
 }
+/** The copy's branch, or its folder's HEAD, isn't the head nibbi recorded: retire would drop what moved it, so it refuses —
+    naming the commits past that head when there are any. (`branch -d` can't decide it: a copy's landings aren't in main.) */
+async function movedRefusal(cfg: GameCfg, copy: CopyRecord): Promise<CopyRefusal | undefined> {
+  const tips = [await branchHead(cfg, copy.branch)];
+  let on = copy.branch;
+  if (existsSync(copy.worktree)) {
+    on = await git(copy.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD').catch(() => '');
+    tips.push(await git(copy.worktree, 'rev-parse', '--verify', '--quiet', 'HEAD').catch(() => ''));
+  }
+  const moved = [...new Set(tips.filter(tip => tip && tip !== copy.headSha))];
+  if (!moved.length && on === copy.branch) return undefined;
+  const commits = moved.length ? (await git(cfg.repo, 'log', '--format=%h %s', '--max-count=5', ...moved, '--not', copy.headSha).catch(() => '')).split('\n').filter(Boolean) : [];
+  return commits.length ? refuse('retireMoved', { name: copy.name, commits: commits.map(line => line.slice(0, 72)).join(', ') }) : new CopyRefusal('moved', fill(COPY_WORDS.moved, { name: copy.name }));
+}
 async function deleteBranch(cfg: GameCfg, copy: CopyRecord): Promise<void> {
-  if (!(await branchHead(cfg, copy.branch))) return;
+  const tip = await branchHead(cfg, copy.branch); if (!tip) return;
   if ((await checkedOutAt(cfg, copy.branch)).length) throw refuse('notNibbis', { name: copy.name });
+  // Checked again right before -D: nothing that isn't nibbi's head goes with the branch.
+  if (tip !== copy.headSha) throw await movedRefusal(cfg, copy) ?? refuse('moved', { name: copy.name });
   await git(cfg.repo, 'branch', '-D', copy.branch);
 }
 

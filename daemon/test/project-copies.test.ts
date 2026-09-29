@@ -416,6 +416,27 @@ test('retire leaves a copy with files nibbi didn’t make', async () => {
   assert.equal(await exists(repo, 'refs/heads/nibbi/copy/dev'), false); assert.equal((await git(repo, 'worktree', 'list', '--porcelain')).includes('copies/retire-dirty/dev'), false);
 });
 
+test('retire keeps commits nibbi didn’t make', async () => {
+  const repo = await project('retire-moved'); const copy = await makeCopy('retire-moved');
+  const holders = (commit: string): Promise<string> => git(repo, 'for-each-ref', '--contains', commit, '--format=%(refname)');
+  // The owner commits in the copy's folder: that commit is on the copy's branch and nowhere else.
+  writeFileSync(join(copy.worktree, 'mine.txt'), 'the owner’s\n'); await git(copy.worktree, 'add', '.'); await git(copy.worktree, 'commit', '-m', 'the owner’s commit');
+  const mine = await sha(copy.worktree, 'HEAD'), short = await git(repo, 'rev-parse', '--short', mine);
+  assert.equal((await copies.copiesView('retire-moved')).copies[0].health, 'moved'); assert.equal(await holders(mine), 'refs/heads/nibbi/copy/dev');
+  const before = await snapshot(repo, copy);
+  await refused(copies.retireCopy('retire-moved', copy.id, copy.headSha), fill(W.retireMoved, { name: 'dev', commits: short + ' the owner’s commit' }));
+  assert.deepEqual(await snapshot(repo, copy), before); assert.equal(await holders(mine), 'refs/heads/nibbi/copy/dev'); assert.ok(existsSync(join(copy.worktree, 'mine.txt')));
+  // The folder on another branch, at nibbi's head: nothing to name, and still not retired.
+  await git(copy.worktree, 'reset', '--hard', copy.headSha); await git(copy.worktree, 'switch', '-q', '-c', 'side');
+  await refused(copies.retireCopy('retire-moved', copy.id, copy.headSha), fill(W.moved, { name: 'dev' }));
+  assert.ok(existsSync(copy.worktree)); assert.equal(copyOf(copy.id).status, 'ready');
+  // Kept on a branch of the owner's and put back: retire goes, and the owner's commit outlives the copy.
+  await git(copy.worktree, 'switch', '-q', 'nibbi/copy/dev'); await git(repo, 'branch', '-D', 'side'); await git(repo, 'branch', 'mine', mine);
+  await copies.retireCopy('retire-moved', copy.id, copy.headSha);
+  assert.equal(copyOf(copy.id).status, 'retired'); assert.equal(existsSync(copy.worktree), false);
+  assert.equal(await holders(mine), 'refs/heads/mine'); assert.equal(await exists(repo, 'refs/heads/nibbi/copy/dev'), false);
+});
+
 test('one plays at a time', async () => {
   await project('play', { play: PLAY }); const dev = await makeCopy('play'); const dev1 = await makeCopy('play', 'dev1');
   const main = 'project:play', a = records.copyPreviewId('play', dev.id), b = records.copyPreviewId('play', dev1.id);

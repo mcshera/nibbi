@@ -66,6 +66,7 @@ export const COPY_WORDS = Object.freeze({
   shipFailed: 'main is unchanged — {detail}',
   catchUpRefused: 'couldn’t catch {name} up — {detail}',
   notNibbis: '{name}’s folder isn’t the copy nibbi made — nibbi won’t delete it',
+  retireMoved: '{name} has commits nibbi didn’t make — nibbi won’t delete them: {commits}',
 });
 export const COPY_STATUS_WORDS: Readonly<Record<string, string>> = Object.freeze({ creating: 'it’s still being made', shipping: 'it’s shipping', catching_up: 'it’s catching up', retiring: 'it’s being retired', broken: 'it couldn’t be made' });
 export const fill = (template: string, values: Record<string, string | number | undefined>): string => template.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] === undefined ? whole : String(values[key]));

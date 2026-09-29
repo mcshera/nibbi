@@ -922,6 +922,7 @@ test('every blocked word a copy says, in the spec’s order (§4.2)', () => {
   assert.equal(b({}, { status: 'broken' }).retire, '', 'a broken copy can always be retired');
   assert.equal(b(gh).retire, '');
   assert.equal(b({}, { health: 'missing' }).retire, '');
+  assert.equal(b({}, { health: 'moved' }).retire, 'dev changed outside nibbi — its head isn’t the one nibbi checked, so nothing lands or ships until it’s put back', 'its branch may hold commits nibbi didn’t make');
   for (const status of ['running', 'queued', 'awaiting_input', 'installing']) {
     assert.equal(b({ runs: [onCopy('x', DEV, 'dev', { status, endedAt: undefined })] }).retire, 'an improvement is building on dev — stop it or let it land first', status);
   }

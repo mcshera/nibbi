@@ -435,6 +435,7 @@ and `status --porcelain`, before and after.
 | 20 | **Main's path is unchanged**: a main run's merge, its issue completion and its retained worktree on failure behave as before | daemon/test/lifecycle.test.ts, project-workspace.test.ts, build-attempts.test.ts, steer.test.ts pass **unedited**; plus `a main run merges into main while a copy exists` |
 | 21 | **Auto ship never ships a copy** nor lands a copy's run | `auto ship leaves copies alone` (schedulerCycle with mode ship, as auto.test.ts drives it) |
 | 22 | **The read tells the truth**: ahead/behind by rev-list, health moved/dirty/missing | `the read says ahead, behind and health` |
+| 23 | **Retire never drops a commit nibbi didn't make**: a copy whose branch or folder moved outside nibbi is refused, nothing removed; an owner's commit kept on a branch of theirs outlives the retire | `retire keeps commits nibbi didn't make` |
 
 ---
 
@@ -940,8 +941,8 @@ The three builders' departures (each said in their commit) and the integrator's.
 | copy-records.ts names | empty · shape · long | length is tested before shape: the pattern alone caps a name at 32, so `nameLong` could never be said |
 | verified-merge.ts, main's path | remove the merge worktree after the bookkeeping | right after the fast-forward, before it; a conflict also reports its files. An install failure in the verification worktree is still `changed`, as today |
 | copy.ship | step 1 is the merge sequence's own guard | ship checks main's checkout (branch, clean) first so it can refuse in its own words, and merges with `--ff-only` in the verification worktree, so a `merge.ff=false` setting can't make a commit nobody played |
-| daemon words | `WORDS.copy` | plus daemon-only ones: `copyGone`, `retired`, `stillPlaying`, `changedOutside`, `branchExists`, `folderExists`, `stoppedWhileMaking`, `shipFailed`, `catchUpRefused`, `notNibbis` |
-| copy.retire | remove the worktree if git lists it | refuses with `notNibbis` unless git lists the folder with the copy's branch checked out there and nowhere else; a folder already gone but still listed gets a plain `worktree remove` first; a run waiting to land stays as it is |
+| daemon words | `WORDS.copy` | plus daemon-only ones: `copyGone`, `retired`, `stillPlaying`, `changedOutside`, `branchExists`, `folderExists`, `stoppedWhileMaking`, `shipFailed`, `catchUpRefused`, `notNibbis`, `retireMoved` |
+| copy.retire | remove the worktree if git lists it | refuses with `notNibbis` unless git lists the folder with the copy's branch checked out there and nowhere else; a folder already gone but still listed gets a plain `worktree remove` first; a run waiting to land stays as it is. **Refuses a copy that moved outside nibbi** — its branch, or its folder's HEAD, isn't `headSha` — before anything changes: `retireMoved` names the commits past `headSha` (≤ 5), else the `moved` words; `branch -D` checks the branch is still at `headSha` right before it runs. `-D` alone dropped an owner's commit on the copy's branch (review F1) |
 | issue.create with `copyId` | store it after the write | checks the copy (live, ready, not GitHub) before anything is written; in GitHub mode `issue.build` ignores a stored copy and builds on main |
 | copy.play | live and ready | also refuses unless its health is ok, the model's play rule |
 | recovery | — | startup doesn't wait for `landWaiting`; passed copy runs that never got a landing attempt try once; a copy stuck `retiring` goes back to `broken` if it has an error, else `ready` |
@@ -949,7 +950,7 @@ The three builders' departures (each said in their commit) and the integrator's.
 | margin-ui.js name rule | import `copyNameProblem` | its own copy (the bar imports only the contract); a test holds the two to the same words |
 | bar folding | copies start unfolded; the open one always unfolded | a copy unfolds when its page or a ticket of it opens, and the caret can fold it again; folds are remembered by copy id, so a remade "dev" starts unfolded |
 | bar why-lines | play's and ship's words | a copy's health words alone when it has any; none while making, retiring, shipping or catching up; ship's reason skipped when the headline says it |
-| RetireVM.blocked | building-group or queued runs | also `awaiting_input` (the daemon refuses it too, as active); the model also blocks on landing and waiting-to-land runs, which the daemon doesn't refuse |
+| RetireVM.blocked | building-group or queued runs | also `awaiting_input` (the daemon refuses it too, as active); the model also blocks on landing and waiting-to-land runs, which the daemon doesn't refuse; and on health `moved`, with the `moved` words |
 | project-pages.js ink order | §4.4's four | the catch-up question's yes takes the ink while it is open; the armed retire strip has none |
 | pages questions | — | one open at a time (ship, catch up, retire); a question stays as asked while its yes is out; retire's refusal is said at its foot |
 | contract `shipLevel` | "main hasn’t moved on since {name} caught up" | "{name} has everything main has": the old words were said of a copy that had never caught up (the lab said "since dev was copied") |

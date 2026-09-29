@@ -538,7 +538,9 @@ function copyVM(ctx, copy, records, allRecords, others) {
       || (Number(project.dirty) > 0 ? WORDS.copy.shipCheckoutDirty : ''),
     catchUp: ctx.demo ? WORDS.demoChange : gate || (!behind ? fill(WORDS.copy.catchUpLevel, { name }) : ''),
     retire: ctx.demo ? WORDS.demoChange : ['creating', 'shipping', 'catching_up', 'retiring'].includes(phase) ? notReady
-      : building ? fill(WORDS.copy.retireBuilding, { name }) : '',
+      : building ? fill(WORDS.copy.retireBuilding, { name })
+      // its branch or folder moved outside nibbi: retire could drop commits nibbi didn't make, so it waits until it's put back
+      : health === 'moved' ? fill(WORDS.copy.moved, { name }) : '',
   };
 
   const verifiedSha = str(copy.lastVerifiedSha);
