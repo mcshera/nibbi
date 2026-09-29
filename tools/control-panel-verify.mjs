@@ -1,13 +1,18 @@
 // The control panel's behaviour in the real built app (docs/CONTROL-PANEL.md §8.5): the Cards bar and the
 // Console pages over real routes and real Git, never the live app. projectWorkflowFixture gives isolated
 // state, deterministic providers and a real project check, so a run really stages and really merges.
-// Thirteen checks at 1180x820 and 390x844 touch, on paper-garden; each prints PASS or FAIL and a failure
-// does not stop the rest. Screenshots in output/playwright/control-panel/. Run by `npm run verify`.
+// Thirteen checks at 1180x820 and 390x844 touch, on paper-garden, and eight on observatory for its copies
+// (docs/BUILDS-AS-COPIES.md §6.4: + New build, an improvement that lands in the copy, Ship to main asked
+// twice, catch up, one plays at a time, retire, GitHub mode, 390 touch), with real git in temp repos. Each
+// prints PASS or FAIL and a failure does not stop the rest. Screenshots in output/playwright/control-panel/.
+// Run by `npm run verify`.
 //
 // It also carries what tools/kanban-verify.mjs protected before the Issues board left the UI: a thing
 // kept for later survives a reload, and the draft in the composer is kept while you do it (checks 4, 5).
 import assert from 'node:assert/strict';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,10 +25,10 @@ const nibbiBin = join(homedir(), '.nibbi', 'bin');
 if (existsSync(join(nibbiBin, 'rg')) && !(process.env.PATH || '').split(':').includes(nibbiBin)) process.env.PATH = nibbiBin + ':' + (process.env.PATH || '');
 const candidate = resolve(process.env.NIBBI_CP_CANDIDATE || '.'), daemon = join(candidate, 'daemon/dist');
 const out = resolve(process.env.NIBBI_CP_OUTPUT || 'output/playwright/control-panel'); mkdirSync(out, { recursive: true });
-const { WORDS } = await import(new URL('../public/lib/control-panel-contract.js', import.meta.url));
+const { WORDS, COPY } = await import(new URL('../public/lib/control-panel-contract.js', import.meta.url));
 const fixture = await projectWorkflowFixture({ daemon, ui: join(candidate, 'dist/ui') });
 const { updateProject } = await import(pathToFileURL(join(daemon, 'projects.js')).href);
-const PROJECT = 'paper-garden';
+const PROJECT = 'paper-garden', COPIES = 'observatory';
 // main plays at a URL here, so ▶ is a live key with a press state; the project's own dev server is previews.ts's business.
 updateProject(PROJECT, { play: fixture.base + '/?played=main' });
 
@@ -43,7 +48,7 @@ const settled = page => page.evaluate(() => Promise.race([
 ]));
 async function shot(page, name) { await settled(page); await page.screenshot({ path: join(out, name + '.png') }); }
 
-async function openApp({ width = 1180, height = 820, touch = false, reducedMotion = 'no-preference' } = {}) {
+async function openApp({ width = 1180, height = 820, touch = false, reducedMotion = 'no-preference', project = PROJECT } = {}) {
   const context = await browser.newContext({ viewport: { width, height }, isMobile: touch, hasTouch: touch, reducedMotion, serviceWorkers: 'block' });
   await context.route('**/*', route => new URL(route.request().url()).origin === fixture.base ? route.continue() : route.abort());
   const page = await context.newPage(); page.setDefaultTimeout(12_000);
@@ -51,10 +56,28 @@ async function openApp({ width = 1180, height = 820, touch = false, reducedMotio
   const commands = [];   // every command the page sends, by name
   page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/commands') commands.push(request.postDataJSON()?.name); });
   await page.goto(fixture.base + '/?nosw=1');
-  await page.waitForFunction(() => window.nibbiApp?.state().projects?.length >= 3 && document.body.dataset.link === 'live');
-  await barOpen(page); await chooseProject(page, PROJECT); await closeSwitcher(page);
-  await page.waitForFunction(p => nibbiApp.state().thread.project === p && document.querySelector('[data-bar-build="main"]'), PROJECT);
+  await boot(page, project);
   return { context, page, commands };
+}
+async function boot(page, project) {
+  await page.waitForFunction(() => window.nibbiApp?.state().projects?.length >= 3 && document.body.dataset.link === 'live');
+  await barOpen(page); await chooseProject(page, project); await closeSwitcher(page);
+  await page.waitForFunction(p => nibbiApp.state().thread.project === p && document.querySelector('[data-bar-build="main"]'), project);
+}
+/** A press is visible, on --t1, and is not a click: pressed on the control and released elsewhere. */
+async function pressProbe(page, name, locator) {
+  const away = { x: 1100, y: 300 };
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox(); assert.ok(box, name + ' is on screen');
+  await page.mouse.move(away.x, away.y); await page.waitForTimeout(200);
+  const rest = await locator.evaluate(el => getComputedStyle(el).backgroundColor);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.waitForTimeout(200);
+  const pressed = await locator.evaluate(el => { const s = getComputedStyle(el), props = s.transitionProperty.split(', '), times = s.transitionDuration.split(', '); return { bg: s.backgroundColor, active: el.matches(':active'), props, background: times[props.indexOf('background-color') % times.length] ?? null }; });
+  await page.mouse.move(away.x, away.y); await page.mouse.up();   // released elsewhere: a press, never a click
+  assert.equal(pressed.active, true, name + ' is pressed');
+  assert.notEqual(pressed.bg, rest, `${name}: pressed (${pressed.bg}) differs from rest (${rest})`);
+  assert.ok(!pressed.props.includes('all'), `${name}: no transition on all (${pressed.props})`);
+  assert.equal(pressed.background, '0.12s', `${name}: background moves on --t1 (${pressed.props} / ${pressed.background})`);
 }
 async function barOpen(page) {
   if (await page.locator('#workspace-sidebar').getAttribute('aria-hidden') !== 'true') return;
@@ -207,26 +230,14 @@ try {
       }, page);
 
       await check('11 press states', async () => {
-        const away = { x: 1100, y: 300 };
-        const probe = async (name, locator) => {
-          await locator.scrollIntoViewIfNeeded();
-          const box = await locator.boundingBox(); assert.ok(box, name + ' is on screen');
-          await page.mouse.move(away.x, away.y); await page.waitForTimeout(200);
-          const rest = await locator.evaluate(el => getComputedStyle(el).backgroundColor);
-          await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.waitForTimeout(200);
-          const pressed = await locator.evaluate(el => { const s = getComputedStyle(el), props = s.transitionProperty.split(', '), times = s.transitionDuration.split(', '); return { bg: s.backgroundColor, active: el.matches(':active'), props, background: times[props.indexOf('background-color') % times.length] ?? null }; });
-          await page.mouse.move(away.x, away.y); await page.mouse.up();   // released elsewhere: a press, never a click
-          assert.equal(pressed.active, true, name + ' is pressed');
-          assert.notEqual(pressed.bg, rest, `${name}: pressed (${pressed.bg}) differs from rest (${rest})`);
-          assert.ok(!pressed.props.includes('all'), `${name}: no transition on all (${pressed.props})`);
-          assert.equal(pressed.background, '0.12s', `${name}: background moves on --t1 (${pressed.props} / ${pressed.background})`);
-        };
+        const probe = (name, locator) => pressProbe(page, name, locator);
         await probe('a conversation row', bar(page, '.project-thread[data-thread-id="home"]'));
         await probe('main\'s row', bar(page, '[data-bar-build="main"]'));
         await probe('an improvement row', bar(page, '[data-bar-improvement="issue:keyboard-focus"]'));
         await probe('+ improvement', bar(page, '[data-cp-role="new-improvement"]'));
         await probe('▶', bar(page, '[data-cp-role="play-main"]'));
         await probe('the conversations +', bar(page, '.project-thread-new'));
+        await probe('the builds +', bar(page, '[data-cp-role="new-build"]'));
         await probe('Settings', page.locator('#status'));
         await probe('collapse', page.locator('.sidebar-collapse'));
         await (await row(page, 'issue:keyboard-focus')).click();
@@ -249,7 +260,7 @@ try {
           assert.equal(await start.isDisabled(), true, 'start now waits for the reply');
           assert.equal(await start.getAttribute('title'), WORDS.busy);
           await field.fill('Mulch the beds'); await field.press('Enter');
-          assert.equal(await bar(page, '.cp-form-note').innerText(), WORDS.busy, 'Enter says why, in words');
+          assert.equal(await bar(page, '.cp-improvement-form .cp-form-note').innerText(), WORDS.busy, 'Enter says why, in words');
           const dispatched = commands.filter(n => n === 'run.dispatch').length;
           await bar(page, '[data-cp-role="up-next"]').click();
           await until('up next while answering', async () => (await issues()).items.find(i => i.text === 'Mulch the beds'));
@@ -369,10 +380,286 @@ try {
     }
   }
 
+  /* ---------------------------------------------------------------------------------------- copies (docs/BUILDS-AS-COPIES.md §6.4) */
+  {
+    // observatory: main and its copies play as servers; the check is the fixture's real one
+    await fixture.prepareCopies(COPIES);
+    const repo = join(process.env.NIBBI_PROJECTS_DIR, COPIES);
+    const gitIn = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+    const sha = ref => fixture.git(COPIES, 'rev-parse', ref);
+    const copyNamed = async name => (await fixture.copies(COPIES)).copies.find(c => c.name === name);
+    const word = (page, name) => page.evaluate(n => document.querySelector(`#workspace-sidebar [data-bar-build="${n}"] .cp-word:not(.cp-count)`)?.textContent ?? null, name);
+    const note = (page, name) => page.evaluate(n => document.querySelector(`#workspace-sidebar [data-bar-build="${n}"] .cp-note`)?.textContent ?? null, name);
+    const wordIs = (page, name, text, timeout = 20_000) => page.waitForFunction(([n, t]) => document.querySelector(`#workspace-sidebar [data-bar-build="${n}"] .cp-word:not(.cp-count)`)?.textContent === t, [name, text], { timeout });
+    const playing = async id => (await fetch(fixture.base + '/api/preview?id=' + encodeURIComponent(id)).then(r => r.json()));
+    const mainPlaying = async () => (await fetch(fixture.base + '/api/play?project=' + COPIES).then(r => r.json()));
+    const posts = (commands, name) => commands.filter(n => n === name).length;
+    const ON_DEV = 'Light the dome from below', LATER_DEV = 'Label the constellations';
+    const small = (page, scope) => page.locator(scope).evaluateAll(els => els.filter(el => el.getClientRects().length && !el.closest('[hidden]')).map(el => { const r = el.getBoundingClientRect(), icon = el.matches('.cp-icon-key, .cp-key'); return { name: el.getAttribute('aria-label') || el.textContent.trim().slice(0, 30) || el.className, h: Math.round(r.height), w: Math.round(r.width), icon }; }).filter(b => b.h < 43.5 || (b.icon && b.w < 43.5)));
+    let shippedRuns = [], issueId = null;
+
+    const { context, page, commands } = await openApp({ project: COPIES });
+    try {
+      await check('14 + New build → dev appears, a copy of main', async () => {
+        const mainSha = await sha('main');
+        updateProject(COPIES, { install: 'sleep 2' });   // long enough to see it being made
+        try {
+          await bar(page, '[data-cp-role="new-build"]').click();
+          const form = bar(page, '[data-cp-role="build-form"]'); await form.waitFor({ state: 'visible' });
+          const field = bar(page, '[data-cp-role="build-name"]');
+          assert.equal(await field.inputValue(), COPY.first, 'the suggested name is dev');
+          assert.equal(await field.evaluate(el => el === document.activeElement && el.selectionStart === 0 && el.selectionEnd === el.value.length), true, 'and it is selected, so typing replaces it');
+          await form.getByText(WORDS.copy.formSub, { exact: true }).waitFor();
+          await page.keyboard.press('Enter');
+          await bar(page, '[data-bar-build="dev"]').waitFor();
+          await page.waitForFunction(() => { const w = document.querySelector('#workspace-sidebar [data-bar-build="dev"] .cp-word:not(.cp-count)'); return w?.textContent === 'making the copy' && w.getAnimations().some(a => a.animationName === 'cp-bar-pulse' && a.playState === 'running'); });
+          await shot(page, 'copy-making-1180');
+          await wordIs(page, 'dev', 'nothing to ship yet');
+        } finally { updateProject(COPIES, { install: 'true' }); }
+        assert.equal(posts(commands, 'copy.create'), 1, 'one copy.create');
+        assert.equal(await note(page, 'dev'), WORDS.copy.line, 'line two: copy of main');
+        assert.equal(await bar(page, '[data-bar-build="dev"]').evaluate(el => el === document.activeElement), true, 'focus is on the new row');
+        const dev = await copyNamed('dev');
+        assert.equal(dev.branch, COPY.branchPrefix + 'dev');
+        assert.equal(dev.headSha, mainSha, 'made at main\'s head');
+        assert.equal(await sha('refs/heads/' + dev.branch), mainSha);
+        assert.ok(realpathSync(dev.worktree).startsWith(realpathSync(process.env.NIBBI_WORK_DIR) + '/'), 'its worktree is under the work dir: ' + dev.worktree);
+        const at = (await fixture.git(COPIES, 'worktree', 'list', '--porcelain')).split('\n\n').filter(block => block.split('\n').includes('branch refs/heads/' + dev.branch));
+        assert.equal(at.length, 1, 'the branch is checked out in one worktree');
+        assert.equal(realpathSync(at[0].split('\n')[0].slice('worktree '.length)), realpathSync(dev.worktree), 'its own');
+        assert.equal(await view(page), null, 'nothing opened a page');
+        await pressProbe(page, 'a copy row', bar(page, '[data-bar-build="dev"]'));
+        await shot(page, 'copy-made-1180');
+      }, page);
+
+      await check('15 + improvement on dev → it lands in dev, main unchanged', async () => {
+        const mainSha = await sha('main'), before = await copyNamed('dev');
+        await bar(page, '[data-cp-role="new-improvement"][data-build="dev"]').click();
+        const field = bar(page, '.cp-improvement-form textarea');
+        assert.equal(await field.getAttribute('placeholder'), WORDS.copy.formPlaceholder.replace('{name}', 'dev'), 'the form says where it lands');
+        await field.fill(ON_DEV); await page.keyboard.press('Enter');
+        const made = bar(page, '[data-bar-build-body="dev"] [data-bar-improvement^="run:"]').filter({ hasText: ON_DEV });
+        await made.waitFor();
+        const id = (await made.getAttribute('data-bar-improvement')).slice(4);
+        assert.equal(fixture.runtime.get('fixers', id).copyId, before.id, 'the run aims at dev');
+        await fixture.fixer.waitForFixer(id);
+        await until('it lands', () => fixture.runtime.get('fixers', id).status === 'merged', 20_000);
+        shippedRuns.push(id);
+        assert.equal(await sha('main'), mainSha, 'main is unchanged');
+        const dev = await copyNamed('dev');
+        assert.notEqual(dev.headSha, before.headSha, 'dev moved');
+        assert.equal(gitIn(dev.worktree, 'rev-parse', 'HEAD'), dev.headSha, 'its worktree is at its new head, not stale');
+        assert.equal(gitIn(dev.worktree, 'status', '--porcelain'), '', 'and clean');
+        assert.ok(readdirSync(dev.worktree).some(f => /^fixture-change-/.test(f) && readFileSync(join(dev.worktree, f), 'utf8').includes(ON_DEV)), 'with the change in it');
+        assert.equal(gitIn(repo, 'status', '--porcelain'), '', 'the project folder is untouched');
+        await page.waitForFunction(id => document.querySelector(`#workspace-sidebar [data-bar-build-body="dev"] [data-bar-improvement="run:${id}"]`)?.dataset.state === 'in', id);
+        assert.equal(await bar(page, `.cp-build[data-build="main"] [data-bar-improvement="run:${id}"]`).count(), 0, 'it is in dev, not main');
+        await wordIs(page, 'dev', 'ready to play');
+        await page.waitForFunction(() => document.querySelector('#workspace-sidebar [data-bar-build="dev"] .cp-note')?.textContent === 'copy of main · 1 ahead');
+        await bar(page, '[data-bar-build="dev"]').click();
+        const devPage = await ready(page, 'build', 'dev');
+        await page.waitForFunction(() => document.querySelector('#project-workspace .cp-copyline')?.textContent === 'copy of main · 1 ahead · 0 behind');
+        await shot(page, 'copy-landed-1180');
+        // up next on dev, then build it now from its ticket: it lands in dev, and the issue stays open
+        await bar(page, '[data-cp-role="new-improvement"][data-build="dev"]').click();
+        await bar(page, '.cp-improvement-form textarea').fill(LATER_DEV);
+        await bar(page, '[data-cp-role="up-next"]').click();
+        const item = await until('the issue', async () => (await fixture.section(COPIES, 'issues')).items?.find(i => i.text === LATER_DEV));
+        issueId = item.id;
+        const kept = bar(page, `[data-bar-build-body="dev"] [data-bar-improvement="issue:${item.id}"]`);
+        await kept.waitFor(); assert.equal(await kept.getAttribute('data-state'), 'up_next');
+        await kept.click();
+        const ticket = await ready(page, 'ticket', 'issue:' + item.id);
+        await page.waitForFunction(() => { const k = document.querySelector('#project-workspace .cp-page [data-cp-key="build-now"]'); return k && !k.disabled; });
+        await ticket.locator('[data-cp-key="build-now"]').click();
+        const run = await until('its run', () => fixture.fixer.listFixers().find(f => f.issueIds?.includes(item.id)));
+        assert.equal(run.copyId, before.id, 'build it now aims at dev too');
+        await fixture.fixer.waitForFixer(run.id);
+        await until('it lands', () => fixture.runtime.get('fixers', run.id).status === 'merged', 20_000);
+        shippedRuns.push(run.id);
+        assert.equal(await sha('main'), mainSha, 'main is still unchanged');
+        assert.equal((await fixture.section(COPIES, 'issues')).items.find(i => i.id === item.id).done, false, 'in dev is not done: the issue stays open until dev ships');
+        void devPage;
+      }, page);
+
+      await check('16 Ship to main asks twice, then main has it and dev is level', async () => {
+        await bar(page, '[data-bar-build="dev"]').click();
+        const devPage = await ready(page, 'build', 'dev');
+        const ship = devPage.locator('[data-cp-key="ship"]');
+        await page.waitForFunction(() => { const k = document.querySelector('#project-workspace .cp-page [data-cp-key="ship"]'); return k && !k.disabled && /ink/.test(k.className); }, null, { timeout: 15_000 });
+        const before = commands.length;
+        await ship.click();
+        const panel = devPage.locator('.cp-ship'); await panel.waitFor();
+        assert.equal(await devPage.locator('[data-cp-key="ship-no"]').evaluate(el => el === document.activeElement), true, 'the question takes focus on "not yet"');
+        const said = await panel.innerText();
+        for (const title of [ON_DEV, LATER_DEV]) assert.ok(said.includes(title), 'it lists ' + title);
+        assert.ok(said.includes(WORDS.copy.shipChecks.replace('{command}', 'test -n "$(ls fixture-change-*.txt)"')), 'and the checks it runs again');
+        await page.waitForTimeout(300);
+        assert.deepEqual(commands.slice(before), [], 'the first press only asks');
+        await shot(page, 'ship-confirm-1180');
+        const devHead = (await copyNamed('dev')).headSha;
+        await devPage.locator('[data-cp-key="ship-yes"]').click();
+        await until('main has dev', async () => await sha('main') === devHead, 30_000);
+        assert.deepEqual(commands.slice(before), ['copy.ship'], 'yes ships, once');
+        await devPage.locator('.cp-notice', { hasText: WORDS.copy.shipDoneMany.replace('{n}', '2') }).waitFor({ timeout: 15_000 });
+        await page.waitForFunction(() => document.querySelector('#project-workspace .cp-copyline')?.textContent === 'copy of main · 0 ahead · 0 behind', null, { timeout: 15_000 });
+        await wordIs(page, 'dev', 'nothing to ship yet');
+        const dev = await copyNamed('dev');
+        assert.equal(dev.headSha, devHead, 'the copy stays, level with main');
+        assert.equal(dev.status, 'ready');
+        assert.deepEqual([dev.ahead, dev.behind], [0, 0]);
+        for (const id of shippedRuns) assert.equal(fixture.runtime.get('fixers', id).shipped?.sha, devHead, 'its runs are marked shipped');
+        await page.waitForFunction(id => document.querySelector(`#workspace-sidebar .cp-build[data-build="main"] [data-bar-improvement="run:${id}"]`)?.dataset.state === 'in', shippedRuns[0]);
+        assert.equal(await bar(page, `[data-bar-build-body="dev"] [data-bar-improvement]`).count(), 0, 'nothing is left in dev');
+        assert.equal((await fixture.section(COPIES, 'issues')).items.find(i => i.id === issueId).done, true, 'the issue is done now, at ship');
+        await shot(page, 'shipped-1180');
+      }, page);
+
+      await check('17 main moves on → dev says catch up → catch up', async () => {
+        await page.locator('.project-close:visible').click();
+        await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
+        const moved = await fixture.commit(COPIES, 'Main moved on', { 'main-moved.txt': 'the owner committed on main\n' });
+        await chooseProject(page, PROJECT); await closeSwitcher(page);
+        await chooseProject(page, COPIES); await closeSwitcher(page);
+        await wordIs(page, 'dev', 'main moved on · catch up');
+        const row = bar(page, '[data-bar-build-body="dev"] [data-cp-role="catch-up"]'); await row.waitFor();
+        await bar(page, '[data-bar-build="dev"]').click();
+        const devPage = await ready(page, 'build', 'dev');
+        await devPage.locator('.cp-tiles', { hasText: '1 behind' }).waitFor();
+        await shot(page, 'behind-1180');
+        const before = commands.length;
+        await row.click();
+        await page.waitForFunction(() => document.querySelector('#project-workspace .cp-copyline')?.textContent === 'copy of main · 0 ahead · 0 behind', null, { timeout: 20_000 });
+        assert.deepEqual(commands.slice(before).filter(n => n.startsWith('copy.')), ['copy.catchUp'], 'one catch up, no question (it is not playing)');
+        const dev = await copyNamed('dev');
+        execFileSync('git', ['-C', repo, 'merge-base', '--is-ancestor', 'main', dev.branch]);
+        assert.equal(await sha('main'), moved, 'main is only read');
+        assert.equal(gitIn(dev.worktree, 'rev-parse', 'HEAD'), dev.headSha);
+        assert.equal(gitIn(dev.worktree, 'status', '--porcelain'), '', 'dev\'s worktree is clean');
+        assert.ok(existsSync(join(dev.worktree, 'main-moved.txt')), 'and has main\'s newest');
+        await shot(page, 'caught-up-1180');
+      }, page);
+
+      await check('18 One plays at a time', async () => {
+        const dev = await copyNamed('dev'), preview = COPY.preview.replace('{project}', COPIES).replace('{copyId}', dev.id);
+        await bar(page, '[data-cp-role="play-main"]').click();
+        await until('main playing', async () => { const p = await mainPlaying(); return p.running && p.url; }, 30_000);
+        await bar(page, '[data-bar-build="dev"]').click();
+        const devPage = await ready(page, 'build', 'dev');
+        await devPage.locator('.cp-preview-hint', { hasText: WORDS.copy.oneAtATime.replace('{other}', 'main') }).waitFor();
+        await devPage.locator('[data-cp-key="play"]').click();
+        await until('dev playing', async () => { const p = await playing(preview); return p.running && p.url; }, 30_000);
+        assert.equal((await mainPlaying()).running, false, 'playing dev stopped main');
+        await devPage.locator('.cp-preview', { hasText: 'dev is playing' }).waitFor();
+        await wordIs(page, 'dev', 'nothing to ship yet');
+        await shot(page, 'playing-dev-1180');
+        await devPage.locator('[data-cp-key="play-stop"]').click();
+        await until('dev stopped', async () => !(await playing(preview)).running, 15_000);
+      }, page);
+
+      await check('19 Retire asks, refuses while building, then dev is gone', async () => {
+        const release = fixture.holdFixer();
+        let id;
+        try {
+          await bar(page, '[data-cp-role="new-improvement"][data-build="dev"]').click();
+          await bar(page, '.cp-improvement-form textarea').fill('Polish the telescope');
+          await page.keyboard.press('Enter');
+          const made = bar(page, '[data-bar-build-body="dev"] [data-bar-improvement^="run:"]').filter({ hasText: 'Polish the telescope' });
+          await made.waitFor(); id = (await made.getAttribute('data-bar-improvement')).slice(4);
+          await bar(page, '[data-bar-build="dev"]').click();
+          const devPage = await ready(page, 'build', 'dev');
+          const retire = devPage.locator('[data-cp-key="retire"]');
+          await page.waitForFunction(() => document.querySelector('#project-workspace .cp-page [data-cp-key="retire"]')?.disabled === true);
+          assert.equal(await retire.getAttribute('title'), WORDS.copy.retireBuilding.replace('{name}', 'dev'), 'retire says why it waits');
+          await shot(page, 'retire-building-1180');
+        } finally { release(); }
+        await fixture.fixer.waitForFixer(id);
+        await until('it lands', () => fixture.runtime.get('fixers', id).status === 'merged', 20_000);
+        const devPage = pageOf(page, 'build', 'dev');
+        await page.waitForFunction(() => document.querySelector('#project-workspace .cp-page [data-cp-key="retire"]')?.disabled === false, null, { timeout: 15_000 });
+        const dev = await copyNamed('dev'), mainSha = await sha('main');
+        const before = commands.length;
+        await devPage.locator('[data-cp-key="retire"]').click();
+        const strip = devPage.locator('.cp-retire .cp-confirm'); await strip.waitFor();
+        assert.ok((await strip.innerText()).includes(WORDS.copy.retireUnshippedOne.replace(/^, /, '')), 'it names the improvement that hasn\'t shipped');
+        assert.equal(await devPage.locator('[data-cp-key="retire-no"]').evaluate(el => el === document.activeElement), true, 'focus on keep');
+        await page.waitForTimeout(300);
+        assert.deepEqual(commands.slice(before), [], 'the first press only asks');
+        await shot(page, 'retire-confirm-1180');
+        await devPage.locator('[data-cp-key="retire-yes"]').click();
+        await until('dev retired', async () => !(await copyNamed('dev')), 15_000);
+        assert.deepEqual(commands.slice(before), ['copy.retire'], 'yes retires, once');
+        await page.waitForFunction(() => !document.querySelector('#workspace-sidebar [data-bar-build="dev"]'));
+        assert.equal(existsSync(dev.worktree), false, 'its worktree is gone');
+        assert.throws(() => execFileSync('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/' + dev.branch], { stdio: 'pipe' }), 'its branch is gone');
+        assert.equal(await sha('main'), mainSha, 'main is unchanged');
+        assert.ok(existsSync(fixture.runtime.get('fixers', id).worktree), 'the run\'s own worktree is kept');
+        await page.locator('#project-workspace .cp-page h1', { hasText: WORDS.copy.gone }).waitFor();
+        await shot(page, 'gone-1180');
+        await page.locator('.project-close:visible').click();
+        await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
+      }, page);
+
+      await check('20 A GitHub-mode project shows copies disabled with a reason', async () => {
+        const GH = 'weekend-notes', undo = fixture.githubMode(GH);
+        try {
+          await page.reload(); await boot(page, GH);
+          const words = WORDS.copy.githubMode.replace('{project}', GH);
+          const key = bar(page, '[data-cp-role="new-build"]');
+          await page.waitForFunction(w => document.querySelector('#workspace-sidebar [data-cp-role="new-build"]')?.title === w, words);
+          const before = commands.length;
+          await key.click();
+          const form = bar(page, '[data-cp-role="build-form"]'); await form.waitFor({ state: 'visible' });
+          assert.equal(await form.locator('.cp-form-note').innerText(), words, 'the form says why');
+          assert.equal(await bar(page, '[data-cp-role="build-name"]').isDisabled(), true, 'the name can\'t be typed');
+          assert.equal(await bar(page, '[data-cp-role="make-build"]').isDisabled(), true, 'and make it is off');
+          assert.equal(await form.locator('.cp-form-x').evaluate(el => el === document.activeElement), true, 'focus waits on ×');
+          await form.evaluate(el => el.requestSubmit()); await page.waitForTimeout(300);   // Enter in the form, whatever has focus
+          assert.equal(await form.locator('.cp-form-note').innerText(), words, 'a submit only says it again');
+          assert.deepEqual(commands.slice(before), [], 'nothing is sent');
+          await shot(page, 'github-cant-1180');
+          await form.locator('.cp-form-x').click();
+          await form.waitFor({ state: 'hidden' });
+          await bar(page, '[data-bar-build="main"]').click();
+          const main = await ready(page, 'build', 'main');
+          await main.locator('.cp-copies', { hasText: words }).waitFor();
+          const direct = await fetch(fixture.base + '/api/commands', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'copy.create', projectId: GH, args: { name: 'dev' }, idempotencyKey: randomUUID() }) }).then(r => r.json());
+          assert.equal(direct.ok, false, 'the daemon refuses it too');
+          assert.equal(direct.error.message, words);
+          assert.equal((await fixture.copies(GH)).copies.length, 0, 'and nothing was made');
+          await page.locator('.project-close:visible').click();
+        } finally { undo(); }
+      }, page);
+    } finally { await context.close(); }
+
+    const small390 = await openApp({ width: 390, height: 844, touch: true, project: COPIES });
+    try {
+      const { page } = small390;
+      await check('21 Copies at 390 touch', async () => {
+        await barOpen(page);
+        await bar(page, '[data-cp-role="new-build"]').click();
+        assert.equal(await bar(page, '[data-cp-role="build-name"]').inputValue(), 'dev', 'a retired name is free again');
+        await page.keyboard.press('Enter');
+        await bar(page, '[data-bar-build="dev"]').waitFor();
+        await wordIs(page, 'dev', 'nothing to ship yet');
+        await bar(page, '[data-cp-role="play-copy"][data-build="dev"]').scrollIntoViewIfNeeded();
+        assert.deepEqual(await small(page, '#workspace-sidebar button'), [], 'every button in the drawer is 44 tall, every icon key 44 wide — the copy row, its caret, play and ship');
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+        await shot(page, 'copies-bar-390');
+        await bar(page, '[data-bar-build="dev"]').click();
+        await ready(page, 'build', 'dev');
+        assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true', 'a copy row puts the drawer away first');
+        assert.deepEqual(await small(page, '#project-workspace .cp-page button'), [], 'every key on the copy\'s page is 44');
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll on its page');
+        await shot(page, 'copy-page-390');
+      }, page);
+    } finally { await small390.context.close(); }
+  }
+
   await check('no page errors', async () => { assert.deepEqual(errors, []); });
 } finally {
   await browser?.close();
   await fixture.close();
 }
 if (failed) { console.error(`Control panel checks: ${failed} failed, ${passed} passed.`); process.exitCode = 1; }
-else console.log(`Control panel checks passed (${passed}): chat by default, a build row and an improvement row open their pages, + improvement starts or keeps in place, a staged ticket asks twice and merges, a failed one can be put away, plans are unreachable, × and Escape come back, starting waits for the reply in words, 44px at 390 touch, every control presses, and only building words move.`);
+else console.log(`Control panel checks passed (${passed}): chat by default, a build row and an improvement row open their pages, + improvement starts or keeps in place, a staged ticket asks twice and merges, a failed one can be put away, plans are unreachable, × and Escape come back, starting waits for the reply in words, 44px at 390 touch, every control presses, and only building words move; + New build makes a real copy of main, an improvement lands in it and main is unchanged, Ship to main asks twice and leaves the copy level with main, catch up brings main's newest in, one build plays at a time, retire waits for a building improvement and then takes the copy off the machine, GitHub mode says why copies can't be made, and copies are 44px at 390 touch.`);
