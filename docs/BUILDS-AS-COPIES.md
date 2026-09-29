@@ -956,7 +956,7 @@ The three builders' departures (each said in their commit) and the integrator's.
 | app.js cards | `mainFor` → `cardFor` | `cardFor` memoises `buildsCard`; the page's build is found in `card.builds` rather than a second `buildOf` pass |
 | app.js reads | a failed copies read keeps the last good one | and a `copy.updated` that lands while a read is out wins over it (the read runs again), without discarding that read's builds and issues |
 | app.js pages | a copy page whose copy is gone → the gone page | a copy page before the project's copies were first read is not drawn at all, then opens when they land — never "gone" before anyone looked |
-| app.js events | `copy.updated` → `acceptCopy` | a record whose head moved (a landing, a catch-up) reads again at once, so ahead and behind don't lag the "2 in" beside them |
+| app.js events | `copy.updated` → `acceptCopy` | a record whose head moved (a landing, a catch-up) reads again at once rather than after the 400ms event debounce: ahead and behind trail the "2 in" beside them by one read, 51–67ms over 8 landings measured on the copies fixture |
 | app.js ship | refresh | also reads `/api/projects` again: main's last commit, on its page's play foot, moved |
 | app.js refusals | the daemon's words | "… is busy — …" ones are a notice (ink), not an error |
 | tools/test-backend.mjs | `testBackend({ copies: true })` | also `enableCopies()`, for a suite that checks main alone first: one backend per process (the daemon's modules are singletons). It sets `NODE_ENV=test` only there, for its deterministic fixer |
