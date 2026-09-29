@@ -51,12 +51,13 @@ async function pageFor({width=1180,height=712,demo=false,project}={}){
 /* send through the app, not the palette: a leading slash would otherwise be picked from the command palette on Enter */
 async function say(page,text){const before=await page.evaluate(()=>nibbiApp.state().turns.length);await page.evaluate(t=>{void window.nibbiApp.send(t);},text);await page.waitForFunction(n=>{const s=nibbiApp.state();return !s.busy&&s.turns.length>n&&s.turns[s.turns.length-1].done;},before,{timeout:30000});return page.locator('.turn').last();}
 async function shot(page,name){await page.waitForFunction(()=>{const s=window.nibbi?.state?.();return !s||(Math.abs(s.y-s.ty)<2&&Math.abs(s.x-s.tx)<2&&Math.abs(s.r-s.tr)<1);},null,{timeout:5000}).catch(()=>{});await page.evaluate(async()=>{await document.fonts.ready;});await page.screenshot({path:join(out,name+'.png')});}
-async function ready(page,section){await page.waitForFunction(section=>nibbiApp.state().projectView?.section===section&&document.querySelector('#project-workspace').getAttribute('aria-busy')==='false',section);}
-async function open(page,project,section){
+/* An improvement's ticket, opened from its row inside main in the bar (docs/CONTROL-PANEL.md §6.2). */
+async function openTicket(page,project,id){
  if(await page.locator('#sidebar-toggle').isVisible()){await page.locator('#sidebar-toggle').click();await page.waitForFunction(()=>document.querySelector('#workspace-sidebar').getBoundingClientRect().x>=0);}
  await chooseProject(page,project);await closeSwitcher(page);
- await page.locator(`[data-section-project="${project}"][data-project-section="${section}"]`).click();await ready(page,section);
- const updates=page.locator('.project-notice').getByRole('button',{name:'Show updates',exact:true});if(await updates.isVisible())await updates.click();
+ const row=page.locator(`#workspace-sidebar [data-bar-improvement="${id}"]`);if(!await row.count())await page.locator('#workspace-sidebar [data-cp-fold]').first().click();
+ await row.click();await page.waitForFunction(id=>nibbiApp.state().projectView?.page==='ticket'&&nibbiApp.state().projectView?.id===id,id);
+ return page.locator(`#project-workspace .cp-page[data-cp-page="ticket"][data-cp-id="${id}"]`);
 }
 const STEP_LINE=/\d+ steps? in \d+(?:\.\d+)?(?:s|m \d{2}s)(?: · \d+ failed)?/g;
 /* the folded rows are display:none; "show" unfolds them the way a reader would, then the edit_file step is expanded through its summary */
@@ -91,7 +92,7 @@ try{
    await shot(page,'demo-transcript-desktop');
   },page);}finally{await context.close();}}
 
- /* 2. Builds → Log renders structured rows from /api/fixer-log */
+ /* 2. a ticket's Log renders structured rows from /api/fixer-log */
  let logRunId;
  {await check('fixture build stages and its log has structured entries',async()=>{
    // The seeded check command captures ls into a test and prints nothing; a plain ls gives the Log real process.output rows.
@@ -106,14 +107,14 @@ try{
    if(!kinds.includes('process.output'))note('check 2: no process.output rows were emitted by the fixture build');
   });
   const {page,context}=await pageFor();
-  try{await check('Builds Log tab renders .project-log rows with kind badges',async()=>{
+  try{await check('a ticket\'s Log tab renders .project-log rows with kind badges',async()=>{
    assert(logRunId,'a staged fixture build exists');
    const entries=(await api('/api/fixer-log?id='+logRunId)).body.entries||[];
-   await open(page,'paper-garden','builds');
-   const row=page.locator(`[data-build-id="${logRunId}"]`);await row.waitFor();if(!await row.evaluate(el=>el.open))await row.locator(':scope > summary').click();
-   await row.getByRole('button',{name:'Log',exact:true}).click();
-   const panel=row.locator('.project-evidence-panel');await page.waitForFunction(id=>{const p=document.querySelector(`[data-build-id="${id}"] .project-evidence-panel`);return p&&p.textContent.trim()&&!/^Loading/.test(p.textContent.trim());},logRunId);
-   if(!entries.length){assert.match(await panel.innerText(),/No log entries/i,'empty state when the run has no events');note('check 2: Log tab asserted the empty state — the run reported no events');return;}
+   const ticket=await openTicket(page,'paper-garden','run:'+logRunId);
+   const row=ticket.locator(`article.cp-try[data-cp-run="${logRunId}"]`);await row.waitFor();
+   await row.locator('.project-evidence-tabs button[data-kind="log"]').click();
+   const panel=row.locator('.project-evidence-panel');await page.waitForFunction(id=>{const p=document.querySelector(`article.cp-try[data-cp-run="${id}"] .project-evidence-panel`);return p&&p.textContent.trim()&&!/^reading/.test(p.textContent.trim());},logRunId);
+   if(!entries.length){assert.match(await panel.innerText(),/nothing in the log yet/i,'empty state when the run has no events');note('check 2: Log tab asserted the empty state — the run reported no events');return;}
    const rows=panel.locator('.project-log li');const count=await rows.count();assert(count>=1,'.project-log li rows exist (found '+count+')');
    const badged=await rows.evaluateAll(els=>els.filter(li=>li.querySelector('[class*="kind"],[data-kind]')).length);assert(badged>=1,'at least one row has a kind badge');
    const output=entries.filter(e=>e.kind==='process.output').map(e=>String(e.text||'').trim()).find(Boolean);

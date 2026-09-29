@@ -53,8 +53,8 @@ try {
     await page.keyboard.press('Escape');assert.equal(await page.locator('#dock-menu').isVisible(),false,'Escape closes the panel');assert.equal(await page.evaluate(()=>document.activeElement?.id),'dock','Escape returns focus to the options button');
     assert.equal(await page.evaluate(()=>nibbi.state().character),'pool-velvet');
     assert.equal(await page.locator('.project-group').count(),3);
-    // One project is in the bar at a time, so one strip. Every project is a row in the switcher.
-    assert.deepEqual(await page.locator('.project-section[data-project-section]').evaluateAll(els=>els.map(el=>el.dataset.projectSection)),['builds','issues','plans']);
+    // One project is in the bar at a time, so one builds card, holding main. Every project is a row in the switcher.
+    assert.deepEqual(await page.locator('[data-bar-build]').evaluateAll(els=>els.map(el=>el.dataset.barBuild)),['main']);
     assert.equal(await page.locator('.margin-switch-trigger').getAttribute('data-current-project'),'paper-garden','the switcher names the active project');
     assert.equal(await page.locator('[data-project-id]').count(),projects.length,'every project is reachable from the switcher');
     await shot(page,`desktop-or-mobile-${w}x${h}`);
@@ -65,7 +65,8 @@ try {
     await chooseProject(page,'observatory');
     assert.equal(await page.evaluate(()=>nibbiApp.state().project),'observatory');
     assert.equal(await page.locator('.margin-card:not([hidden])').count(),0,'choosing a project does not open its settings');
-    assert.equal(await page.locator('[data-section-project="observatory"]:visible').count(),3);
+    assert.equal(await page.locator('.cp-group[data-cp-group="builds"] [data-bar-build="main"]:visible').count(),1,'observatory\'s builds card holds its main');
+    assert.equal(await page.locator('[data-thread-project="observatory"]:visible').count()>=1,true,'and its conversations card its conversations');
     await openProjectCard(page,'observatory');
     await bounds(page,'.margin-card:not([hidden])');
     await page.keyboard.press('Escape');
