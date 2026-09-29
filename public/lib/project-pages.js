@@ -546,11 +546,13 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     f.save.disabled = !changed && !pending;
     busyKey(f.save, pending);
   }
-  /** The words as they are now: the edit key's payload carries the issue's own text, else the title. */
+  /** The words as they are now: the edit key's payload carries the issue's own text, else the title. The
+      form keeps that payload, and with it the list's revision the words were read at, so a save after
+      the list changed under it is refused (and says so) rather than written over what changed. */
   function fillEdit(f, t) {
     const a = (t.actions || []).find(x => x.action === 'editImprovement');
     f.title.value = a?.payload?.title ?? t.improvement.title; f.desc.value = a?.payload?.description ?? t.asked?.description ?? '';
-    f.from = [f.title.value, f.desc.value]; f.note.textContent = ''; delete f.note.dataset.kind;
+    f.from = [f.title.value, f.desc.value]; f.revision = a?.payload?.revision; f.stale = false; f.note.textContent = ''; delete f.note.dataset.kind;
   }
   function openEdit() {
     P.editing = true; P.confirm = null; P.steerKey = null;
@@ -568,10 +570,15 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     const title = f.title.value.trim(), description = f.desc.value.trim();
     if (!title) { f.title.focus(); return; }
     const page = P;
-    const r = await send('edit-save', a.action, { ...(a.payload || {}), title, description }, { quiet: true });
+    // "save again" means it: once refused, the words have been seen against the list as it is now
+    const value = { ...(a.payload || {}), title, description };
+    if (!f.stale && f.revision !== undefined) value.revision = f.revision;
+    const r = await send('edit-save', a.action, value, { quiet: true });
     if (page !== P) return;
-    if (r.ok) { f.note.textContent = ''; closeEdit(); return; }
-    f.note.textContent = isConflict(r) || /revision|changed|conflict/i.test(r.error) ? CONFLICT : r.error; f.note.dataset.kind = 'error';
+    if (r.ok) { f.note.textContent = ''; f.stale = false; closeEdit(); return; }
+    const conflict = isConflict(r) || /revision|changed|conflict/i.test(r.error);
+    if (conflict) f.stale = true;
+    f.note.textContent = conflict ? CONFLICT : r.error; f.note.dataset.kind = 'error';
     syncEditForm();
   }
 

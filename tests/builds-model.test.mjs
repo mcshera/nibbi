@@ -235,7 +235,8 @@ test('an open issue with no try is up next: it waits, in words; build it now is 
   assert.equal(t.statusLine, 'it waits here until you start it — nothing builds it on its own');
   assert.deepEqual(t.actions.map(a => [a.key, a.action, a.label, a.tone]), [
     ['edit', 'editImprovement', 'edit the words', 'seated'], ['mark-done', 'completeImprovement', 'mark it done', 'seated'], ['build-now', 'buildIssue', 'build it now', 'ink']]);
-  assert.deepEqual(action(t, 'edit').payload, { issueId: 'i', title: 'seedlings overlap', description: 'Two seedlings share a cell.\nSee row 3.' });
+  // the words carry the list's revision they were read at: a save after the list moved is refused, not written over it
+  assert.deepEqual(action(t, 'edit').payload, { issueId: 'i', title: 'seedlings overlap', description: 'Two seedlings share a cell.\nSee row 3.', revision: REV });
   assert.equal(action(t, 'edit').opens, 'form');
   assert.deepEqual(action(t, 'build-now').payload, { issueId: 'i' });
   assert.deepEqual(t.asked, { text: 'seedlings overlap', description: 'Two seedlings share a cell.\nSee row 3.', context: '', at: null, source: 'issue' });

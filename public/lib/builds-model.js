@@ -503,7 +503,7 @@ function actionsOf(ctx, rec, attempts) {
   const unverified = latest && latest.checks[0]?.ok !== true;
 
   if (state === 'up_next' && rec.fromIssue && rec.item) {
-    add(key(ctx, 'editImprovement', WORDS.keys.edit, 'edit', { issueId: rec.issueId, title: str(rec.item.text) || title, description: str(rec.item.description) }, { opens: 'form' }));
+    add(key(ctx, 'editImprovement', WORDS.keys.edit, 'edit', { issueId: rec.issueId, title: str(rec.item.text) || title, description: str(rec.item.description), revision: ctx.revision }, { opens: 'form' }));
     add(key(ctx, 'completeImprovement', WORDS.keys.markDone, 'mark-done', { issueId: rec.issueId }));
     add(key(ctx, 'buildIssue', WORDS.keys.buildNow, 'build-now', { issueId: rec.issueId }, { tone: 'ink' }));
   } else if (state === 'up_next' && runId) {

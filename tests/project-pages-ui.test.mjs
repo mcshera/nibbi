@@ -56,7 +56,7 @@ const TICKETS = {
     const i = imp('issue:seedling-overlap', 'seedlings overlap near the edge', 'up_next', { context: 'Growing' });
     return ticket(i, {
       statusLine: 'it waits here until you start it — nothing builds it on its own',
-      actions: [A('editImprovement', WORDS.keys.edit, 'edit', { issueId: 'seedling-overlap', title: i.title, description: 'Reproduce with a full garden.' }, { opens: 'form' }),
+      actions: [A('editImprovement', WORDS.keys.edit, 'edit', { issueId: 'seedling-overlap', title: i.title, description: 'Reproduce with a full garden.', revision: 'rev-1' }, { opens: 'form' }),
         A('completeImprovement', WORDS.keys.markDone, 'mark-done', { issueId: 'seedling-overlap' }), A('buildIssue', WORDS.keys.buildNow, 'build-now', { issueId: 'seedling-overlap' }, { tone: 'ink' })],
       factsList: facts('from issues.md', 'none yet', '—', '—', '—'),
       askedVM: asked(i.title, { source: 'issue', description: 'Reproduce with a full garden: the last row of seedlings draws over the fence.', context: 'you marked it in progress' }),
@@ -397,20 +397,23 @@ test('each ticket key sends its payload; asking twice sends only on yes; forms s
     await h.page.evaluate(() => { window.fail.editImprovement = { message: 'The document changed.', code: 'REVISION_CONFLICT' }; });
     await h.page.locator('[data-cp-key="edit-title"]').fill('seedlings leave room at the fence');
     await h.page.locator('[data-cp-key="edit-desc"]').fill('Keep my unsaved notes.');
+    // the list moves while the words are edited: the save still goes against the list they were read from
+    const movedList = over => { const next = model('up-next', over); next.ticket.actions[0].payload.revision = 'rev-2'; return next; };
+    await h.page.evaluate(mdl => pages.update(mdl), movedList({ now: NOW + 30_000 }));
     await h.page.locator('[data-cp-key="edit-save"]').click();
     await h.page.locator('.cp-edit .cp-page-note[data-kind="error"]').waitFor();
     assert.equal(await h.page.locator('.cp-edit .cp-page-note').innerText(), 'the list changed — your words are still here; save again');
     assert.equal(await h.page.locator('[data-cp-key="edit-title"]').inputValue(), 'seedlings leave room at the fence');
-    await h.update('up-next', { now: NOW + 60_000 });
+    await h.page.evaluate(mdl => pages.update(mdl), movedList({ now: NOW + 60_000 }));
     assert.equal(await h.page.locator('[data-cp-key="edit-desc"]').inputValue(), 'Keep my unsaved notes.', 'an update keeps the words being edited');
     assert.equal(await h.page.evaluate(() => pages.snapshot().hasDraft), true);
     await h.page.evaluate(() => { delete window.fail.editImprovement; });
     await h.page.locator('[data-cp-key="edit-save"]').click();
     await h.page.locator('.cp-page h1').waitFor();
     assert.deepEqual((await sent()).map(c => c.value), [
-      { issueId: 'seedling-overlap', title: 'seedlings leave room at the fence', description: 'Keep my unsaved notes.' },
-      { issueId: 'seedling-overlap', title: 'seedlings leave room at the fence', description: 'Keep my unsaved notes.' },
-    ]);
+      { issueId: 'seedling-overlap', title: 'seedlings leave room at the fence', description: 'Keep my unsaved notes.', revision: 'rev-1' },
+      { issueId: 'seedling-overlap', title: 'seedlings leave room at the fence', description: 'Keep my unsaved notes.', revision: 'rev-2' },
+    ], 'the first save goes against the list the words were read from; refused, the second against the list as it is now');
     assert.equal(await h.page.evaluate(() => document.activeElement?.dataset.cpKey), 'edit', 'saved, focus is back on edit the words');
 
     // guide it: one field under the keys; Enter sends it; the notice says where it went, in ink

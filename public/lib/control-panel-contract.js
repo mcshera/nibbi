@@ -393,7 +393,7 @@ export const WORDS = Object.freeze({
  * @property {{ text: string }} queueImprovement    → issue.create
  * @property {{ action: 'start'|'stop'|'open' }} playMain
  * @property {{ issueId: string }} buildIssue
- * @property {{ issueId: string, title: string, description: string }} editImprovement
+ * @property {{ issueId: string, title: string, description: string, revision: string }} editImprovement   revision: the issues list's, as the words were read (a save against a list that moved since is refused)
  * @property {{ issueId: string }} completeImprovement
  * @property {{ issueId: string }} reopenImprovement
  * @property {{ runId: string }} stopRun

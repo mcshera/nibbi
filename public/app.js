@@ -2167,7 +2167,8 @@ async function handleControlPanelAction(action, project, value) {
       return issueCommand(project, revision => ({ action: 'issue.create', title, description, expectedRevision: revision }), { retry: true });
     }
     case 'buildIssue': return issueCommand(project, revision => ({ action: 'issue.build', id: value?.issueId, expectedRevision: revision }), { retry: true });   // duplicate-safe on the daemon
-    case 'editImprovement': return issueCommand(project, revision => ({ action: 'issue.edit', id: value?.issueId, title: String(value?.title || '').trim(), description: String(value?.description ?? ''), expectedRevision: revision }), { retry: false });   // a conflict keeps the words on the page
+    // against the list as the words were read: a change since then is a conflict, and the words stay on the page
+    case 'editImprovement': return issueCommand(project, revision => ({ action: 'issue.edit', id: value?.issueId, title: String(value?.title || '').trim(), description: String(value?.description ?? ''), expectedRevision: value?.revision || revision }), { retry: false });
     case 'completeImprovement': return issueCommand(project, revision => ({ action: 'issue.complete', id: value?.issueId, expectedRevision: revision }), { retry: true });
     case 'reopenImprovement': return issueCommand(project, revision => ({ action: 'issue.reopen', id: value?.issueId, expectedRevision: revision }), { retry: true });
     case 'stopRun': return runCommand(project, 'run.stop', value?.runId);
