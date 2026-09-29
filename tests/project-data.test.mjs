@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadProjectSection,loadProjectSummaries,projectCommand,ProjectDataError,loadGithubProject,loadGithubBuild,loadGithubChanges,githubCommand} from '../public/lib/project-data.js';
+import {loadProjectSection,loadProjectSummaries,projectCommand,ProjectDataError,loadGithubProject,loadGithubBuild,loadGithubChanges,githubCommand,loadProjectCopies} from '../public/lib/project-data.js';
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
 const document=(project='alpha',section='plans',extra={})=>({project,section,status:'ready',markdown:'# Plan\nA prose roadmap.',revision:'revision-a',items:[],counts:null,...extra});
 test('canonical section read preserves identities, revision, source text and reported counts',async()=>{
@@ -40,4 +40,12 @@ test('GitHub reads and reviewed writes retain canonical project and Build identi
  await assert.rejects(loadGithubBuild({project:'alpha',buildId:'a',fetcher:async()=>json({project:'beta',buildId:'a'})}),ProjectDataError);
  await assert.rejects(loadGithubChanges({project:'alpha',buildId:'a',fetcher:async()=>json({project:'alpha',buildId:'b',files:[],sourceRevision:'one'})}),ProjectDataError);
  const result=await githubCommand('alpha','build.publish',{operationId:'review-one'},{idempotencyKey:'identity-one',fetcher:async(url,options)=>{assert.equal(url,'/api/commands');assert.deepEqual(JSON.parse(options.body),{name:'build.publish',args:{operationId:'review-one'},projectId:'alpha',idempotencyKey:'identity-one'});return json({ok:true,data:{state:'unknown'}});}});assert.equal(result.state,'unknown');
+});
+test('the copies read is one project\'s: a foreign copy, a bad id or a refusal never enters a view',async()=>{
+ const copy={id:'copy-0b8f6f7e-54a1-4c55-9d0c-2f1e6c7d8a90',project:'alpha',name:'dev',status:'ready'};
+ const read={project:'alpha',mode:'local',disabled:'',limit:5,main:{branch:'main',sha:'a'.repeat(40)},copies:[copy],retired:[],ships:[],fetchedAt:1};
+ assert.deepEqual(await loadProjectCopies({project:'alpha',fetcher:async(url,options)=>{assert.equal(url,'/api/project-copies?project=alpha');assert.equal(options.method,'GET');return json(read);}}),read);
+ for(const bad of [{...read,project:'beta'},{...read,copies:null},{...read,copies:[{...copy,project:'beta'}]},{...read,copies:[{...copy,id:'alpha:dev'}]}])await assert.rejects(loadProjectCopies({project:'alpha',fetcher:async()=>json(bad)}),ProjectDataError);
+ await assert.rejects(loadProjectCopies({project:'alpha',fetcher:async()=>json({error:'The brain has no builds'},400)}),e=>e instanceof ProjectDataError&&e.status===400&&e.message==='The brain has no builds');
+ await assert.rejects(loadProjectCopies({project:'../alpha'}),TypeError);
 });
