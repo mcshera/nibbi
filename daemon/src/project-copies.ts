@@ -34,6 +34,8 @@ export interface CopiesRead {
 }
 
 const ACTIVE = new Set(['installing', 'running', 'verifying', 'awaiting_input']);
+/** Not active, still on its copy: retire waits for these too (listFixers says 'staged' for 'done'). */
+const ON_COPY = new Set(['queued', 'staged']);
 const isGithub = (project: string): boolean => connectionFor(project)?.workflowMode === 'github';
 const now = (): string => new Date().toISOString();
 function projectConfig(project: string): GameCfg { const cfg = games()[project]; if (!cfg) throw new Error('Unknown project'); return cfg; }
@@ -317,7 +319,9 @@ export async function retireCopy(project: string, id: string, expectedHead: stri
   return withRepoLock(cfg.repo, async () => {
     const copy = liveCopy(project, id), previous = copy.status;
     if (previous !== 'ready' && previous !== 'broken') throw new CopyRefusal('notReady', notReadyWords(copy));
-    if (listFixers().some(run => run.copyId === id && (buildIsActive(run.id) || ACTIVE.has(run.status) || run.status === 'queued'))) throw refuse('retireBuilding', { name: copy.name });
+    // The model's rule: a try building, queued, or passed and not landed yet (staged: landing, or waiting while the copy plays).
+    // Retired under a staged try, that try could never land, be retried, or let its issue build again.
+    if (listFixers().some(run => run.copyId === id && (buildIsActive(run.id) || ACTIVE.has(run.status) || ON_COPY.has(run.status)))) throw refuse('retireBuilding', { name: copy.name });
     if (expectedHead !== copy.headSha) throw refuse('headMoved', { name: copy.name });
     if (!within(config.workDir, copy.worktree)) throw refuse('notNibbis', { name: copy.name });
     const moved = await movedRefusal(cfg, copy); if (moved) throw moved;

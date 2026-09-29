@@ -646,16 +646,29 @@ test('a landing that changes the dependency files reinstalls in the copy', async
   assert.equal(copyOf(copy.id).error, null); assert.deepEqual(merges(), []);
 });
 
-test('retire stops a playing copy and leaves a waiting try as it is', async () => {
+test('retire refuses while a try waits to land, and after retire its issue builds on main', async () => {
   const repo = await project('retire-play', { play: PLAY }); const copy = await makeCopy('retire-play');
   const preview = records.copyPreviewId('retire-play', copy.id), main = await snapshot(repo);
   try {
     await copies.playCopy('retire-play', copy.id);
-    const waiting = await improve('retire-play', 'a.txt never lands', copy); assert.equal(waiting.landing?.state, 'waiting');
-    await copies.retireCopy('retire-play', copy.id, copy.headSha);
+    const issue = await act('retire-play', 'issue.create', { title: 'a.txt waits to land', copyId: copy.id }); if (!issue.ok) throw new Error(issue.error.message);
+    const built = await act('retire-play', 'issue.build', { id: issue.itemId }); if (!built.ok) throw new Error(built.error.message);
+    const runId = (built.run as Fixer).id; await fixer.waitForFixer(runId); await fixer.landOnCopy(runId);
+    assert.deepEqual([run(runId).status, run(runId).landing?.state], ['staged', 'waiting']);
+    // The model's rule: a try that passed and hasn't landed holds retire, and the refusal stops nothing.
+    const before = await snapshot(repo, copy);
+    await refused(copies.retireCopy('retire-play', copy.id, copy.headSha), fill(W.retireBuilding, { name: 'dev' }));
+    assert.deepEqual(await snapshot(repo, copy), before); assert.equal(previews.previewStatus(preview).running, true);
+    assert.deepEqual([run(runId).status, run(runId).landing?.state], ['staged', 'waiting']);
+    // It lands once dev stops playing; then retire stops a playing dev and goes.
+    await copies.stopCopy('retire-play', copy.id); assert.equal(run(runId).status, 'merged');
+    await copies.playCopy('retire-play', copy.id);
+    await copies.retireCopy('retire-play', copy.id, copyOf(copy.id).headSha);
     assert.equal(previews.previewStatus(preview).running, false); assert.equal(copyOf(copy.id).status, 'retired');
-    await fixer.landOnCopy(waiting.id); await new Promise(resolve => setTimeout(resolve, 200));
-    assert.equal(run(waiting.id).status, 'staged'); assert.equal(run(waiting.id).landing?.state, 'waiting');
     assert.equal(existsSync(copy.worktree), false); assert.deepEqual(await snapshot(repo), main);
+    // Its landed, never-shipped try doesn't hold the issue: it builds again, on main.
+    const again = await act('retire-play', 'issue.build', { id: issue.itemId }); assert.equal(again.ok, true, again.ok ? '' : again.error.message); if (!again.ok) return;
+    const next = again.run as Fixer; assert.deepEqual([next.copyId, next.targetBranch], [undefined, 'main']);
+    await fixer.waitForFixer(next.id); assert.equal(run(next.id).status, 'staged');
   } finally { await previews.stopAndWait(preview); }
 });
