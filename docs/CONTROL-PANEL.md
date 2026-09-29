@@ -489,7 +489,7 @@ issue up_next with no try: `when` null, `context` = its heading or the first lin
 | up_next, queued run | "queued — it starts when one of the {maxConcurrent} slots frees" | cancel it (`stopRun`, no confirm: nothing ran) |
 | building | activity (or "installing" / "doing the work" / "running the checks") + " · 4m in · try 2" | guide it (form; only with `run.steer` allowed) · stop (confirm) |
 | needs_you | "it stopped to ask you something — guide it, or stop it" | ★ guide it (form) · stop (confirm) |
-| ready, local | checks passed: "checks passed on a1b2c3d — play it, then merge it or discard it"; else "not verified — verify it before it can merge" | ★ play it (when `preview.start`/`preview.stop` allowed; running: open it + stop playing) · approve & merge (confirm; ★ when not previewable; blocked words per §5.2) · discard (confirm, armed) · verify it (when `run.verify` allowed and not passed) |
+| ready, local | checks passed: "checks passed on a1b2c3d — play it, then merge it or discard it" ("— merge it or discard it" when the try has nothing to play); else "not verified — verify it before it can merge" | ★ play it (when `preview.start`/`preview.stop` allowed; running: open it + stop playing) · approve & merge (confirm; ★ when not previewable; blocked words per §5.2) · discard (confirm, armed) · verify it (when `run.verify` allowed and not passed) |
 | to_push · pull_request · pr_ready · needs_attention | §4.2 | ★ the github steps · discard (confirm, armed; when allowed) |
 | in | "in main since 2h · landed with try 2" (§4.2 in GitHub mode) | see its changes (selects the changes tab) |
 | failed | the reason (first line of the run's summary) + " — main is unchanged" | ask nibbi about it · ★ try again |

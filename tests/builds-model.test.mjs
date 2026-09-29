@@ -332,6 +332,7 @@ test('a local staged try: play it, approve & merge asking twice, discard armed, 
   // nothing to play: merge is the ink key
   const still = ticketOf(withRead(r, ['run.discard', 'run.merge']), 'run:s');
   assert.deepEqual(keys(still), ['merge', 'discard']); assert.deepEqual(inks(still), ['merge']);
+  assert.equal(still.statusLine, 'checks passed on a1b2c3d — merge it or discard it', 'and the words do not offer a play there is no key for');
   // unverified: the words say so, merge says why, verify it appears
   const raw = run('u', { status: 'staged', commitSha: 'a1b2c3d4' });
   const u = ticketOf(withRead(raw, ['run.verify', 'run.discard']), 'run:u');

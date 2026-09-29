@@ -469,7 +469,9 @@ function statusLineOf(ctx, rec, attempts) {
   if (state === 'to_push') return 'checks passed here — push it to open a pull request';
   if (state === 'ready') {
     if (githubRun(run)) return 'pushed — open a pull request from its github steps';
-    if (run.verification?.status === 'passed') return `checks passed${basis?.sha ? ' on ' + basis.sha : ''} — play it, then merge it or discard it`;
+    // "play it" only where there is something to play: a try whose worktree has no play command has no play key
+    const known = Array.isArray(basis?.allowedActions), playable = !known || basis.preview?.running === true || basis.allowedActions.some(a => a === 'preview.start' || a === 'preview.stop');
+    if (run.verification?.status === 'passed') return `checks passed${basis?.sha ? ' on ' + basis.sha : ''} — ${playable ? 'play it, then merge it or discard it' : 'merge it or discard it'}`;
     return ctx.check.real ? 'not verified — verify it before it can merge' : WORDS.noCheck;
   }
   if (state === 'in') {
