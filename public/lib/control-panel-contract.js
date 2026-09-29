@@ -354,7 +354,7 @@ export const WORDS = Object.freeze({
     shipChecks: 'nibbi runs {command} once more on what main becomes — main only changes if it passes',
     shipPlayed: 'you played {name} {ago}',
     shipNotPlayed: '{name} hasn’t been played since its last improvement landed',
-    shipLevel: 'main hasn’t moved on since {name} caught up',
+    shipLevel: '{name} has everything main has',
     shipYesOne: 'ship 1 to main',
     shipYesMany: 'ship {n} to main',
     shipNo: 'not yet',

@@ -940,12 +940,12 @@ test('ship to main: ready and every why, what ships and what stays, the facts, t
   assert.equal(ok.lead, '1 improvement goes into main, and main is live with it straight away.');
   assert.deepEqual(ok.checks, [{ name: 'npm test', ok: true, note: 'verified 1h ago on bbbbbbb' }]);
   assert.equal(ok.checksLine, 'nibbi runs npm test once more on what main becomes — main only changes if it passes');
-  assert.deepEqual(ok.facts, ['you played dev 10m ago', 'main hasn’t moved on since dev caught up']);
+  assert.deepEqual(ok.facts, ['you played dev 10m ago', 'dev has everything main has']);
   assert.deepEqual([ok.yes, ok.no], ['ship 1 to main', 'not yet']);
   assert.deepEqual(ok.payload, { copyId: DEV, expectedHead: sha('b') }, 'the full head the owner looked at');
   const two = card({ runs: [landed, onCopy('m2', DEV, 'dev', { status: 'merged', endedAt: ago(20) })], copies: read2([copyView(DEV, 'dev')]) }).builds[1].ship;
   assert.deepEqual([two.lead, two.yes], ['2 improvements go into main, and main is live with them straight away.', 'ship 2 to main']);
-  assert.deepEqual(two.facts, ['dev hasn’t been played since its last improvement landed', 'main hasn’t moved on since dev caught up']);
+  assert.deepEqual(two.facts, ['dev hasn’t been played since its last improvement landed', 'dev has everything main has']);
   // every why, in order: each only when the ones before it hold
   const whys = [
     [{ demo: true }, {}, WORDS.demoChange],
