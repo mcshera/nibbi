@@ -860,3 +860,17 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
 13. **Open, for the owner**: whether "both of them" meant the two groups (read here, ROUND5 decided 1);
     whether up-next items should be drained by automation (scheduler option (b), code.md §3); lowercase
     for the progress line (D13).
+
+---
+
+## 10. As built — where the integration departed from §8 (part 2)
+
+| where | the spec said | as built, and why |
+|---|---|---|
+| tools/attention-verify.mjs:99-100 | the notification opens `run:<failing>` | it opens `run:fixture-3`, the chain's root, with the failing retry as try 2: D2 makes a ticket the `replacesBuildId` chain, and the failing run is a retry of fixture-3 |
+| app.js `refreshStatus` | — | a snapshot that lands after a newer `run.updated` no longer replaces that run's record (it dropped a retried run, and a notification then opened a gone ticket, 2 of 3 probe runs). `openRunTicket` also resolves over the builds read and the run itself |
+| §5.1 editImprovement | `issue.edit` with the list's revision | with the revision the words were read at (the payload's `revision`); after a refusal the next save goes against the list as it is. A save after issues.md moved under the form went through before |
+| tools/github-workflow-verify.mjs:72 | `.project-workspace button:visible` ≥ 44 | at ≤640px only: page keys are 36 and links 32 at a fine pointer (§0) |
+| margins.css `.margin-card-right` ≤899px | the lab's 8px foot | 12px: arrive rises 10px, and the card arrived 2px past a 568px phone |
+| tools/control-panel-verify.mjs | — | paper-garden plays at a URL in its fixture, so ▶ is a live key whose press can be measured (check 11) |
+| tools/kanban-verify.mjs | retire | deleted; its intent is checks 4 and 5 |
