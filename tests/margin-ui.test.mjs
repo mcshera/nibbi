@@ -890,3 +890,31 @@ test('every notification status the app reports names its subject', async () => 
   for (const [key, value] of [...values, ['fallback', map[2]]]) assert.match(value, /^Notifications /, key + ': ' + value);
   assert.match(app, /notificationBlocked: notificationPermission === 'denied'/);
 });
+
+// Words carry state: in the project card a long name is what gives way, never the state word beside it.
+test('a long project name is cut before the project card’s state word is', {timeout: 60000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    for (const width of [1180, 390]) {
+      const page = await browser.newPage({viewport: {width, height: 820}, hasTouch: width < 900});
+      const errors = await harness(page);
+      await page.evaluate(() => {
+        window.model = {projects: [
+          {id: 'paper-garden-community-edition', name: 'paper-garden-community-edition', active: true, branch: 'main', mode: 'stage', attention: {text: '1 ready to review', tone: 'attention'},
+            conversations: [{id: 'home', title: 'Home', lastText: '', active: true}], builds: [mainOf({badge: {text: '1 ready to review', tone: 'attention'}})]},
+        ], activeProject: 'paper-garden-community-edition', busy: false, view: null, settings: {}};
+        ui.update(model);
+      });
+      if (width < 900) { await page.locator('#sidebar-toggle').click(); await frame(page); }
+      const head = await page.locator('.cp-card-head').first().evaluate(el => {
+        const badge = el.querySelector('.cp-badge'), title = el.querySelector('.cp-title');
+        return {badge: badge.textContent, badgeCut: badge.scrollWidth > badge.clientWidth + 1, titleCut: title.scrollWidth > title.clientWidth + 1};
+      });
+      assert.equal(head.badge, '1 ready to review');
+      assert.equal(head.badgeCut, false, `at ${width} the state word is whole: ${JSON.stringify(head)}`);
+      assert.equal(head.titleCut, true, `at ${width} the long name gives way instead: ${JSON.stringify(head)}`);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});

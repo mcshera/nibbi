@@ -171,6 +171,10 @@ body.sidebar-open .workspace-sidebar { transform: none; visibility: visible; }
 /* the badge: a word on the right-hand edge, like every word in the rows under it */
 .cp-badge { flex: 1 1 auto; min-width: 0; padding-left: var(--space-3); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-meta); font-weight: 400; line-height: 16px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .cp-badge:empty { padding-left: 0; }
+/* the project card: the name gives way, the state word does not (words carry state). A long name is cut, not "1 fai…" */
+.cp-card-head > .cp-title { flex: 0 1 auto; max-width: none; }
+.cp-card-head > .cp-badge { flex: 0 0 auto; max-width: 62%; margin-left: auto; }
+.cp-card-head > .cp-badge:not(:empty) + .cp-trail { margin-left: 0; }
 /* a header with nothing on its trailing column still stops its badge at the right-hand edge */
 .cp-group-head > .cp-badge:last-child { margin-right: var(--cp-key); }
 /* The groups' headers stay in view while their rows scroll under them. A group's header IS its card's top: it
