@@ -380,8 +380,9 @@ body.native-mac .sidebar-toggle { top: 48px; }
   .workspace-sidebar { width: var(--sidebar-width-narrow); border-right: 0; box-shadow: var(--e-rail); }
   .margin-card-left, .margin-card-right { left: 12px; right: 12px; width: auto; }
   .margin-card { top: 76px; max-height: calc(100dvh - 92px); }
-  /* Settings opens under the head, so the key that opened it stays in view */
-  .margin-card-right { top: calc(var(--space-5) + var(--touch) + var(--space-3)); max-height: calc(100dvh - var(--space-5) - var(--touch) - 2 * var(--space-3)); }
+  /* Settings opens under the head, so the key that opened it stays in view. Its foot keeps the 12px the other
+     edges keep: with 8 it arrived 2px past the bottom of a 568px phone (arrive rises 10px). */
+  .margin-card-right { top: calc(var(--space-5) + var(--touch) + var(--space-3)); max-height: calc(100dvh - 2 * var(--space-5) - var(--touch) - var(--space-3)); }
   .margin-card .margin-pill, .margin-card .margin-mode { min-height: 36px; }
   .margin-pref { min-height: var(--touch); }
   body.margin-ui-active .feed, body.margin-ui-active .pill, body.margin-ui-active .chips { width: calc(100vw - 24px); }
