@@ -1288,7 +1288,10 @@ const fixerEventAt = new Map();   // run id → the event that last wrote its re
    than on every event: a busy minute used to mean a synchronous localStorage write per event. */
 let cursorPending = null, cursorTimer = 0;
 function flushCursor() { if (cursorTimer) { clearTimeout(cursorTimer); cursorTimer = 0; } if (cursorPending !== null) { LS.set('eventCursor', cursorPending); cursorPending = null; } }
-function rememberCursor(id) { cursorPending = id; if (!cursorTimer) cursorTimer = setTimeout(() => { cursorTimer = 0; flushCursor(); }, 500); }
+function rememberCursor(id) {
+  if (id === 0) fixerEventAt.clear();   // the stream was reset: its ids start again, so none of the old ones is newer than a snapshot
+  cursorPending = id; if (!cursorTimer) cursorTimer = setTimeout(() => { cursorTimer = 0; flushCursor(); }, 500);
+}
 function connectEvents() {
   if (S.demo || evSource || !Number.isSafeInteger(S.snapshotCursor)) return;
   // A first visit already has current state from the snapshot. Start there;
