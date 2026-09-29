@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { testBackend } from './test-backend.mjs';
+import { openProjectCard } from './choose-project.mjs';
 
 const fixture = await testBackend();
 const out = new URL('../output/playwright/surfaces/', import.meta.url).pathname;
@@ -23,7 +24,7 @@ async function page(viewport, options = {}, { query = '?demo=1&nosw=1', reply } 
   // A scripted brain answers once with exactly this text, for replies no demo script writes.
   if (reply) await tab.route('**/api/send', route => route.fulfill({ json: { text: reply, costUsd: 0, isError: false } }));
   await tab.goto(fixture.base + '/' + query);
-  await tab.waitForFunction(() => window.nibbiApp && window.nibbi && document.querySelector('.margin-tab[data-margin-tab="builds"]'));
+  await tab.waitForFunction(() => window.nibbiApp && window.nibbi && document.querySelector('[data-bar-build="main"]'));
   return { context, page: tab, errors };
 }
 const settled = tab => tab.waitForFunction(() => document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity));
@@ -31,10 +32,11 @@ const settled = tab => tab.waitForFunction(() => document.getAnimations().every(
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });
 
-  // A section is a room: from idle the character snaps to its header pose instead of shrinking
+  // A page is a room: from idle the character snaps to its header pose instead of shrinking
   // through the header for 600ms, the fixers stay outside, and the header × is the only way back.
+  // main's build page is the page a build row opens (docs/CONTROL-PANEL.md §6.2).
   for (const [width, height, touch] of [[1180, 820, false], [390, 844, true]]) {
-    await scenario(`a section is a room at ${width}x${height}`, async () => {
+    await scenario(`a page is a room at ${width}x${height}`, async () => {
       const { context, page: tab, errors } = await page({ width, height }, touch ? { isMobile: true, hasTouch: true } : {});
       try {
         await tab.waitForFunction(() => document.querySelectorAll('#agents .agent').length > 0, null, { timeout: 15_000 });
@@ -43,24 +45,25 @@ try {
         if (width >= 900) assert.ok(before.r > 100, 'with the hero at full size, r=' + before.r);
         assert.notEqual(before.agents, 'none', 'and the fixers on their perch, so hiding them is a real change');
         if (width < 900) { await tab.locator('#sidebar-toggle').click(); await tab.waitForFunction(() => document.querySelector('#workspace-sidebar').getAttribute('aria-hidden') === 'false'); }
-        await tab.locator('.margin-tab[data-margin-tab="builds"]').click();
+        await tab.locator('[data-bar-build="main"]').click();
         await frames(tab);
         const opened = await tab.evaluate(() => ({ r: window.nibbi.state().r, tr: window.nibbi.state().tr, agents: getComputedStyle(document.querySelector('#agents')).display, launcher: document.querySelectorAll('#project-chat-launcher').length, view: document.body.classList.contains('project-view') }));
-        assert.equal(opened.view, true, 'the section is open');
+        assert.equal(opened.view, true, 'the page is open');
         // Snapped, not sprung: two frames in, the pose is the target. A spring (k=70) is still near where it started.
         assert.ok(opened.tr < before.r, `the header pose is smaller than the hero (${opened.tr} < ${before.r})`);
         assert.ok(Math.abs(opened.r - opened.tr) < 0.5, `two frames after opening, the hero is already in its header pose (r=${opened.r}, target ${opened.tr})`);
         if (width >= 900) assert.ok(opened.r <= 80, 'r=' + opened.r);
         assert.equal(opened.agents, 'none', 'no fixers float over the records');
         assert.equal(opened.launcher, 0, 'and no floating chat launcher covers them');
-        // Measure once the section has arrived: it slides in 10px over --t2, and so does the drawer leaving.
-        await tab.waitForFunction(() => document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false' && document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity));
-        const close = tab.locator('.project-close'), box = await close.boundingBox();
+        // Measure once the page has arrived: it slides in 10px over --t2, and so does the drawer leaving.
+        await tab.waitForFunction(() => document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false' && document.querySelector('#project-workspace .cp-page[data-cp-page="build"]')?.getAttribute('aria-busy') === 'false' && document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity));
+        // The page's own ×: the frame keeps a hidden one for Repository & GitHub.
+        const close = tab.locator('#project-workspace .cp-page .project-close'), box = await close.boundingBox();
         assert.ok(box && box.width >= 44 && box.height >= 44, 'the header × is a 44px target, was ' + JSON.stringify(box));
         assert.ok(box.x >= 0 && box.x + box.width <= width && box.y >= 0, 'inside the viewport');
-        await tab.locator('.project-workspace-body').evaluate(el => { el.scrollTop = el.scrollHeight; });
+        await tab.locator('#project-workspace .cp-page .project-workspace-body').evaluate(el => { el.scrollTop = el.scrollHeight; });
         assert.deepEqual(await close.boundingBox(), box, 'and it stays put while the records scroll');
-        await tab.screenshot({ path: `${out}section-${width}x${height}.png` });
+        await tab.screenshot({ path: `${out}page-${width}x${height}.png` });
         await close.click();
         await tab.waitForFunction(() => document.querySelector('#project-workspace').hidden);
         assert.deepEqual(await tab.evaluate(() => ({ view: document.body.classList.contains('project-view'), focus: document.activeElement?.id, agents: getComputedStyle(document.querySelector('#agents')).display })), { view: false, focus: 'ask', agents: before.agents }, 'the × returns to the composer, and the fixers come back');
@@ -69,19 +72,19 @@ try {
     });
   }
 
-  // Below 900 the section header stacks its summary over its controls. The GitHub panels' toolbars are
-  // a heading and one button with no actions group, and they keep their row: stacked, the button
-  // stretched into a full-width slab.
+  // Below 900 a header with an actions group stacks its summary over its controls. The GitHub panels'
+  // toolbars are a heading and one button with no actions group, and they keep their row: stacked, the
+  // button stretched into a full-width slab. Repository & GitHub opens from the project's settings card
+  // (the lobby toolbar that also led there is gone).
   for (const [width, height] of [[700, 900], [390, 844]]) {
     await scenario(`the repository toolbar keeps its row at ${width}x${height}`, async () => {
       const { context, page: tab, errors } = await page({ width, height }, { isMobile: true, hasTouch: true });
       try {
         await tab.locator('#sidebar-toggle').click();
         await tab.waitForFunction(() => document.querySelector('#workspace-sidebar').getAttribute('aria-hidden') === 'false');
-        await tab.locator('.margin-tab[data-margin-tab="builds"]').click();
-        await tab.waitForFunction(() => window.nibbiApp.state().projectView?.section === 'builds' && document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false');
-        await tab.getByRole('button', { name: 'Repository & GitHub', exact: true }).first().click();
-        await tab.waitForFunction(() => window.nibbiApp.state().projectView?.section === 'repository' && document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false' && document.querySelector('.github-panel .project-toolbar'), null, { timeout: 15_000 });
+        await openProjectCard(tab, 'fixture');
+        await tab.locator('.margin-card:not([hidden])').getByRole('button', { name: 'Repository & GitHub', exact: true }).click();
+        await tab.waitForFunction(() => window.nibbiApp.state().projectView?.page === 'repository' && document.querySelector('#project-workspace').getAttribute('aria-busy') === 'false' && document.querySelector('.github-panel .project-toolbar'), null, { timeout: 15_000 });
         await settled(tab);
         const bars = await tab.evaluate(() => [...document.querySelectorAll('.project-toolbar')].filter(bar => bar.getClientRects().length && !bar.querySelector(':scope > .project-toolbar-actions')).map(bar => {
           const box = el => el.getBoundingClientRect(), heading = bar.querySelector(':scope > h2'), button = bar.querySelector(':scope > button');
@@ -93,7 +96,7 @@ try {
           assert.ok(bar.sameRow, `and sits beside "${bar.heading}", ${JSON.stringify(bar)}`);
         }
         const header = await tab.evaluate(() => { const bar = document.querySelector('.project-toolbar:has(> .project-toolbar-actions)'); return bar && getComputedStyle(bar).flexDirection; });
-        if (header) assert.equal(header, 'column', 'while a section header still stacks its summary over its controls');
+        if (header) assert.equal(header, 'column', 'while a toolbar with an actions group still stacks its summary over its controls');
         await tab.screenshot({ path: `${out}repository-${width}x${height}.png` });
         assert.deepEqual(errors, []);
       } finally { await context.close(); }
@@ -206,4 +209,4 @@ try {
   await fixture.close();
 }
 if (failed) process.exitCode = 1;
-else console.log('Surface checks passed: a section is a room, the repository toolbar keeps its row, an agent card closes when unpinned, the copy button is a 44px target, a ring on ink is the inverse ring, and an old step summary is a line.');
+else console.log('Surface checks passed: a page is a room, the repository toolbar keeps its row, an agent card closes when unpinned, the copy button is a 44px target, a ring on ink is the inverse ring, and an old step summary is a line.');

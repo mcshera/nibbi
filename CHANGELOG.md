@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.9.0 — Unreleased
+
+### The control panel, phase 1
+
+**The bar is a control panel.** It was a switcher, a strip of four glyphs and whatever section the
+strip had open, in four container languages: a raised card, flat rows, rows with a trunk, and `+`
+squares heavier than anything near them. It is three identical cards now — the project, its
+conversations, its builds — with one header, one row and one key between them, and Settings sits in
+the head, left of collapse, where the owner asked for it. Both groups are always open. The foot is a
+quiet line, and it holds the bottom edge once the cards run past it.
+
+**Chat is the room.** Nothing opens a page until you choose a row. A build's row opens its build
+page, an improvement's row its ticket, and ×, Escape or a conversation's row goes back to the
+conversation. Opened from the docked bar, focus stays on the row, so you can click down the list and
+read; from a notification, a chip or the drawer, it moves to the page. A conversation's second line
+is the last thing said in it, which the daemon now keeps on the thread (`lastText`) and sends with
+`thread.updated`.
+
+**A build is a clone of the app.** Phase 1 has one: **main**, the live build, and it says where its
+work really lands — `live · lands on staging` when that is not main. Its page plays your checkout
+(and says which branch it is on, because that is what play really runs), counts what waits on you,
+names the project's check, and lists every improvement in one order, the bar's: waiting on you,
+building, up next, in, failed. `dev`, `dev1` and a `+` to make one wait for phase 2.
+
+**Improvements, not issues and plans.** Plans left the UI, and so did the Issues board. An
+improvement is an open item in `issues.md` or a run started from your words, and its word says where
+it is: up next, building, needs you, ready to review, in, failed — or interrupted, in ink, because
+the backend stopping under a run is not a verdict on it. Up next is not a queue, and the page says
+so: nothing builds an up-next item on its own, and **build it now** is the way from one to the other.
+The roadmap is untouched and still drives automation, `/plan` and `/goal`; the project's settings
+card says so in one line.
+
+**+ improvement is one form.** In the bar and on main's page: **start now** (↵) dispatches a run,
+**up next** keeps it in `issues.md`, and "ask nibbi instead" hands the words to the conversation.
+It never leaves the room it was opened in and never types over your draft. A retried run is a new
+try on the same ticket, not a new ticket.
+
+**Review moved onto the ticket.** The Builds lobby is gone; its flow is the ticket's keys: play it,
+approve & merge and discard — each asks twice, on the page, and sends nothing until the second press
+— verify it, guide it, stop, try again. Every try is a card with its steps, its checks, its log (new
+events join an open log in place, and a refresh never rebuilds one you are reading), its changes and,
+in GitHub mode, its GitHub panel, which is also the ticket's one ink key there: a GitHub build merges
+on GitHub, so it has no approve & merge. The lobby's j/k/a/x/p keys went with it; `/review` keeps
+them in the chat.
+
+**Buttons that feel pressed.** Every control in the bar and on the pages presses in colour and shadow
+on `--t1`, and only the one primary of a surface scales — the open form's start now, a page's ink key,
+send. Rows and keys are 44px in the drawer and at a coarse pointer, and a two-line row is 44 everywhere.
+
+**What waits for nibbi.** Only what starts a run — start now, build it now, try again — waits while
+nibbi is answering, and it says so in words instead of failing. Up next, edits, stop, merge, discard,
+play and every page work during a reply.
+
+**Words.** "needs input" is "needs you", in the bar, on the toggle and in the away summary. The chip
+that opened a build in the lobby says "open it" and opens its ticket, and so does a run's
+notification. Page keys are lowercase: `try again`, `approve & merge`.
+
+**Two things found on the way.** A snapshot read that set out before an event and landed after it
+put the run list back to what it was, dropping a retried run until the next read; a notification
+clicked in that window opened a ticket for the wrong chain and called it gone (2 of 3 probe runs at
+page load). Records the event stream has moved past a snapshot now stay as the events left them.
+And an edit saved after `issues.md` changed under the open form went through against the newer
+list, over whatever changed; it is refused now, keeps your words and the change, and the next save
+goes on. The Settings card, top-anchored at last, arrived 2px past the bottom of a 568px phone; its
+foot keeps 12px like its other edges.
+
+**Checked.** `tools/control-panel-verify.mjs`, in `npm run verify`, drives the real app over real
+routes and real Git — a run really stages and really merges — in twelve checks, from chat being the
+default to every control's press and nothing moving under reduced motion. Every suite that clicked a
+tab or read the lobby now drives the bar's rows and the pages. `tools/kanban-verify.mjs` is retired
+with the board it tested; what it protected — a thing kept for later survives a reload, and your
+draft is kept while you do it — is two of the new checks.
+
 ## 0.8.1 — Unreleased
 
 ### Composition and surfaces

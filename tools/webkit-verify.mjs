@@ -1,6 +1,6 @@
 // WKWebView is the engine Nibbi ships in, and every other suite runs Chromium. This one drives the
 // real built app in Playwright's WebKit against an isolated backend: the bar, a streamed reply,
-// the Builds lobby. Not part of `npm run verify` (launch cost, flake); `npm run verify:webkit`.
+// main's build page and a ticket. Not part of `npm run verify` (launch cost, flake); `npm run verify:webkit`.
 // No WebGL claim either way: headless WebKit here reports webgl, a GPU-less runner falls back to
 // nibbi.js's canvas2d. The suite prints which backend drew the character and asserts neither.
 import assert from 'node:assert/strict';
@@ -48,12 +48,19 @@ async function size(width, height) {
     await page.locator('#sidebar-toggle').click(); await settle(page);
     assert.equal(await hiddenBar(page), 'false', `${tag}: and the toggle brings it back`);
   }
+  // The Cards bar: one build row (main), the conversations, and rows big enough to hit — a two-line row
+  // is 44 tall everywhere; every row and key is 44 in the drawer (≤899px), 32 docked.
   const bar = await page.evaluate(() => {
-    const tabs = [...document.querySelectorAll('.margin-tab')], el = document.querySelector('#workspace-sidebar');
-    return { tabs: tabs.length, minTab: Math.min(...tabs.map(t => t.getBoundingClientRect().height)), overflow: el.scrollWidth - el.clientWidth };
+    const el = document.querySelector('#workspace-sidebar'), shown = list => [...list].filter(n => n.getClientRects().length);
+    const h = n => n.getBoundingClientRect().height;
+    const two = shown(el.querySelectorAll('.cp-row.cp-two')), rows = shown(el.querySelectorAll('.cp-row, .cp-key, .cp-icon-key'));
+    return { builds: el.querySelectorAll('[data-bar-build]').length, conversations: shown(el.querySelectorAll('.project-thread[data-thread-id]')).length,
+      minTwo: Math.min(...two.map(h)), minRow: Math.min(...rows.map(h)), overflow: el.scrollWidth - el.clientWidth };
   });
-  assert.equal(bar.tabs, 4, `${tag}: Chat, Builds, Issues, Plans`);
-  assert.ok(bar.minTab + .5 >= (phone ? 44 : 32), `${tag}: tabs are big enough to hit: ${bar.minTab}px`);
+  assert.equal(bar.builds, 1, `${tag}: one build row, main`);
+  assert.ok(bar.conversations >= 1, `${tag}: the conversations card lists at least home`);
+  assert.ok(bar.minTwo + .5 >= 44, `${tag}: a two-line row is 44 tall: ${bar.minTwo}px`);
+  assert.ok(bar.minRow + .5 >= (phone ? 44 : 32), `${tag}: rows and keys are big enough to hit: ${bar.minRow}px`);
   assert.ok(bar.overflow <= 1, `${tag}: the bar does not scroll sideways: ${bar.overflow}px`);
   await page.locator('.margin-switch-trigger').click(); await settle(page);
   assert.ok(await page.evaluate(() => { const m = document.querySelector('.margin-switch-menu').getBoundingClientRect(), b = document.querySelector('#workspace-sidebar').getBoundingClientRect(); return !document.querySelector('.margin-switch-menu').hidden && m.left >= b.left - 1 && m.right <= b.right + 1; }), `${tag}: the switcher opens inside the bar`);
@@ -74,15 +81,22 @@ async function size(width, height) {
   assert.equal(reply.items, 2, `${tag}: both list items settled`);
   assert.match(reply.text, /ship it straight to/, `${tag}: the whole reply is there`);
 
-  // The Builds lobby, on the fixture's builds.
-  mark(`${tag} builds`);
+  // main's build page, on the fixture's runs, and from its list the staged one's ticket.
+  mark(`${tag} build page`);
   if (phone) { await page.locator('#sidebar-toggle').click(); await settle(page); }
-  await page.locator('.margin-tab[data-margin-tab="builds"]').click();
+  await page.locator('[data-bar-build="main"]').click();
   await page.locator('#project-workspace:not([hidden])').waitFor();
-  await page.locator('#project-workspace [data-build-id="fixture-0"]').first().waitFor();
+  const staged = page.locator('#project-workspace .cp-page[data-cp-page="build"] .cp-imp[data-cp-key="imp-run:fixture-0"]');
+  await staged.waitFor();
   await settle(page);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${tag}: no horizontal page overflow`);
-  await page.screenshot({ path: out + `builds-${tag}.png` });
+  await page.screenshot({ path: out + `build-${tag}.png` });
+  mark(`${tag} ticket`);
+  await staged.click();
+  await page.locator('#project-workspace .cp-page[data-cp-page="ticket"][data-cp-id="run:fixture-0"] article.cp-try[data-cp-run="fixture-0"]').waitFor();
+  await settle(page);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${tag}: no horizontal page overflow on the ticket`);
+  await page.screenshot({ path: out + `ticket-${tag}.png` });
   await bounded(context.close(), 15_000, 'context close');
   return { tag, renderer };
 }
@@ -95,6 +109,6 @@ try {
     catch (error) { failed++; console.error('FAIL', `webkit ${width}x${height}`, '\n', error.stack || error.message); }
   }
   if (errors.length) { failed++; console.error('FAIL no page errors in WebKit', errors); }
-  if (!failed) console.log(`WebKit checks passed (${browser.version()}): the bar, a streamed reply and the Builds lobby at 1180x820 and 390x844. Renderer: ${seen.map(s => s.tag + ' ' + s.renderer).join('; ')}.`);
+  if (!failed) console.log(`WebKit checks passed (${browser.version()}): the bar, a streamed reply, main's build page and a ticket at 1180x820 and 390x844. Renderer: ${seen.map(s => s.tag + ' ' + s.renderer).join('; ')}.`);
 } finally { await bounded(browser?.close() ?? Promise.resolve(), 20_000, 'browser close').catch(error => { failed++; console.error('FAIL', error.message); }); await fixture.close(); }
 process.exitCode = failed ? 1 : 0;

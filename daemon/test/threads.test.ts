@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { RuntimeStore } from '../src/store.js';
-import { archiveThread, createThread, HOME, listThreads, renameThread, requireThread, touchThread } from '../src/threads.js';
+import { archiveThread, createThread, HOME, listThreads, previewText, renameThread, requireThread, touchThread } from '../src/threads.js';
 
 function fixture(t: TestContext) {
   const directory = mkdtempSync(join(tmpdir(), 'nibbi-threads-'));
@@ -99,7 +99,7 @@ test('every real change to a thread is announced, and an unchanged touch is not'
   assert.equal(events.length, 1, 'creating a thread says so');
   touchThread(thread.id, '2026-09-04T10:00:00.000Z', 'Rebalance the salvage dice', store);
   assert.equal(events.length, 2, 'the first message names it, and that is news');
-  assert.deepEqual(events[1].payload.thread, { id: thread.id, project: 'battalion', title: 'Rebalance the salvage dice', lastAt: '2026-09-04T10:00:00.000Z', archived: false });
+  assert.deepEqual(events[1].payload.thread, { id: thread.id, project: 'battalion', title: 'Rebalance the salvage dice', lastAt: '2026-09-04T10:00:00.000Z', archived: false, lastText: null });
   assert.equal(events[1].projectId, 'battalion');
   touchThread(thread.id, '2026-09-04T10:00:00.000Z', 'Rebalance the salvage dice', store);
   assert.equal(events.length, 2, 'a touch that changes nothing is silent');
@@ -109,4 +109,31 @@ test('every real change to a thread is announced, and an unchanged touch is not'
   archiveThread('battalion', thread.id, true, store);
   assert.equal((events[3].payload.thread as { archived: boolean }).archived, true, 'archiving is a change too');
   assert.equal(store.replay(0, 100).filter(event => event.type === 'thread.updated').length, 4, 'and each one is in the replayable log');
+});
+
+test('each conversation carries the last thing said in it, of either role, cleaned and bounded', t => {
+  const { store } = fixture(t);
+  const insert = store.db.prepare('INSERT INTO messages(at,project_id,role,channel,text,metadata,thread_id) VALUES(?,?,?,?,?,?,?)');
+  const events: { payload: Record<string, unknown> }[] = [];
+  store.events.on('event', event => { if (event.type === 'thread.updated') events.push(event); });
+  assert.equal(listThreads('battalion', store)[0].lastText, null, 'a home with nothing said has no line');
+  insert.run('2026-09-01T10:00:00.000Z', 'battalion', 'user', 'app', 'What changed overnight?', '{}', null);
+  insert.run('2026-09-01T10:00:05.000Z', 'battalion', 'oracle', 'app', '## Two merges\n\n**Salvage** and `dice`.\n»voice: two things merged\n»acts: diff', '{}', null);
+  insert.run('2026-09-01T10:00:00.000Z', 'shipless', 'user', 'app', 'Another project', '{}', null);
+  assert.equal(listThreads('battalion', store)[0].lastText, 'Two merges Salvage and dice.', "home's line is its newest row, nibbi's included, without markdown, voice or acts");
+  assert.equal(listThreads('shipless', store)[0].lastText, 'Another project', 'and only its own project’s');
+
+  const thread = createThread('battalion', undefined, store);
+  touchThread(thread.id, '2026-09-04T10:00:00.000Z', 'Rebalance the dice', store, 'Rebalance the dice');
+  assert.equal(listThreads('battalion', store)[1].lastText, 'Rebalance the dice');
+  const long = 'word '.repeat(60) + '\n```js\nconst hidden = 1;\n```\nafter';
+  touchThread(thread.id, '2026-09-04T10:01:00.000Z', undefined, store, long);
+  const said = listThreads('battalion', store)[1].lastText!;
+  assert.equal(said.length, 120, 'bounded to 120 characters');
+  assert.ok(said.endsWith('…') && !said.includes('hidden'), 'cut with an ellipsis; a fenced block never shows its code');
+  assert.equal(previewText('before\n```\ncode\n```\nafter'), 'before … after', 'a fenced block becomes one ellipsis');
+  assert.equal(previewText('open\n~~~\nnever closed'), 'open …', 'an unclosed fence hides the rest');
+  assert.equal((events.at(-1)!.payload.thread as { lastText: string }).lastText, said, 'the event carries the same line');
+  touchThread(thread.id, '2026-09-04T10:02:00.000Z', undefined, store);
+  assert.equal(listThreads('battalion', store)[1].lastText, said, 'a touch without text keeps the last line');
 });
