@@ -134,6 +134,30 @@ test('suggest puts its suggestions up next, marked nibbi suggested, and builds n
   fixer.setAuto('ideas', { mode: 'off' }); leadReply = 'nothing to add';
 });
 
+test('stage and ship leave nibbi’s suggestions for you: they build what you put up next, and none of what nibbi suggested', async () => {
+  const repo = await project('yours');
+  leadReply = '- s1.txt nibbi idea one\n- s2.txt nibbi idea two';
+  fixer.setAuto('yours', { mode: 'suggest' });
+  await automationCycle(notify);
+  const suggested = itemsOf('yours').filter(item => item.suggested).map(item => item.id);
+  assert.equal(suggested.length, 2, 'suggest put two up next');
+  const mine = await upNext('yours', 'o.txt yours');
+  fixer.setAuto('yours', { mode: 'stage' });
+  await automationCycle(notify); await settle('yours');
+  assert.deepEqual(runsOf('yours').map(f => f.issueIds), [[mine]], 'yours, below them in the list, and neither of nibbi’s');
+  // ship into main merges what it builds: still none of nibbi's, however many passes
+  fixer.setAuto('yours', { mode: 'ship' });
+  for (let pass = 0; pass < 2; pass++) { await automationCycle(notify); await settle('yours'); }
+  assert.equal(runsOf('yours').filter(f => f.issueIds?.some(id => suggested.includes(id))).length, 0, 'nibbi’s suggestions are never built by themselves');
+  for (const id of suggested) assert.equal(itemsOf('yours').find(item => item.id === id)!.done, false, 'nor marked done');
+  assert.equal(existsSync(join(repo, 's1.txt')) || existsSync(join(repo, 's2.txt')), false, 'nor merged into main');
+  // build it now is yours to press: then it builds
+  await act('yours', 'issue.build', { id: suggested[0] });
+  assert.equal(runsOf('yours').filter(f => f.issueIds?.includes(suggested[0])).length, 1);
+  await settle('yours');
+  fixer.setAuto('yours', { mode: 'off' }); leadReply = 'nothing to add';
+});
+
 test('a suggestion list is its "- " lines, one short line each, none already listed', () => {
   assert.deepEqual(suggestionsFrom('intro\n- one\n* two\n• three\n2) four', [], 5), ['one', 'two', 'three', 'four']);
   assert.deepEqual(suggestionsFrom('- `code` and __bold__\n- <!-- nibbi-issue:x --> sneaky\n- ONE', ['one']), ['code and bold', 'sneaky']);

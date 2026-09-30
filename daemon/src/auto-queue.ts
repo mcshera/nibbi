@@ -32,9 +32,10 @@ export function openIssues(project: string): OpenIssue[] {
 }
 /** What stage and ship build next into `target` (a live copy's id; null is main), top first: what is up next there or in main's
     list, and not tried since automation was turned on (`since`), so a try you stopped or discarded isn't started again by itself.
-    An improvement put up next on another copy is that copy's. */
+    An improvement put up next on another copy is that copy's. nibbi's own suggestions are the owner's to build or mark done (the
+    owner's decision): they wait for build it now, whatever the mode. */
 export function automationQueue(project: string, target: string | null, since?: string): OpenIssue[] {
-  return openIssues(project).filter(item => item.upNext && (item.copyId === null || item.copyId === target)
+  return openIssues(project).filter(item => item.upNext && !item.suggested && (item.copyId === null || item.copyId === target)
     && !(since && item.tries.some(run => String(run.startedAt) >= since)));
 }
 /** A suggestion list from the lead's reply: its "- " (or "1.") lines, cleaned to one short line each, none already listed. */

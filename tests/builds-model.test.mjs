@@ -1146,11 +1146,14 @@ test('phase 2 is pure too: frozen input, no clock of its own, the same answer tw
 /* ================================================================================== automation picks up up next */
 // The owner, 2026-09-29: stage and ship build what is up next, into main or the copy chosen on the card (docs/CONTROL-PANEL.md §12).
 
-test('automation: a suggested one says so; up next says automation builds it while stage or ship works the list', () => {
-  const issues = { status: 'ready', revision: REV, items: [item('i', 'rows drift', { suggested: true })] };
-  assert.equal(only(buildMain(input({ issues }))).context, WORDS.suggested, 'nibbi suggested, until something happens to it');
-  assert.equal(only(buildMain(input({ issues: { ...issues, items: [item('i', 'rows drift', { suggested: true, boardStatus: 'in-progress' })] } }))).context, 'you marked it in progress');
+test('automation: a suggested one says so, and waits for you; up next says automation builds it while stage or ship works the list', () => {
+  const suggestedOne = { status: 'ready', revision: REV, items: [item('i', 'rows drift', { suggested: true })] };
+  assert.equal(only(buildMain(input({ issues: suggestedOne }))).context, WORDS.suggested, 'nibbi suggested, until something happens to it');
+  assert.equal(only(buildMain(input({ issues: { ...suggestedOne, items: [item('i', 'rows drift', { suggested: true, boardStatus: 'in-progress' })] } }))).context, 'you marked it in progress');
   const waits = 'it waits here until you start it — nothing builds it on its own', picks = 'automation builds it into main when there’s room — or build it now';
+  // nibbi's suggestion is yours to build or mark done: stage and ship don't build it (auto-queue.ts), and its ticket doesn't say they will
+  for (const mode of ['stage', 'ship']) assert.equal(ticketOf(input({ issues: suggestedOne, auto: { mode } }), 'issue:i').statusLine, waits, mode);
+  const issues = { status: 'ready', revision: REV, items: [item('i', 'rows drift')] };
   // off, suggest, a /goal (the roadmap is what it works then), or no read of it yet: nothing builds it on its own
   for (const auto of [undefined, null, { mode: 'off' }, { mode: 'suggest' }, { mode: 'stage', goal: true }, { mode: 'ship', goal: true }]) {
     assert.equal(buildMain(input({ issues, auto })).autoInto, '', JSON.stringify(auto));

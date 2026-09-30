@@ -921,7 +921,7 @@ an up-next improvement on its own. Now the modes work the Improvements list:
 | mode | before | now |
 |---|---|---|
 | suggest | one free-text note, ≤ 300 characters, from a roadmap read | the lead is asked for up to three improvements; each goes into main's up next marked **nibbi suggested** (`WORDS.suggested`, the row's line two and the ticket), for the owner to build or mark done. It builds nothing and has no dispatch tool. It asks again only once none of its last ones is still up next and the list has changed; what the owner marked done is not suggested again |
-| stage | the lead dispatched roadmap tasks, up to capacity | the top of up next, in issues.md order, through `issue.build` (its duplicate guard, its copy rules), while the project has room: `maxConcurrent` less its running **and queued** tries. No model chooses |
+| stage | the lead dispatched roadmap tasks, up to capacity | the top of up next, in issues.md order, through `issue.build` (its duplicate guard, its copy rules), while the project has room: `maxConcurrent` less its running **and queued** tries. No model chooses. nibbi's suggestions are not built: they wait for the owner's build it now |
 | ship | stage, plus auto-merge into main | the same, into the build chosen on the card. Into main: today's auto-merge on main. Into a copy: its tries land in the copy on their own (D5), and ship **merges nothing into main** — Ship to main stays the owner's confirm |
 
 - **Builds into.** `AutoCfg.copyId` (unset: main), set with `auto.set { copyId }` (`null`: main) from
@@ -932,7 +932,9 @@ an up-next improvement on its own. Now the modes work the Improvements list:
 - **Which improvements** (`daemon/src/auto-queue.ts`): those the bar shows up next — no try yet, the
   latest try stopped or discarded, or tried on a copy retired before it shipped — in main's list or the
   target copy's; one put up next on another copy is that copy's. Not one tried since automation was
-  turned on (`onAt`), so a try the owner stopped or discarded isn't started again by itself. File order,
+  turned on (`onAt`), so a try the owner stopped or discarded isn't started again by itself. Not one
+  nibbi suggested: the decision has suggestions "built or marked done by the owner", so stage and ship
+  leave them for build it now, and their tickets keep `it waits here until you start it` (review F1). File order,
   not the bar's in-progress-first order: the kanban that marked items in progress left in phase 1.
 - **The guards are the old ones**: a failed, interrupted or stopped run since `onAt` turns it off; the
   spend cap (and a provider cost it can't read, under a cap) turns it off; GitHub mode pauses ship. A

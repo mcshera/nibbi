@@ -787,8 +787,9 @@ function statusLineOf(ctx, rec, attempts) {
   if (rec.retiredFrom && state === 'discarded') return fill(WORDS.copy.retiredBefore, { name: rec.retiredFrom });
   if (state === 'up_next') {
     if (rec.fromIssue) {
-      // automation picks it up, unless it already tried it since it was turned on (a try you stopped or discarded waits for you)
-      const into = autoInto(ctx, rec.copyId), tried = !!ctx.auto.onAt && rec.tries.some(r => (iso(r.startedAt) || '') >= ctx.auto.onAt);
+      // automation picks it up, unless it already tried it since it was turned on (a try you stopped or discarded waits for you),
+      // or nibbi suggested it: a suggestion is yours to build or mark done, whatever the mode (the owner's decision, 2026-09-29)
+      const into = rec.item?.suggested === true ? '' : autoInto(ctx, rec.copyId), tried = !!ctx.auto.onAt && rec.tries.some(r => (iso(r.startedAt) || '') >= ctx.auto.onAt);
       return into && !tried ? fill(WORDS.upNextAuto, { name: into }) : 'it waits here until you start it — nothing builds it on its own';
     }
     return ctx.maxConcurrent === 1 ? 'queued — it starts when its one slot frees' : `queued — it starts when one of the ${ctx.maxConcurrent} slots frees`;

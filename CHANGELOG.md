@@ -25,7 +25,8 @@ as build it now — while the project has room (its running and queued tries cou
 once) and under the spend cap, as before. No model chooses what goes next. **ship** does the same and,
 into main, merges as it did. **suggest** asks nibbi for up to three improvements and puts each in up
 next marked *nibbi suggested*, for you to build or mark done; it builds nothing, and asks again only
-once you've answered the last ones.
+once you've answered the last ones. stage and ship don't build them either: a suggestion waits for your
+build it now.
 
 **It builds into the copy you choose.** With a copy, the card has a **Builds into** segment: main, dev,
 dev1… Into a copy, a try lands there on its own and ship merges nothing into main — Ship to main stays
