@@ -24,7 +24,7 @@
  *  falls back to main, settled, and one whose copy the client has not read yet is held back. */
 import {
   MAIN, ID_PREFIX, STATES, STATE_WORDS, STATE_TONES, LIVE_STATES, GROUPS, RUN_STATES, GITHUB_STAGED,
-  BADGE, ATTENTION_TONES, BAR_LIMITS, PAGE_LIMITS, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS,
+  BADGE, ATTENTION_TONES, BAR_LIMITS, PAGE_LIMITS, REFUSED_IN_DEMO, WORDS,
   COPY, COPY_STATUS, COPY_HEALTH, COPY_STATE_WORDS, COPY_STATE_TONES, COPY_LIVE, CARD_BADGE,
 } from './control-panel-contract.js';
 
@@ -284,7 +284,7 @@ function contextOf(input = {}) {
   const autoTarget = str(auto.copyId) && liveById.has(auto.copyId) ? auto.copyId : null;
   return {
     auto: { on: ['stage', 'ship'].includes(auto.mode) && auto.goal !== true, target: autoTarget, into: autoTarget ? liveById.get(autoTarget).name : MAIN, onAt: iso(auto.onAt) },
-    name, project, runs, items, list, branch, now, maxConcurrent, busy: input.busy === true, demo: input.demo === true,
+    name, project, runs, items, list, branch, now, maxConcurrent, demo: input.demo === true,
     revision: str(input.issues?.revision), play: isRecord(input.play) ? input.play : null, check,
     github: connection ? { mode: githubMode ? 'github' : 'local', repository: str(connection.repository) || null,
       integrationBranch: str(connection.integrationBranch) || null, releaseBranch: str(connection.releaseBranch) || null } : null,
@@ -472,7 +472,7 @@ function mainVM(ctx, records, copies, full) {
   if (full) Object.assign(play, { stops: playingCopy ? playingCopy.name : '', kind: ['server', 'url', 'none'].includes(ctx.play?.kind) ? ctx.play.kind : play.playable ? 'server' : 'none' });
   const line = ctx.branch === MAIN ? WORDS.mainLine : fill(WORDS.mainLineOther, { branch: ctx.branch });
   const blocked = {
-    start: ctx.demo ? WORDS.demoStart : ctx.busy ? WORDS.busy : '',
+    start: ctx.demo ? WORDS.demoStart : '',   // not while nibbi answers either: nothing waits for the reply (§12.2)
     queue: ctx.demo ? WORDS.demoChange : ctx.list !== 'ready' || !ctx.revision ? WORDS.noList : '',
     play: play.blocked,
   };
@@ -537,7 +537,7 @@ function copyVM(ctx, copy, records, allRecords, others) {
     || ctx.runs.some(run => run.copyId === copyId && ON_COPY.has(status(run)));
   const project = ctx.project;
   const blocked = {
-    start: ctx.demo ? WORDS.demoStart : ctx.busy ? WORDS.busy : gate,
+    start: ctx.demo ? WORDS.demoStart : gate,
     queue: ctx.demo ? WORDS.demoChange : gate || (ctx.list !== 'ready' || !ctx.revision ? WORDS.noList : ''),
     play: ctx.demo ? WORDS.demoPlay : running ? '' : gate || (kind === 'url' ? fill(WORDS.copy.fixedAddress, { project: ctx.name || 'this project' })
       : read.playable !== true ? fill(WORDS.copy.nothingToPlay, { name }) : ''),
@@ -764,7 +764,6 @@ const LIST_ACTIONS = new Set(['queueImprovement', 'editImprovement', 'completeIm
 function gate(ctx, action, payload) {
   const inDemo = REFUSED_IN_DEMO.includes(action) && !(action === 'previewRun' && payload?.action === 'open');
   if (ctx.demo && inDemo) return START_ACTIONS.has(action) ? WORDS.demoStart : ['previewRun', 'playMain', 'playCopy'].includes(action) ? WORDS.demoPlay : WORDS.demoChange;
-  if (ctx.busy && WAITS_FOR_REPLY.includes(action)) return WORDS.busy;
   if (LIST_ACTIONS.has(action) && (ctx.list !== 'ready' || !ctx.revision)) return WORDS.noList;
   return '';
 }

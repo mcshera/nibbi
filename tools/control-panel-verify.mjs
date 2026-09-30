@@ -252,7 +252,9 @@ try {
         await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
       }, page);
 
-      await check('9 busy refuses starting, in words', async () => {
+      // D8, reversed 2026-09-29 (docs/CONTROL-PANEL.md §12.2): a run is a background agent in its own worktree, so the keys
+      // that start one don't wait for nibbi's reply — only a new conversation does.
+      await check('9 while nibbi answers, start now still starts', async () => {
         const release = fixture.holdChat();
         try {
           await page.locator('#ask').fill('How does the garden look?'); await page.locator('#ask').press('Enter');
@@ -260,18 +262,20 @@ try {
           await bar(page, '.cp-group[data-cp-group="conversations"] .cp-badge', { hasText: WORDS.answering }).waitFor();
           await bar(page, '[data-cp-role="new-improvement"]').click();
           const field = bar(page, '.cp-improvement-form textarea'), start = bar(page, '[data-cp-role="start-now"]');
-          assert.equal(await start.isDisabled(), true, 'start now waits for the reply');
-          assert.equal(await start.getAttribute('title'), WORDS.busy);
-          await field.fill('Mulch the beds'); await field.press('Enter');
-          assert.equal(await bar(page, '.cp-improvement-form .cp-form-note').innerText(), WORDS.busy, 'Enter says why, in words');
+          assert.equal(await start.isDisabled(), false, 'start now does not wait for the reply');
+          assert.equal(await bar(page, '.cp-improvement-form .cp-form-note').isVisible(), false, 'and nothing says it waits');
           const dispatched = commands.filter(n => n === 'run.dispatch').length;
-          await bar(page, '[data-cp-role="up-next"]').click();
-          await until('up next while answering', async () => (await issues()).items.find(i => i.text === 'Mulch the beds'));
-          assert.equal(commands.filter(n => n === 'run.dispatch').length, dispatched, 'nothing started');
+          await field.fill('Mulch the beds'); await field.press('Enter');
+          const made = bar(page, '[data-bar-improvement^="run:"]').filter({ has: page.locator('.cp-primary', { hasText: 'Mulch the beds' }) });
+          await made.waitFor({ timeout: 10_000 });
+          assert.equal(commands.filter(n => n === 'run.dispatch').length, dispatched + 1, 'one run, started while nibbi answered');
           assert.equal(await page.evaluate(() => nibbiApp.state().busy), true, 'and nibbi was still answering');
+          assert.equal(await bar(page, '.project-thread-new').isDisabled(), true, 'a new conversation still waits: one turn at a time');
           await shot(page, 'busy-1180');
         } finally { release(); }
         await page.waitForFunction(() => !nibbiApp.state().busy, null, { timeout: 20_000 });
+        const mulch = fixture.runtime.list('fixers').find(f => f.game === PROJECT && f.issue === 'Mulch the beds');
+        assert.ok(mulch, 'the run is the daemon’s'); await fixture.fixer.waitForFixer(mulch.id);
       }, page);
 
       await check('13 a failed try is not stuck: discard puts it away', async () => {
@@ -693,4 +697,4 @@ try {
   await fixture.close();
 }
 if (failed) { console.error(`Control panel checks: ${failed} failed, ${passed} passed.`); process.exitCode = 1; }
-else console.log(`Control panel checks passed (${passed}): chat by default, a build row and an improvement row open their pages, + improvement starts or keeps in place, a staged ticket asks twice and merges, a failed one can be put away, plans are unreachable, × and Escape come back, starting waits for the reply in words, 44px at 390 touch, every control presses, and only building words move; + New build makes a real copy of main, an improvement lands in it and main is unchanged, Ship to main asks twice and leaves the copy level with main, catch up brings main's newest in, one build plays at a time, retire waits for a building improvement and then takes the copy off the machine, GitHub mode says why copies can't be made, and copies are 44px at 390 touch.`);
+else console.log(`Control panel checks passed (${passed}): chat by default, a build row and an improvement row open their pages, + improvement starts or keeps in place, a staged ticket asks twice and merges, a failed one can be put away, plans are unreachable, × and Escape come back, start now starts while nibbi answers, stage mode picks up up next, 44px at 390 touch, every control presses, and only building words move; + New build makes a real copy of main, an improvement lands in it and main is unchanged, Ship to main asks twice and leaves the copy level with main, catch up brings main's newest in, one build plays at a time, retire waits for a building improvement and then takes the copy off the machine, GitHub mode says why copies can't be made, and copies are 44px at 390 touch.`);

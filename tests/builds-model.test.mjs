@@ -8,7 +8,7 @@ import {
   buildMain, ticketOf, improvementIdForRun, mergeRuns, conversationsFor, previewText, splitImprovementText, parseDiffstat,
   buildsCard, buildOf, nextCopyName, copyNameProblem, normalizeCopyName,
 } from '../public/lib/builds-model.js';
-import { RUN_STATES, STATE_WORDS, STATE_TONES, GROUPS, WORDS, BADGE, PAGE_LIMITS, COPY_STATES } from '../public/lib/control-panel-contract.js';
+import { RUN_STATES, STATE_WORDS, STATE_TONES, GROUPS, WORDS, BADGE, PAGE_LIMITS, COPY_STATES, WAITS_FOR_REPLY } from '../public/lib/control-panel-contract.js';
 
 const NOW = Date.parse('2026-09-28T12:00:00.000Z');
 const ago = minutes => new Date(NOW - minutes * 60_000).toISOString();
@@ -431,13 +431,15 @@ test('every state has at most one ink key, and the states the spec stars have ex
 
 /* ------------------------------------------------------------------------------------------ §5.2 blocked words */
 
-test('while nibbi answers, only the three keys that start a run wait, in words (D8)', () => {
+test('while nibbi answers, no key waits — not even the three that start a run (D8, reversed 2026-09-29: §12.2)', () => {
+  assert.deepEqual([...WAITS_FOR_REPLY], [], 'nothing waits for the reply');
+  assert.equal('busy' in WORDS, false, 'and no words say it does');
   const issues = { status: 'ready', revision: REV, items: [item('i', 'rows drift')] };
   const m = buildMain(input({ busy: true, issues }));
-  assert.equal(m.blocked.start, WORDS.busy); assert.equal(m.blocked.queue, ''); assert.equal(m.blocked.play, '');
-  assert.equal(action(ticketOf(input({ busy: true, issues }), 'issue:i'), 'build-now').blocked, WORDS.busy);
+  assert.equal(m.blocked.start, ''); assert.equal(m.blocked.queue, ''); assert.equal(m.blocked.play, '');
+  assert.equal(action(ticketOf(input({ busy: true, issues }), 'issue:i'), 'build-now').blocked, '');
   assert.equal(action(ticketOf(input({ busy: true, issues }), 'issue:i'), 'edit').blocked, '');
-  assert.equal(action(ticketOf(input({ busy: true, runs: [run('f', { status: 'failed' })] }), 'run:f'), 'retry').blocked, WORDS.busy);
+  assert.equal(action(ticketOf(input({ busy: true, runs: [run('f', { status: 'failed' })] }), 'run:f'), 'retry').blocked, '');
   const staged = run('s', { status: 'staged', verification: { status: 'passed' } });
   const t = ticketOf(withRead(staged, ALL_REVIEW, { busy: true }), 'run:s');
   for (const k of ['play-run', 'merge', 'discard']) assert.equal(action(t, k).blocked, '', k);
@@ -887,7 +889,7 @@ test('every blocked word a copy says, in the spec’s order (§4.2)', () => {
   const gh = { read2: { disabled: 'github', mode: 'github' } };
   // start
   assert.equal(b({ demo: true, busy: true }).start, WORDS.demoStart);
-  assert.equal(b({ busy: true }).start, WORDS.busy);
+  assert.equal(b({ busy: true }).start, '', 'start now goes while nibbi answers (§12.2)');
   assert.equal(b(gh).start, 'copies are local for now — garden ships through GitHub pull requests');
   assert.equal(b({}, { status: 'creating' }).start, 'dev is busy — it’s still being made');
   assert.equal(b({}, { status: 'shipping' }).start, 'dev is busy — it’s shipping');

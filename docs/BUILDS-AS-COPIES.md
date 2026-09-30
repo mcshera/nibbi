@@ -497,7 +497,7 @@ PAGE_LIMITS as main), `list`, `blocked`, `ship`, `catchUp`, `retire`, `history`,
 
 | key | order |
 |---|---|
-| start (+ improvement → start now) | demo `demoStart` · busy `busy` · `disabled === 'github'` `githubMode` · status ≠ ready `notReady` · health ≠ ok `healthWords` |
+| start (+ improvement → start now) | demo `demoStart` · ~~busy `busy`~~ (gone, CONTROL-PANEL.md §12.2) · `disabled === 'github'` `githubMode` · status ≠ ready `notReady` · health ≠ ok `healthWords` |
 | queue (up next) | demo `demoChange` · github · status · health · list not ready `noList` |
 | play | demo `demoPlay` · github · status · health · `play.kind === 'url'` `fixedAddress` · not playable `nothingToPlay` |
 | ship (ShipVM.why) | demo `demoChange` · github `githubMode` · no check `noCheck` · status `notReady` · health · in = 0 `shipNothing` · behind > 0 `shipBehind` · `project.branch ≠ copy.base` `shipCheckoutOther` · `project.dirty > 0` `shipCheckoutDirty` |
@@ -704,7 +704,7 @@ ticket crumb for a copy; 390×844 touch: every key ≥ 44, no sideways scroll; t
 
 The bar and pages call `onAction(name, projectId, value)`; the integrator answers in
 `handleControlPanelAction` (app.js:2146). WAITS_FOR_REPLY is unchanged: nothing about a copy waits for
-nibbi's reply.
+nibbi's reply. (Since 2026-09-29 nothing at all does: CONTROL-PANEL.md §12.2 emptied it.)
 
 | action | sent by | value | calls | while nibbi answers | demo |
 |---|---|---|---|---|---|
@@ -715,9 +715,9 @@ nibbi's reply.
 | catchUpCopy | bar catch-up row, page catch-up / its yes | `{ copyId, expectedHead, stopPlay }` | `api.command('copy.catchUp', { id: copyId, expectedHead, stopPlay }, p)`; refresh | yes | refused |
 | retireCopy | page retire-yes | `{ copyId, expectedHead }` | `api.command('copy.retire', { id: copyId, expectedHead }, p)`; refresh | yes | refused |
 | playCopy | bar play-copy, page preview, a waiting ticket | `{ copyId, action }` | start: `copy.play { id }` → poll `GET /api/preview?id=copy:<p>:<id>` every 500ms ≤ 60s → `openUrl(url)`; stop: `copy.stop { id }` → poll until not running; open: `openUrl(play.url)`; then refresh (main's play too) | yes | refused (not `open`) |
-| startImprovement | bar / page forms | `{ text, copyId? }` | `run.dispatch { issue, title, copyId? }` (`copyId` only when set) | refused `busy` | refused |
+| startImprovement | bar / page forms | `{ text, copyId? }` | `run.dispatch { issue, title, copyId? }` (`copyId` only when set) | yes (refused `busy` until CONTROL-PANEL.md §12.2) | refused |
 | queueImprovement | bar / page forms | `{ text, copyId? }` | projectCommand `issue.create { title, description, copyId? }` | yes | refused |
-| buildIssue | ticket | `{ issueId, copyId? }` | projectCommand `issue.build { id, copyId? }` | refused `busy` | refused |
+| buildIssue | ticket | `{ issueId, copyId? }` | projectCommand `issue.build { id, copyId? }` | yes (refused `busy` until CONTROL-PANEL.md §12.2) | refused |
 
 ---
 

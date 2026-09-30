@@ -12,7 +12,7 @@ import { emptyLine } from './lib/empty.js';
 import { installProjectWorkspace } from './lib/project-workspace.js';
 import { installProjectPages } from './lib/project-pages.js';
 import { buildsCard, ticketOf, improvementIdForRun, mergeRuns, conversationsFor, splitImprovementText } from './lib/builds-model.js';
-import { MAIN, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS, COPY, COPY_COMMANDS } from './lib/control-panel-contract.js';
+import { MAIN, REFUSED_IN_DEMO, WORDS, COPY, COPY_COMMANDS } from './lib/control-panel-contract.js';
 import { projectCommand, loadProjectSection, loadProjectCopies, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { marginMetadata } from './lib/margin-metadata.js';
 import { localReplyMetadata, localReplyLabel, updateLocalReply, settleLocalReply, rateLimitNotice } from './lib/local-fallback.js';
@@ -2185,12 +2185,11 @@ async function handleMarginAction(action, id, value) {
 
 /* ------------------------------------------------------------------ the control panel's actions (docs/CONTROL-PANEL.md §5) */
 const DEMO_WORDS = { startImprovement: WORDS.demoStart, buildIssue: WORDS.demoStart, retryRun: WORDS.demoStart, playMain: WORDS.demoPlay, previewRun: WORDS.demoPlay, playCopy: WORDS.demoPlay };
-/** Every name the bar and the pages send. Only what starts an agent run waits for nibbi's reply; every
-    daemon write, and play, is refused in demo. Existing calls are reused: handleProjectAction's command
+/** Every name the bar and the pages send. None waits for nibbi's reply — a run is a background agent in its own
+    worktree, and the daemon bounds it (D8, reversed 2026-09-29: §12.2); every daemon write, and play, is refused in demo. Existing calls are reused: handleProjectAction's command
     paths, /play's server core, the lobby's preview polling. */
 async function handleControlPanelAction(action, project, value) {
   activity();
-  if (WAITS_FOR_REPLY.includes(action) && S.busy) throw notice(WORDS.busy);
   if (S.demo && REFUSED_IN_DEMO.includes(action) && value?.action !== 'open') throw notice(DEMO_WORDS[action] || WORDS.demoChange);
   // Opened from the docked bar, focus stays on its row (a control panel: click down the rows and read);
   // from the drawer, a notification, a chip or a page, it moves to the page's heading.
@@ -2400,8 +2399,7 @@ async function handleProjectAction(action, project, value) {
   // running is worth reaching while Nibbi is mid-turn, and neither call changes anything.
   if (action === 'previewStatus') return api.get('/api/preview?id=' + encodeURIComponent(value.id));
   if (action === 'openUrl') { openUrl(value.url); return true; }
-  // A daemon command never contends with the lead turn; what waits for the reply is decided by the
-  // control panel (WAITS_FOR_REPLY), before it gets here.
+  // A daemon command never contends with the lead turn, and nothing the control panel sends waits for the reply (§12.2).
   if (S.demo && ['projectCommand','buildCommand','githubCommand'].includes(action)) throw new Error('Leave demo mode before changing project work.');
   selectMarginProject(project);
   if (action === 'githubCommand') {

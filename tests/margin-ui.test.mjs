@@ -647,32 +647,37 @@ test('+ improvement starts it now or keeps it up next, and says in words when it
     await page.evaluate(() => release());
     await form.waitFor({state: 'hidden'});
     await page.evaluate(() => { window.hold = false; calls.length = 0; });
-    // nibbi answering: start now waits, in words; up next still goes; the conversations + waits too
-    await page.evaluate(busy => { model.busy = true; model.projects[0].builds = [mainOf({blocked: {start: busy, queue: '', play: ''}})]; ui.update(model); }, WORDS.busy);
+    // nibbi answering: start now still goes — a run is a background agent in its own worktree, not the chat's turn (D8, reversed
+    // 2026-09-29: docs/CONTROL-PANEL.md §12.2) — and keeps its double-press guard; up next goes; only the conversations + waits
+    await page.evaluate(() => { model.busy = true; model.projects[0].builds = [mainOf()]; ui.update(model); window.hold = true; });
     await add.click();
-    assert.equal(await start.isDisabled(), true);
-    assert.equal(await start.getAttribute('title'), WORDS.busy);
-    assert.equal(await note.innerText(), WORDS.busy, 'the form says why start now waits');
+    assert.equal(await start.isDisabled(), false, 'start now goes while nibbi answers');
+    assert.equal(await note.isVisible(), false, 'and nothing says it waits for the reply');
     await field.fill('the join button is bigger');
     await field.press('Enter');
-    assert.equal(await page.evaluate(() => calls.length), 0, 'Enter sends nothing while nibbi answers');
-    assert.equal(await note.innerText(), WORDS.busy);
-    assert.equal(await queue.isDisabled(), false);
-    await queue.click();
-    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'queueImprovement', id: 'alpha', value: {text: 'the join button is bigger'}}, 'up next works while nibbi answers');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'startImprovement', id: 'alpha', value: {text: 'the join button is bigger'}}, 'Enter starts it while nibbi answers');
+    assert.equal(await start.getAttribute('aria-busy'), 'true', 'the key holds while it sends');
+    await page.evaluate(() => { calls.length = 0; ui.update(model); });
+    await field.press('Enter');
+    assert.equal(await page.evaluate(() => calls.length), 0, 'a second Enter while it sends sends nothing, answering or not');
+    await page.evaluate(() => { window.hold = false; release(); });
     await form.waitFor({state: 'hidden'});
     await add.click();
-    assert.equal(await note.innerText(), WORDS.busy, 'opened again while nibbi answers, it says so at once');
+    await field.fill('a second thought');
+    await queue.click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'queueImprovement', id: 'alpha', value: {text: 'a second thought'}}, 'up next works while nibbi answers');
+    await form.waitFor({state: 'hidden'});
     const convo = page.locator('.cp-group[data-cp-group="conversations"]');
     assert.equal(await convo.locator('.cp-badge').innerText(), WORDS.answering);
     assert.equal(await convo.locator('.cp-badge').evaluate(el => el.getAnimations().map(a => a.animationName).join()), 'cp-bar-pulse', 'answering pulses, in opacity only');
-    assert.equal(await convo.locator('.project-thread-new').isDisabled(), true);
+    assert.equal(await convo.locator('.project-thread-new').isDisabled(), true, 'a new conversation still waits: one turn runs at a time');
     assert.equal(await convo.locator('.project-thread-new').getAttribute('title'), 'not while nibbi is answering');
-    // the reply landed: start now goes again, and the note stops saying it waits
-    await page.evaluate(() => { model.busy = false; model.projects[0].builds = [mainOf()]; ui.update(model); });
+    // the reply landed: the conversations + comes back; the form never changed
+    await page.evaluate(() => { model.busy = false; ui.update(model); });
+    assert.equal(await convo.locator('.project-thread-new').isDisabled(), false);
+    await add.click();
     assert.equal(await start.isDisabled(), false);
-    assert.equal(await form.isVisible(), true);
-    assert.equal(await note.isVisible(), false, 'the waiting words go when the wait does');
+    assert.equal(await note.isVisible(), false);
     // demo: both keys and ▶ say why they cannot, and main says it under its row
     await page.evaluate(w => { model.projects[0].builds = [mainOf({blocked: {start: w.demoStart, queue: w.demoChange, play: w.demoPlay}})]; ui.update(model); }, WORDS);
     assert.equal(await start.getAttribute('title'), WORDS.demoStart);

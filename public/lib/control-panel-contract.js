@@ -248,9 +248,11 @@ export const PAGE_ACTIONS = Object.freeze([
   'stopRun', 'steerRun', 'retryRun', 'verifyRun', 'mergeRun', 'discardRun', 'previewRun', 'talkAbout', 'refresh', 'buildEvidence',
   'shipCopy', 'catchUpCopy', 'retireCopy', 'playCopy',
 ]);
-/** Anything that starts an agent run waits for nibbi's reply (ROUND3.md decided 4); nothing else does —
-    making, shipping, catching up, retiring and playing a copy all go while nibbi answers. */
-export const WAITS_FOR_REPLY = Object.freeze(['startImprovement', 'buildIssue', 'retryRun']);
+/** Nothing waits for nibbi's reply. D8 had start now, build it now and try again wait (ROUND3.md decided 4); the owner
+    reversed it on 2026-09-29 (docs/CONTROL-PANEL.md §12.2): a run is a background agent in its own worktree, not the chat's
+    turn, and the daemon's own guards (one live try per improvement, capacity, the spend cap) bound it. Each key keeps its
+    double-press guard and its pending state. */
+export const WAITS_FOR_REPLY = Object.freeze([]);
 /** Refused in demo: every daemon write, and play (a play 'open' is allowed: it only opens an address). */
 export const REFUSED_IN_DEMO = Object.freeze([
   'startImprovement', 'queueImprovement', 'playMain', 'buildIssue', 'editImprovement', 'completeImprovement', 'reopenImprovement',
@@ -262,7 +264,6 @@ export const REFUSED_IN_DEMO = Object.freeze([
 
 /** Fixed copy. `{…}` are filled by whoever renders; everything is lowercase (LANGUAGE §11, audit P14). */
 export const WORDS = Object.freeze({
-  busy: 'nibbi’s answering — this can start once the reply lands',
   demoStart: 'the demo brain can’t start builds — turn it off in settings',
   demoPlay: 'the demo brain can’t play builds — turn it off in settings',
   demoChange: 'the demo brain can’t change project work — turn it off in settings',
@@ -671,7 +672,7 @@ export const WORDS = Object.freeze({
  * @property {BuildVM|null} build     the page's build (page 'build': the one named page.id; 'ticket': the ticket's build). null: a copy page whose copy is gone (WORDS.copy.gone)
  * @property {BuildVM[]} [builds]     phase 2: every build of the project, main first (main's page lists its copies from them)
  * @property {TicketVM|null} ticket   non-null when page.page === 'ticket'
- * @property {boolean} busy
+ * @property {boolean} busy         nibbi is answering (the GitHub panel's keys wait for it; no run key does — §12.2)
  * @property {boolean} demo
  * @property {number} now          ms; relative times are said against it
  */
@@ -716,7 +717,7 @@ export const WORDS = Object.freeze({
  * @property {{ running: boolean, url?: string, playable: boolean, starting?: boolean, error?: string, kind?: string }|null} play   GET /api/play?project=
  * @property {CopiesRead|null} [copies]  phase 2: GET /api/project-copies?project=; null until read (copy-targeted improvements are then held back, not drawn under main)
  * @property {number} maxConcurrent     S.auto[project].maxConcurrent ?? 2
- * @property {boolean} busy
+ * @property {boolean} busy          nibbi is answering — nothing the model makes waits for it (§12.2)
  * @property {boolean} demo
  * @property {number} now
  */

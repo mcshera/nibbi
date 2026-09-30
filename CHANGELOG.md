@@ -2,6 +2,15 @@
 
 ## 0.9.0 — Unreleased
 
+### The keys that start a run don't wait for nibbi's reply
+
+**start now**, **build it now** and **try again** used to be refused while nibbi was answering, with
+*nibbi’s answering — this can start once the reply lands*. A run is a background agent in its own
+folder, not the chat's turn, and the daemon already keeps it honest — one live try per improvement,
+the project's capacity, the spend cap — so they start now, and the words are gone. Each key still holds
+while it is sending, and a second press sends nothing. A new conversation, and switching away from
+the one that is answering, still wait: those share the turn.
+
 ### Automation works the Improvements list
 
 **It picks up up next.** Phase 1 took Plans out of the bar, so the Automation modes on the project card
