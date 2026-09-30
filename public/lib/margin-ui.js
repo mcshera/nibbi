@@ -1370,7 +1370,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   /** The Automation part of the card: what it works, where it builds (a segment of main and the copies), and its last word. */
   function paintAutomation(entry, data) {
-    const copies = (Array.isArray(data.builds) ? data.builds : []).filter(b => b && b.kind === 'copy' && b.copyId);
+    // a copy that couldn't be made is not offered: it never becomes ready, and the daemon refuses it (autoBroken)
+    const copies = (Array.isArray(data.builds) ? data.builds : []).filter(b => b && b.kind === 'copy' && b.copyId && b.status !== 'broken');
     const choices = [{name: MAIN, copyId: null}, ...copies.map(b => ({name: text(b.name ?? b.id, 'a copy'), copyId: String(b.copyId)}))];
     const chosen = choices.find(c => c.copyId !== null && c.copyId === data.autoTarget) || choices[0];
     setText(entry.autoLine, data.goalActive ? fillIn(WORDS.auto.goalLine, {project: text(data.id ?? data.name, 'this project')}) : fillIn(WORDS.auto.line, {name: chosen.name}));

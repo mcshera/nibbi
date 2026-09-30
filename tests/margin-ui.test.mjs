@@ -1311,8 +1311,12 @@ test('the project card: automation picks up up next, into main or the copy you c
     assert.equal(await card.locator('.margin-auto-note').isVisible(), false);
     assert.equal(await card.locator('.margin-into-field').isVisible(), true, 'the goal done, the choice is back');
     assert.deepEqual(await into.locator('button').evaluateAll(els => els.map(el => el.disabled)), [true, true, true], 'while nibbi answers, like the other settings');
+    // a copy that couldn't be made is not offered, and chosen, the card says main (the daemon falls back to it)
+    await page.evaluate(() => { model.busy = false; model.projects[0].autoTarget = 'copy-11111111-1111-1111-1111-111111111111'; model.projects[0].builds = model.projects[0].builds.map(b => b.name === 'dev' ? {...b, status: 'broken'} : b); ui.update(model); });
+    assert.deepEqual(await keys(), [['main', 'true'], ['dev1', 'false']], 'dev couldn’t be made: it is not a choice');
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into main');
     // the copies go: nothing to choose, and the choice falls to main
-    await page.evaluate(() => { model.busy = false; model.projects[0].builds = model.projects[0].builds.slice(0, 1); ui.update(model); });
+    await page.evaluate(() => { model.projects[0].autoTarget = null; model.projects[0].builds = model.projects[0].builds.slice(0, 1); ui.update(model); });
     assert.equal(await card.locator('.margin-into-field').isVisible(), false);
     assert.equal(await line.innerText(), 'automation picks up up next · builds into main');
     assert.deepEqual(errors, []);

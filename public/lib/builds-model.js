@@ -281,7 +281,8 @@ function contextOf(input = {}) {
   // automation (the owner's decision, 2026-09-29): stage and ship build what is up next — into main, or the copy chosen on the card —
   // unless a /goal is set, when it works the roadmap. auto: { mode, copyId, goal, onAt }, from /api/auto and the goals.
   const auto = isRecord(input.auto) ? input.auto : {};
-  const autoTarget = str(auto.copyId) && liveById.has(auto.copyId) ? auto.copyId : null;
+  // a target that couldn't be made (broken) never becomes ready: the daemon falls back to main on its next pass (settleAutoTarget)
+  const autoTarget = str(auto.copyId) && liveById.has(auto.copyId) && liveById.get(auto.copyId).status !== 'broken' ? auto.copyId : null;
   return {
     auto: { on: ['stage', 'ship'].includes(auto.mode) && auto.goal !== true, target: autoTarget, into: autoTarget ? liveById.get(autoTarget).name : MAIN, onAt: iso(auto.onAt) },
     name, project, runs, items, list, branch, now, maxConcurrent, demo: input.demo === true,

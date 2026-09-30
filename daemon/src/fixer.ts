@@ -63,6 +63,8 @@ export const AUTO_WORDS = Object.freeze({
   suggestFailed: 'couldn’t put a suggestion up next — {why}',
   fellBack: '{name} was retired, so automation builds into main now',
   fellBackShip: '{name} was retired, so automation builds into main now — in stage, so each one waits for you to merge it',
+  brokeBack: '{name} couldn’t be made, so automation builds into main now',
+  brokeBackShip: '{name} couldn’t be made, so automation builds into main now — in stage, so each one waits for you to merge it',
 });
 export function autoConfig(): Record<string, AutoCfg> {
   const store = runtime(); const saved = store.get<Record<string, AutoCfg>>('config', 'auto'); if (saved) return saved;
@@ -74,10 +76,12 @@ export function autoConfig(): Record<string, AutoCfg> {
 export function setAuto(project: string, cfg: Partial<Omit<AutoCfg, 'copyId'>> & { copyId?: string | null }): AutoCfg {
   if (!games()[project]) throw new Error('Unknown project');
   const all = autoConfig(); const cur = all[project] ?? { on: false, maxConcurrent: 2, autoMerge: false, mode: 'off' };
-  // A copy to build into is one of this project's live copies, in a local project; null (or unset) is main.
+  // A copy to build into is one of this project's live copies, in a local project; null (or unset) is main. One being made,
+  // shipping or catching up is waited for; one that couldn't be made never becomes ready, so it is refused.
   if (typeof cfg.copyId === 'string') {
     if (connectionFor(project)?.workflowMode === 'github') throw refuse('githubMode', { project });
-    requireLiveCopy(project, cfg.copyId, { ready: false });
+    const copy = requireLiveCopy(project, cfg.copyId, { ready: false });
+    if (copy.status === 'broken') throw refuse('autoBroken', { name: copy.name });
   }
   const { copyId, ...rest } = cfg;
   const next: AutoCfg = { ...cur, ...rest };
@@ -94,14 +98,16 @@ export function setAuto(project: string, cfg: Partial<Omit<AutoCfg, 'copyId'>> &
   all[project] = next; runtime().put('config', 'auto', all, { projectId: project, type: 'auto.updated', payload: { config: next } }); return next;
 }
 export function noteAuto(project: string, note: string): void { if (autoConfig()[project]) setAuto(project, { note: note.slice(0, 300), at: new Date().toISOString() }); }
-/** A copy automation builds into that is no longer live (retired, or gone) falls back to main, with a note. Ship steps down to
-    stage as it does: ship into a copy never merged main, and falling back must not start to. */
+/** A copy automation builds into that is no longer live (retired, or gone), or that couldn't be made (broken: a copy never
+    leaves it but by retire — its install failed, or the backend stopped while it was being made), falls back to main, with a
+    note. Ship steps down to stage as it does: ship into a copy never merged main, and falling back must not start to. */
 export function settleAutoTarget(project: string): void {
   const cfg = autoConfig()[project]; if (!cfg?.copyId) return;
-  const copy = copyById(cfg.copyId);
-  if (copy && copy.project === project && copy.status !== 'retired') return;
-  const name = copy?.name ?? 'that build', ship = cfg.mode === 'ship';
-  setAuto(project, { copyId: null, ...(ship ? { mode: 'stage' as const } : {}), note: fill(ship ? AUTO_WORDS.fellBackShip : AUTO_WORDS.fellBack, { name }), at: new Date().toISOString() });
+  const copy = copyById(cfg.copyId), ours = !!copy && copy.project === project;
+  if (ours && copy.status !== 'retired' && copy.status !== 'broken') return;
+  const name = copy?.name ?? 'that build', ship = cfg.mode === 'ship', broke = ours && copy.status === 'broken';
+  const words = broke ? (ship ? AUTO_WORDS.brokeBackShip : AUTO_WORDS.brokeBack) : ship ? AUTO_WORDS.fellBackShip : AUTO_WORDS.fellBack;
+  setAuto(project, { copyId: null, ...(ship ? { mode: 'stage' as const } : {}), note: fill(words, { name }), at: new Date().toISOString() });
 }
 export const listFixers = (): Fixer[] => runtime().list<Fixer>('fixers').map(run => run.status === 'done' ? { ...run, status: 'staged' } : run);
 const live = new Map<string, { abort: AbortController; handle?: AgentHandle; done: Promise<void> }>();

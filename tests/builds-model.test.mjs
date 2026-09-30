@@ -1177,6 +1177,10 @@ test('automation into a copy: main’s list and the copy’s go into it; another
   assert.deepEqual(intos({ mode: 'stage', copyId: DEV }), [['main', 'dev'], ['dev', 'dev'], ['dev1', '']]);
   assert.deepEqual(intos({ mode: 'ship', copyId: null }), [['main', 'main'], ['dev', ''], ['dev1', '']]);
   assert.deepEqual(intos({ mode: 'ship', copyId: OLD }), [['main', 'main'], ['dev', ''], ['dev1', '']], 'a target no longer live is main');
+  // a target that couldn't be made is main too: it never becomes ready, and the daemon falls back to main (settleAutoTarget)
+  const broken = read2([copyView(DEV, 'dev', { status: 'broken', error: 'the backend stopped while it was being made' }), copyView(DEV1, 'dev1')]);
+  assert.deepEqual(buildsCard(input2({ copies: broken, issues, auto: { mode: 'stage', copyId: DEV } })).builds.map(b => [b.name, b.autoInto]), [['main', 'main'], ['dev', ''], ['dev1', '']]);
+  assert.equal(ticketOf(input2({ copies: broken, issues, auto: { mode: 'stage', copyId: DEV } }), 'issue:m').statusLine, 'automation builds it into main when there’s room — or build it now');
   assert.deepEqual(intos({ mode: 'suggest', copyId: DEV }), [['main', ''], ['dev', ''], ['dev1', '']]);
   const status = (id, auto) => ticketOf(input2({ copies: two, issues, auto }), id).statusLine;
   assert.equal(status('issue:m', { mode: 'stage', copyId: DEV }), 'automation builds it into dev when there’s room — or build it now');

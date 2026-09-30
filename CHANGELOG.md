@@ -30,7 +30,8 @@ build it now.
 
 **It builds into the copy you choose.** With a copy, the card has a **Builds into** segment: main, dev,
 dev1… Into a copy, a try lands there on its own and ship merges nothing into main — Ship to main stays
-your confirm. Retire that copy and automation builds into main again, in stage, and says so.
+your confirm. Retire that copy, or if it couldn't be made, and automation builds into main again, in
+stage, and says so; a copy that couldn't be made is not offered.
 
 **A set /goal keeps the roadmap**, exactly as before: its lead builds on main and ship merges it,
 whichever copy up next builds into, and the card hides **Builds into** until the goal is done. The card says which it is working (`automation

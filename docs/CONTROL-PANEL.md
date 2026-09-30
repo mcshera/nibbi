@@ -926,9 +926,14 @@ an up-next improvement on its own. Now the modes work the Improvements list:
 
 - **Builds into.** `AutoCfg.copyId` (unset: main), set with `auto.set { copyId }` (`null`: main) from
   the card's **Builds into** segment — main and the live copies, drawn only when there is a copy. The
-  daemon refuses a copy that isn't this project's and live, and any copy in a GitHub-mode project. A
-  retired copy falls back to main with a note, and ship steps down to stage: ship into a copy never
-  merged main, and falling back must not start to (`settleAutoTarget`, run by retire and by every pass).
+  daemon refuses a copy that isn't this project's and live, one that couldn't be made (`broken`, which
+  only retire leaves: `COPY_WORDS.autoBroken`), and any copy in a GitHub-mode project. A retired copy,
+  or one that breaks while chosen (its install fails, or a restart finds it still being made), falls
+  back to main with a note, and ship steps down to stage: ship into a copy never merged main, and
+  falling back must not start to (`settleAutoTarget`, run by retire and by every pass). Before, a broken
+  target was accepted and waited on forever in silence, while every up-next ticket said automation
+  would build it into that copy (review F3); the card doesn't offer a broken copy, and the model reads
+  a broken target as main.
 - **Which improvements** (`daemon/src/auto-queue.ts`): those the bar shows up next — no try yet, the
   latest try stopped or discarded, or tried on a copy retired before it shipped — in main's list or the
   target copy's; one put up next on another copy is that copy's. Not one tried since automation was

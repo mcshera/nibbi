@@ -248,3 +248,20 @@ test('a set goal in ship still merges its runs into main when a copy is chosen f
   assert.deepEqual([goals().goalship.done, fixer.autoConfig().goalship.mode, fixer.autoConfig().goalship.note], [true, 'off', 'Roadmap complete']);
   assert.equal(copyOf(dev.id).ships.length, 0, 'and it ships no copy'); assert.equal(copyOf(dev.id).headSha, dev.headSha, 'nor builds into one');
 });
+
+test('a copy that couldn’t be made is not a target: refused on the card, and one that breaks falls back to main in stage', async () => {
+  await project('broke');
+  const view = await copies.createCopy('broke', 'dev'); await copies.waitForCopy(view.id);
+  fixer.setAuto('broke', { mode: 'ship', copyId: view.id });
+  // What reconcileCopies does to a copy still being made at a restart, and an install failure does at any time.
+  records.patchCopy(view.id, record => { record.status = 'broken'; record.error = records.COPY_WORDS.stoppedWhileMaking; });
+  assert.throws(() => fixer.setAuto('broke', { copyId: view.id }), { message: 'dev couldn’t be made — automation can’t build into it, so choose main or another copy' });
+  await automationCycle(notify);
+  const cfg = fixer.autoConfig().broke;
+  assert.deepEqual([cfg.copyId, cfg.mode], [undefined, 'stage'], 'main, in stage: ship into a copy never merged main');
+  assert.equal(cfg.note, 'dev couldn’t be made, so automation builds into main now — in stage, so each one waits for you to merge it');
+  const item = await upNext('broke', 'x.txt something');
+  await automationCycle(notify); await settle('broke');
+  assert.deepEqual(runsOf('broke').map(f => [f.issueIds, f.copyId]), [[[item], undefined]], 'it builds into main, not nowhere');
+  fixer.setAuto('broke', { mode: 'off' });
+});
