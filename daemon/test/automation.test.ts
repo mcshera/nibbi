@@ -265,3 +265,82 @@ test('a copy that couldn’t be made is not a target: refused on the card, and o
   assert.deepEqual(runsOf('broke').map(f => [f.issueIds, f.copyId]), [[[item], undefined]], 'it builds into main, not nowhere');
   fixer.setAuto('broke', { mode: 'off' });
 });
+
+// The guards §12.1 names, each pinned on its own (review F4): with any one removed, its test fails.
+test('an improvement put up next on another copy is that copy’s: built neither into the chosen copy nor into main', async () => {
+  await project('others');
+  const one = await copies.createCopy('others', 'dev'), two = await copies.createCopy('others', 'dev1');
+  await copies.waitForCopy(one.id); await copies.waitForCopy(two.id);
+  const onMain = await upNext('others', 'm.txt on main'), onDev1 = (await act('others', 'issue.create', { title: 'd.txt on dev1', copyId: two.id })).itemId!;
+  const builtFor = (id: string) => runsOf('others').filter(f => f.issueIds?.includes(id));
+  fixer.setAuto('others', { mode: 'stage', copyId: one.id });
+  await automationCycle(notify); await settle('others');
+  assert.deepEqual(builtFor(onMain).map(f => f.copyId), [one.id], 'main’s list goes into dev');
+  assert.equal(builtFor(onDev1).length, 0, 'dev1’s own is not built into dev');
+  fixer.setAuto('others', { copyId: null });
+  await automationCycle(notify); await settle('others');
+  assert.equal(builtFor(onDev1).length, 0, 'nor into main');
+  fixer.setAuto('others', { copyId: two.id });
+  await automationCycle(notify); await settle('others');
+  assert.deepEqual(builtFor(onDev1).map(f => f.copyId), [two.id], 'dev1 chosen, it is built there');
+  fixer.setAuto('others', { mode: 'off' });
+});
+
+test('a queued try counts against the most at once', async () => {
+  await project('queued');
+  const first = await upNext('queued', 'a.txt first'), second = await upNext('queued', 'b.txt second');
+  fixer.setAuto('queued', { mode: 'stage', maxConcurrent: 2 });
+  const release = hold();
+  try {
+    const waiting = fixer.queueFix('queued', 'q.txt yours, queued');   // queued, not started: nothing drained it yet
+    assert.equal(run(waiting.id).status, 'queued');
+    await automationCycle(notify);
+    assert.deepEqual(runsOf('queued').filter(f => f.issueIds?.length).map(f => f.issueIds), [[first]], 'room for one: two at most, one queued');
+    assert.equal(runsOf('queued').some(f => f.issueIds?.includes(second)), false);
+  } finally { release(); }
+  await settle('queued');
+  fixer.setAuto('queued', { mode: 'off' });
+});
+
+test('a target being made, shipping or catching up is waited for, and automation stays on', async () => {
+  await project('waits');
+  const view = await copies.createCopy('waits', 'dev'); await copies.waitForCopy(view.id);
+  const item = await upNext('waits', 'w.txt when dev is ready');
+  fixer.setAuto('waits', { mode: 'stage', copyId: view.id });
+  for (const status of ['creating', 'shipping', 'catching_up'] as const) {
+    records.patchCopy(view.id, record => { record.status = status; });
+    await automationCycle(notify);
+    const cfg = fixer.autoConfig().waits;
+    assert.deepEqual([runsOf('waits').length, cfg.mode, cfg.copyId], [0, 'stage', view.id], status + ': it waits, still on, still into dev');
+  }
+  records.patchCopy(view.id, record => { record.status = 'ready'; });
+  await automationCycle(notify); await settle('waits');
+  assert.deepEqual(runsOf('waits').map(f => [f.issueIds, f.copyId]), [[[item], view.id]], 'ready, it builds into dev');
+  fixer.setAuto('waits', { mode: 'off' });
+});
+
+test('a GitHub-mode project can’t build up next into a copy', async () => {
+  const repo = await project('ghauto');
+  const view = await copies.createCopy('ghauto', 'dev'); await copies.waitForCopy(view.id);
+  runtime().put('github-connections', 'ghauto', { project: 'ghauto', workflowMode: 'github', integrationBranch: 'staging', releaseBranch: 'main', repository: 'owner/ghauto', repo });
+  assert.throws(() => fixer.setAuto('ghauto', { copyId: view.id }), { message: 'copies are local for now — ghauto ships through GitHub pull requests' });
+  assert.equal(fixer.autoConfig().ghauto?.copyId, undefined);
+  fixer.setAuto('ghauto', { copyId: null });   // main is always a choice
+  assert.equal(fixer.autoConfig().ghauto.copyId, undefined);
+});
+
+test('an improvement tried on a copy retired before it shipped is up next again, and picked up into main', async () => {
+  const repo = await project('orphan');
+  const view = await copies.createCopy('orphan', 'dev'); await copies.waitForCopy(view.id);
+  const item = await upNext('orphan', 'r.txt tried on dev');
+  await act('orphan', 'issue.build', { id: item, copyId: view.id }); await settle('orphan');
+  const tried = runsOf('orphan')[0];
+  assert.deepEqual([run(tried.id).status, run(tried.id).copyId], ['merged', view.id], 'it landed in dev');
+  await copies.retireCopy('orphan', view.id, copyOf(view.id).headSha);
+  assert.equal(existsSync(join(repo, 'r.txt')), false, 'it never reached main');
+  fixer.setAuto('orphan', { mode: 'stage' });
+  await automationCycle(notify); await settle('orphan');
+  const again = runsOf('orphan').filter(f => f.id !== tried.id);
+  assert.deepEqual(again.map(f => [f.issueIds, f.copyId]), [[[item], undefined]], 'dev retired under it: into main now');
+  fixer.setAuto('orphan', { mode: 'off' });
+});

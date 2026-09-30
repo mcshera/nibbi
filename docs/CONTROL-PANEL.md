@@ -958,11 +958,17 @@ an up-next improvement on its own. Now the modes work the Improvements list:
   from `BuildVM.autoInto`), and the + improvement hint says up next is picked up (`WORDS.form.hintAuto`,
   `WORDS.copy.formHintAuto`). The ship segment's ink is `[data-mode="ship"]` now, not `:last-child`, so
   the last copy in Builds into is seated like any pressed key.
-- **Checked.** `daemon/test/automation.test.ts` (temp state, real git, 7 tests): stage builds the top
+- **Checked.** `daemon/test/automation.test.ts` (temp state, real git, 15 tests): stage builds the top
   item and no second past capacity, then the next, and not a discarded one again; the spend cap stops it
   first; suggest adds three marked nibbi suggested, cleaned and none a repeat, builds nothing, and waits
-  for the owner; ship into dev lands in dev, never ships main nor merges a staged main try, and a retired
-  dev falls back to main in stage; ship into main keeps today's merge; a goal keeps the roadmap.
+  for the owner; stage and ship build none of nibbi's suggestions; ship into dev lands in dev, never
+  ships main nor merges a staged main try, and a retired dev falls back to main in stage; ship into main
+  keeps today's merge; a goal keeps the roadmap, and in ship merges its main runs with a copy chosen; a
+  broken copy is refused and, broken while chosen, falls back to main in stage. Each guard above is
+  pinned on its own, so removing any one fails its test (review F4): another copy's up next is built
+  neither into the chosen copy nor into main; a queued try counts against capacity; a target being made,
+  shipping or catching up is waited for with automation left on; a GitHub-mode project refuses a copy
+  target; a try on a copy retired before it shipped is picked up into main.
   `tools/control-panel-verify.mjs` check 22: stage chosen on the card, one pass, the top two up-next rows
   turn into building and the third waits, its ticket saying automation builds it.
 

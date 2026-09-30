@@ -38,8 +38,10 @@ whichever copy up next builds into, and the card hides **Builds into** until the
 picks up up next · builds into dev`), with its last note under it; an up-next ticket says automation
 will build it, and a try you stopped or discarded isn't started again by itself.
 
-**Checked.** `daemon/test/automation.test.ts` drives each mode in temp repos (7 tests: capacity, the
-spend cap, suggest, ship into dev and into main, a retired target, a goal); control-panel check 22
+**Checked.** `daemon/test/automation.test.ts` drives each mode in temp repos (15 tests: capacity and
+a queued try, the spend cap, suggest and its suggestions left for you, ship into dev and into main, a
+retired or broken target, a target not ready yet, another copy's list, GitHub mode, a try orphaned by
+a retire, a goal, and a goal in ship with a copy chosen); control-panel check 22
 turns stage on from the card and watches the top two up-next rows start building while the third waits.
 
 ### The control panel, phase 2: builds are copies
