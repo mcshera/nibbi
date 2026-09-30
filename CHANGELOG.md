@@ -2,6 +2,11 @@
 
 ## 0.9.0 — Unreleased
 
+### The progress line speaks like the rest of the bar
+
+The foot says `nothing merged yet today` and `progress not available` now, in lowercase like every other
+state line in the bar; the counted forms (`2 merged today · 5 this week · 3-day streak`) already were.
+
 ### The keys that start a run don't wait for nibbi's reply
 
 **start now**, **build it now** and **try again** used to be refused while nibbi was answering, with

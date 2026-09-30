@@ -48,14 +48,14 @@ const held = (locator, rest, {prop = 'backgroundColor', want = null} = {}) => lo
 const probeColor = (page, locator, value) => locator.evaluate((el, value) => { const probe = document.createElement('i'); probe.style.color = value; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }, value);
 
 test('progress line reports verified merges without proposing a next goal', () => {
-  assert.equal(progressLine(undefined), 'Progress not available');
-  assert.equal(progressLine(null), 'Progress not available');
-  assert.equal(progressLine({available: false}), 'Progress not available');
-  assert.equal(progressLine({available: false, today: {deliveries: 4}, week: {deliveries: 9}, streak: 2}), 'Progress not available', 'unavailable wins over stale numbers');
-  assert.equal(progressLine({available: true}), 'Progress not available', 'no counts is not zero progress');
-  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}), 'Nothing merged yet today');
-  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 3}, streak: 0}), 'Nothing merged yet today · 3 this week');
-  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 1}, streak: 1}), 'Nothing merged yet today · 1 this week · 1-day streak');
+  assert.equal(progressLine(undefined), 'progress not available');
+  assert.equal(progressLine(null), 'progress not available');
+  assert.equal(progressLine({available: false}), 'progress not available');
+  assert.equal(progressLine({available: false, today: {deliveries: 4}, week: {deliveries: 9}, streak: 2}), 'progress not available', 'unavailable wins over stale numbers');
+  assert.equal(progressLine({available: true}), 'progress not available', 'no counts is not zero progress');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}), 'nothing merged yet today');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 3}, streak: 0}), 'nothing merged yet today · 3 this week');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 1}, streak: 1}), 'nothing merged yet today · 1 this week · 1-day streak');
   assert.equal(progressLine({available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}), '2 merged today · 5 this week · 3-day streak');
   assert.equal(progressLine({available: true, today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}), '1 merged today · 1 this week · 1-day streak');
   assert.equal(progressLine({today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}), '1 merged today · 1 this week · 1-day streak', 'available defaults to true when counts exist');
@@ -99,18 +99,18 @@ test('the bar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await progress.count(), 1, 'one companion progress line in the projects rail');
     assert.equal(await progress.getAttribute('role'), 'status');
     assert.ok(await progress.evaluate(el => el.classList.contains('margin-muted')), 'quiet muted style');
-    assert.equal(await progress.innerText(), 'Progress not available', 'no progress in the model reads as unavailable, not zero');
+    assert.equal(await progress.innerText(), 'progress not available', 'no progress in the model reads as unavailable, not zero');
     assert.ok(await progress.evaluate(el => el.closest('.margin-foot') === document.querySelector('.margin-body').lastElementChild), 'the quiet line is the foot, the last thing in the scroll under the cards');
     for (const [value, said] of [
-      [{available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}, 'Nothing merged yet today'],
-      [{available: true, today: {deliveries: 0}, week: {deliveries: 4}, streak: 0}, 'Nothing merged yet today · 4 this week'],
+      [{available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}, 'nothing merged yet today'],
+      [{available: true, today: {deliveries: 0}, week: {deliveries: 4}, streak: 0}, 'nothing merged yet today · 4 this week'],
       [{available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}, '2 merged today · 5 this week · 3-day streak'],
       [{available: true, today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}, '1 merged today · 1 this week · 1-day streak'],
-      [{available: false}, 'Progress not available'], [undefined, 'Progress not available'],
+      [{available: false}, 'progress not available'], [undefined, 'progress not available'],
     ]) {
       await page.evaluate(value => { if (value === null) delete model.progress; else model.progress = value; ui.update(model); }, value ?? null);
       assert.equal(await progress.innerText(), said);
-      assert.equal(await progress.textContent(), said, 'textContent is exactly progressLine(), which three suites pin');
+      assert.equal(await progress.textContent(), said, 'textContent is exactly progressLine(), which three suites pin, lowercase (D13 closed)');
     }
     await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}; ui.update(model);});
     assert.deepEqual(await progress.locator('.cp-seg').allTextContents(), ['2 merged today', ' · 5 this week', ' · 3-day streak'], 'each fact is its own piece, so one that does not fit drops whole');

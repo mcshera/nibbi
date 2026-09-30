@@ -70,7 +70,7 @@ real data, with exactly one build — `main` — holding its improvements. No pe
 | D10 | The Scope tab strip, the section summaries and pills, Plans, the Issues kanban and the Builds lobby leave the UI. The data paths stay (daemon unchanged; `/plan`, `/goal`, `/review` chat commands unchanged). Repository & GitHub stays, from the project settings card | ROUND3 decided 1, 6; plan "Remove" |
 | D11 | The lobby's review flow moves onto the ticket: play it, approve & merge (asks twice), discard (asks twice), verify, guide, stop, try again; its evidence (log, changes, checks, GitHub) moves into the ticket's try cards. The lobby's queue keys (j/k/a/x/p) and "Next build" go; `/review` in chat keeps them | the orchestrator; app.js:1401-1445 |
 | D12 | A conversation's second line is the last thing said in it: one small daemon addition (`lastText`, §4.6) | the Cards design (bar-cards.mjs:37-38) |
-| D13 | `#sidebar-progress` keeps `textContent === progressLine(progress)` exactly (sentence case as today): three suites pin it. Lowercasing it is a later one-line change | tests/narration-wiring.test.mjs:76,107,109; tests/margin-ui.test.mjs:16-33 |
+| D13 | `#sidebar-progress` keeps `textContent === progressLine(progress)` exactly ~~(sentence case as today): three suites pin it. Lowercasing it is a later one-line change~~ — **closed 2026-09-29 (§12.3): lowercase**, and the suites pin that | tests/narration-wiring.test.mjs:76,107,109; tests/margin-ui.test.mjs:16-33 |
 | D14 | "remove it" on an up-next issue becomes **mark it done** (`issue.complete`): the daemon has no issue delete (project-workspace.ts:15). A queued run's is **cancel it** (`run.stop`) | never invent a command |
 | D15 | Page keys are lowercase (`try again`, `approve & merge`), unlike the lab's capitalised ink keys | LANGUAGE §11, audit P14 |
 
@@ -757,7 +757,7 @@ payload). Nothing else in the daemon changes.
 | tests/margin-ui.test.mjs | sections, tabs, foot | the BAR builder's (§7c) |
 | tests/project-workspace-ui.test.mjs:65-184, 257-283 | issues editing, milestones, GitHub filters and key hint | delete |
 | tests/project-workspace-ui.test.mjs:185-255, 285-497 | lobby evidence, play, live focus | delete here; the PAGES test carries them (§7b). Keep a small frame test: repository opens, × and Escape call `onClose`, the page host hides the repository content, a notice without a kind is ink |
-| tests/narration-wiring.test.mjs:76, 107, 109 | `#sidebar-progress` textContent | must pass unchanged (D13) |
+| tests/narration-wiring.test.mjs:76, 107, 109 | `#sidebar-progress` textContent | must pass unchanged (D13; lowercase since §12.3) |
 | daemon/test/threads.test.ts:102 | payload `deepEqual` | + `lastText` |
 | tools/verify.mjs:100-109 | builds tab → section → × / Escape | `[data-bar-build="main"]` → the build page → `.project-close`; again → Escape from `.project-workspace-body` |
 | tools/surfaces-verify.mjs:26 | waits for `.margin-tab[data-margin-tab="builds"]` | waits for `[data-bar-build="main"]` |
@@ -865,7 +865,7 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
     so; the plan's commit table did not.
 13. **Open, for the owner**: whether "both of them" meant the two groups (read here, ROUND5 decided 1);
     whether up-next items should be drained by automation (scheduler option (b), code.md §3) — **yes,
-    §12.1**; lowercase for the progress line (D13).
+    §12.1**; lowercase for the progress line (D13) — **yes, §12.3**.
 
 ---
 
@@ -979,3 +979,13 @@ spend cap. So:
   tests/project-pages-ui.test.mjs (*nibbi answering holds none of them*: try again sends once and holds;
   the build page's start now starts), tools/control-panel-verify.mjs check 9, and
   tools/project-workflow-verify.mjs's busy check.
+
+### 12.3 The progress line is lowercase (D13, closed)
+
+`Nothing merged yet today` / `Progress not available` were the only capitalised state lines in the Cards
+bar; everything around them is lowercase (`1 ready to review`, `what ships`, `copy of main`), and
+LANGUAGE §11 says labels are lowercase sentence case. D13 kept them only so three suites would stay
+green. `progressLine()` (margin-ui.js) now returns `nothing merged yet today` / `progress not available`
+(the counted forms, `2 merged today · 5 this week · 3-day streak`, were lowercase already), and
+`#sidebar-progress` still has exactly its text. Re-pointed: tests/margin-ui.test.mjs (the progress-line
+test and the bar's foot) and tests/narration-wiring.test.mjs:175; no browser tool pins the string.

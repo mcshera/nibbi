@@ -83,12 +83,13 @@ const fillIn = (template, values) => String(template).replace(/\{(\w+)\}/g, (all
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const count = value => finite(value) ? Math.max(0, Math.floor(value)) : null;
 const money = value => finite(value) ? `$${Math.max(0, value).toLocaleString(undefined, {maximumFractionDigits: 2})}` : '—';
-/** Companion progress line. Reports what merged; never proposes what to do next. Sentence case, as three suites pin it (D13). */
+/** Companion progress line. Reports what merged; never proposes what to do next. Lowercase, as every state line in the bar is
+    (LANGUAGE §11; D13 closed 2026-09-29, docs/CONTROL-PANEL.md §12.3). */
 export function progressLine(progress) {
   const today = progress && progress.available !== false ? count(progress.today?.deliveries) : null;
-  if (today === null) return 'Progress not available';
+  if (today === null) return 'progress not available';
   const week = count(progress.week?.deliveries) ?? 0, streak = count(progress.streak) ?? 0;
-  const parts = [today === 0 ? 'Nothing merged yet today' : `${today} merged today`];
+  const parts = [today === 0 ? 'nothing merged yet today' : `${today} merged today`];
   if (week > 0) parts.push(`${week} this week`);
   if (streak > 0) parts.push(`${streak}-day streak`);
   return parts.join(' · ');
