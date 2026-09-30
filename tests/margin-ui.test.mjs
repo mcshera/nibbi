@@ -40,6 +40,11 @@ async function harness(page, {extra = '', onAction = 'calls.push({action, id, va
   return errors;
 }
 const frame = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+/** What a held control shows. The press eases in on --t1 and reads as its rest value until a frame is drawn, which a loaded runner can put off past 160ms, so poll (up to 2s) until `prop` leaves `rest`, or matches `want`. */
+const held = (locator, rest, {prop = 'backgroundColor', want = null} = {}) => locator.evaluate((el, [rest, prop, want]) => new Promise(resolve => {
+  const end = performance.now() + 2000;
+  (function look() { const now = getComputedStyle(el)[prop]; if ((want ? new RegExp(want).test(now) : now !== rest) || performance.now() > end) resolve(now); else setTimeout(look, 16); })();
+}), [rest, prop, want]);
 const probeColor = (page, locator, value) => locator.evaluate((el, value) => { const probe = document.createElement('i'); probe.style.color = value; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }, value);
 
 test('progress line reports verified merges without proposing a next goal', () => {
@@ -814,10 +819,9 @@ test('every bar control presses, answers on --t1, is 44px at a touch, and speaks
         const box = await el.boundingBox();
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
-        await page.waitForTimeout(160);   // the press eases in on --t1; read it once it has landed
-        const held = await el.evaluate(el => getComputedStyle(el).backgroundColor);
+        const pressed = await held(el, rest.bg);
         await page.mouse.move(1150, 800); await page.mouse.up();
-        assert.notEqual(held, rest.bg, `${kind} answers a press: ${rest.bg} → ${held}`);
+        assert.notEqual(pressed, rest.bg, `${kind} answers a press: ${rest.bg} → ${pressed}`);
         assert.match(rest.property, /background-color/, `${kind} moves its background in a transition: ${rest.property}`);
         assert.doesNotMatch(rest.property, /\ball\b/, `${kind} never transitions all`);
         assert.equal(rest.duration.split(', ')[rest.property.split(', ').indexOf('background-color')], '0.12s', `${kind} answers on --t1`);
@@ -829,8 +833,8 @@ test('every bar control presses, answers on --t1, is 44px at a touch, and speaks
       const start = page.locator('[data-cp-role="start-now"]');
       const box = await start.boundingBox();
       await page.mouse.move(box.x + 10, box.y + 10); await page.mouse.down();
-      await page.waitForTimeout(200);
-      assert.match(await start.evaluate(el => getComputedStyle(el).transform), /^matrix\(0\.96/, 'start now presses to .96');
+      const scaled = await held(start, null, {prop: 'transform', want: '^matrix\\(0\\.96'});
+      assert.match(scaled, /^matrix\(0\.96/, 'start now presses to .96');
       await page.mouse.move(1150, 800); await page.mouse.up();
       assert.equal(await page.locator('[data-cp-role="up-next"]').evaluate(el => getComputedStyle(el).transitionProperty.includes('transform')), false, 'up next does not scale');
       // one row, one header: two-line rows are 44 at a desk too; every word ends on the right-hand edge
@@ -1309,8 +1313,7 @@ test('copies at 390 touch: every row and key 44 to press, no sideways scroll; ev
         const box = await el.boundingBox();
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
-        await page.waitForTimeout(160);
-        const pressed = await el.evaluate(el => getComputedStyle(el).backgroundColor);
+        const pressed = await held(el, rest.bg);
         await page.mouse.move(1150, 800); await page.mouse.up();
         assert.notEqual(pressed, rest.bg, `${kind} answers a press: ${rest.bg} → ${pressed}`);
         assert.match(rest.property, /background-color/, `${kind} moves its background in a transition`);

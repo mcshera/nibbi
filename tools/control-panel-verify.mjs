@@ -71,7 +71,9 @@ async function pressProbe(page, name, locator) {
   const box = await locator.boundingBox(); assert.ok(box, name + ' is on screen');
   await page.mouse.move(away.x, away.y); await page.waitForTimeout(200);
   const rest = await locator.evaluate(el => getComputedStyle(el).backgroundColor);
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.waitForTimeout(200);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+  // the press eases in on --t1; a loaded runner can go 200ms without a frame, so wait (up to 2s) for the first one that differs
+  await locator.evaluate((el, rest) => new Promise(resolve => { const end = performance.now() + 2000; (function look() { if (getComputedStyle(el).backgroundColor !== rest || performance.now() > end) resolve(); else setTimeout(look, 16); })(); }), rest);
   const pressed = await locator.evaluate(el => { const s = getComputedStyle(el), props = s.transitionProperty.split(', '), times = s.transitionDuration.split(', '); return { bg: s.backgroundColor, active: el.matches(':active'), props, background: times[props.indexOf('background-color') % times.length] ?? null }; });
   await page.mouse.move(away.x, away.y); await page.mouse.up();   // released elsewhere: a press, never a click
   assert.equal(pressed.active, true, name + ' is pressed');
