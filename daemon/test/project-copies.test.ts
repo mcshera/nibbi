@@ -737,3 +737,100 @@ test('retire refuses while a try waits to land, and after retire its issue build
     await fixer.waitForFixer(next.id); assert.equal(run(next.id).status, 'staged');
   } finally { await previews.stopAndWait(preview); }
 });
+
+test('an interrupted ship recovered by two passes at once completes each run once', async () => {
+  const repo = await project('recover-twice'); const copy = await makeCopy('recover-twice');
+  const one = await improve('recover-twice', 'a.txt one', copy), two = await improve('recover-twice', 'b.txt two', copy);
+  assert.deepEqual([one.status, two.status], ['merged', 'merged']);
+  const head = copyOf(copy.id).headSha, main = await sha(repo, 'refs/heads/main');
+  // The backend stopped in the ship's bookkeeping: main fast-forwarded, the first run was marked shipped and delivered, the
+  // second wasn't reached, and the record still says shipping with its intent.
+  await git(repo, 'merge', '--ff-only', head);
+  records.patchCopy(copy.id, record => { record.status = 'shipping'; record.intent = { kind: 'ship', candidate: head, targetSha: main, integration: join(workDir, 'merge-' + randomUUID()), at: new Date().toISOString() }; });
+  const marked = { at: '2026-01-01T00:00:00.000Z', sha: head, copyId: copy.id };
+  const first = run(one.id); first.shipped = marked; fixer.saveFixer(first); fixer.noteDelivery(first);
+  assert.deepEqual([deliveries(one.id), deliveries(two.id)], [1, 0]);
+  const cursor = runtime().cursor();
+  // Two recoveries over it, the second reading the record before the first has finished it; then one more.
+  await Promise.all([copies.reconcileCopies(), copies.reconcileCopies()]);
+  await copies.reconcileCopies();
+  const record = copyOf(copy.id);
+  assert.deepEqual([record.status, record.intent], ['ready', null]);
+  assert.equal(record.ships.length, 1); assert.deepEqual([...record.ships[0].runIds].sort(), [one.id, two.id].sort());
+  assert.deepEqual({ ...record.ships[0], id: '', at: '', runIds: [] }, { id: '', at: '', sha: head, mainBefore: main, runIds: [] });
+  assert.deepEqual([deliveries(one.id), deliveries(two.id)], [1, 1]);
+  // The run marked before the stop stays as it was marked; only the one not reached is shipped now.
+  assert.deepEqual(run(one.id).shipped, marked);
+  assert.equal(runtime().replay(cursor).filter(event => event.type === 'run.updated' && event.runId === one.id).length, 0);
+  assert.equal(run(two.id).shipped?.sha, head); assert.equal(await sha(repo, 'refs/heads/main'), head);
+});
+
+test('recovery lands a passed try that never got to land', async () => {
+  const repo = await project('recover-unattempted'); const copy = await makeCopy('recover-unattempted');
+  const main = await sha(repo, 'refs/heads/main');
+  // As if the backend stopped between the try staging and its landing: staged, checks passed, no landing written.
+  // (It is made by letting it pass while its copy is busy, then taking the waiting landing off.)
+  const release = hold();
+  const started = fixer.spawnFixer('recover-unattempted', 'a.txt never got to land', notify, { copyId: copy.id });
+  await until(() => run(started.id).status === 'running', 'running');
+  records.patchCopy(copy.id, record => { record.status = 'catching_up'; });
+  release(); await fixer.waitForFixer(started.id);
+  assert.deepEqual([run(started.id).status, run(started.id).verification?.status, run(started.id).landing?.state], ['staged', 'passed', 'waiting']);
+  const f = run(started.id); delete f.landing; runtime().put('fixers', f.id, f);
+  records.patchCopy(copy.id, record => { record.status = 'ready'; });
+  assert.equal(copyOf(copy.id).headSha, copy.headSha);
+  await copies.reconcileCopies();
+  await until(() => run(started.id).status === 'merged', 'the try to land', 15_000); await fixer.landOnCopy(started.id);
+  const landed = copyOf(copy.id);
+  assert.notEqual(landed.headSha, copy.headSha); assert.equal(landed.headSha, run(started.id).mergeIntent?.candidate);
+  assert.equal(await sha(repo, 'refs/heads/nibbi/copy/dev'), landed.headSha); assert.equal(await sha(copy.worktree, 'HEAD'), landed.headSha);
+  assert.ok(existsSync(join(copy.worktree, 'a.txt'))); assert.equal(await git(copy.worktree, 'status', '--porcelain'), '');
+  assert.equal(await sha(repo, 'refs/heads/main'), main);
+});
+
+test('a try waiting in the queue fails before it starts when its copy moved outside nibbi', async () => {
+  const repo = await project('moved-queued'); const copy = await makeCopy('moved-queued');
+  const queued = fixer.queueFix('moved-queued', 'a.txt on a moved copy', { copyId: copy.id }); assert.equal(queued.status, 'queued');
+  // The owner commits in the copy's folder while the try waits.
+  writeFileSync(join(copy.worktree, 'mine.txt'), 'the owner’s\n'); await git(copy.worktree, 'add', '.'); await git(copy.worktree, 'commit', '-m', 'the owner’s commit');
+  const before = await snapshot(repo, copy);
+  fixer.drainQueues(notify, false); await fixer.waitForFixer(queued.id);
+  const failed = run(queued.id);
+  assert.deepEqual([failed.status, failed.summary], ['failed', fill(W.changedOutside, { name: 'dev' })]);
+  // Nothing was built on the owner's commit: no worktree, no branch, no landing; the copy is as the owner left it.
+  assert.equal(existsSync(failed.worktree), false); assert.equal(await exists(repo, 'refs/heads/' + failed.branch), false); assert.equal(failed.landing, undefined);
+  assert.deepEqual(await snapshot(repo, copy), before); assert.equal(copyOf(copy.id).headSha, copy.headSha); assert.deepEqual(merges(), []);
+});
+
+test('a merge into main refuses when main changes while its checks run', async () => {
+  // The check holds in its merge-<uuid> worktree while <repo>/hold.flag exists, so the owner can act while it runs.
+  // (No single quotes in it: the sandbox's wrapper would then escape CHECK's `!`.)
+  const { repo } = await createProject('reguard'); assert.doesNotMatch(repo, /\s/);
+  updateProject('reguard', { check: `if [ -f ${repo}/hold.flag ]; then case "$(pwd)" in */merge-*) touch held.flag; while [ -f ${repo}/hold.flag ]; do sleep 0.05; done;; esac; fi; ${CHECK}` });
+  writeFileSync(join(repo, '.gitignore'), '*.flag\n'); await git(repo, 'add', '.gitignore'); await git(repo, 'commit', '-m', 'flags are not the project’s');
+  const staged = await improve('reguard', 'r.txt on main'); assert.equal(staged.status, 'staged', staged.summary ?? '');
+  /** Approve the run; while its check holds, the owner does `change` in the project folder. The refusal, if any. */
+  const whileChecking = async (change: () => Promise<void>): Promise<Error | undefined> => {
+    const earlier = new Set(merges());
+    writeFileSync(join(repo, 'hold.flag'), '');
+    const approving = fixer.approveFixer(staged.id).then(() => undefined, (error: Error) => error);
+    await until(() => merges().some(name => !earlier.has(name) && existsSync(join(workDir, name, 'held.flag'))), 'the check to hold');
+    await change(); rmSync(join(repo, 'hold.flag'));
+    const refusal = await approving;
+    for (const name of merges().filter(name => !earlier.has(name))) await git(repo, 'worktree', 'remove', '--force', join(workDir, name));   // main's path keeps a failed one; the test tidies it
+    return refusal;
+  };
+  // The owner commits on main: main stays at their commit, nothing was written about a merge, and nothing tried to move it.
+  let owners = '';
+  const committed = await whileChecking(async () => { writeFileSync(join(repo, 'owner.txt'), 'the owner’s\n'); await git(repo, 'add', 'owner.txt'); await git(repo, 'commit', '-m', 'the owner commits on main'); owners = await sha(repo, 'HEAD'); });
+  assert.equal(committed?.message, 'Target changed during verification; no merge performed');
+  assert.equal(await sha(repo, 'refs/heads/main'), owners); assert.equal(existsSync(join(repo, 'r.txt')), false);
+  assert.deepEqual([run(staged.id).status, run(staged.id).mergeIntent], ['staged', undefined]);
+  // The owner switches the folder to a branch of theirs at main's head: a fast-forward there would move their branch, not main.
+  const switched = await whileChecking(async () => { await git(repo, 'switch', '-q', '-c', 'side'); });
+  assert.equal(switched?.message, 'Target changed during verification; no merge performed');
+  assert.deepEqual([await sha(repo, 'refs/heads/side'), await sha(repo, 'refs/heads/main')], [owners, owners]);
+  assert.deepEqual([run(staged.id).status, run(staged.id).mergeIntent], ['staged', undefined]); assert.equal(deliveries(staged.id), 0);
+  await git(repo, 'switch', '-q', 'main'); await git(repo, 'branch', '-D', 'side');
+  assert.deepEqual(merges(), []);
+});
