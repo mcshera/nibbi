@@ -32,7 +32,8 @@ build it now.
 dev1… Into a copy, a try lands there on its own and ship merges nothing into main — Ship to main stays
 your confirm. Retire that copy and automation builds into main again, in stage, and says so.
 
-**A set /goal keeps the roadmap**, exactly as before. The card says which it is working (`automation
+**A set /goal keeps the roadmap**, exactly as before: its lead builds on main and ship merges it,
+whichever copy up next builds into, and the card hides **Builds into** until the goal is done. The card says which it is working (`automation
 picks up up next · builds into dev`), with its last note under it; an up-next ticket says automation
 will build it, and a try you stopped or discarded isn't started again by itself.
 

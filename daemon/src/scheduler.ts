@@ -87,16 +87,16 @@ async function automate(project: string, notify: (message: string) => Promise<vo
   if (cfg.spendCap && (autoSpend(project) >= cfg.spendCap || recent.some(run => ['staged', 'done', 'merged'].includes(run.status) && run.costUsd === undefined))) {
     setAuto(project, { mode: 'off', note: 'Spend cap reached, or provider cost is unavailable. Review before resuming.' }); return;
   }
-  const target = cfg.copyId ?? null;
-  // Auto ship lands main's runs only, and only while automation builds into main: a copy's runs land on their own, and nothing
-  // but the owner's confirm ships a copy (D15). Building into a copy, ship never merges main.
-  if (cfg.mode === 'ship' && !target) for (const run of stagedFor(project).filter(run => !run.copyId)) {
+  const target = cfg.copyId ?? null, goal = goals()[project], goalActive = !!goal && !goal.done;
+  // Auto ship lands main's runs only, and only while automation builds into main, or while a /goal is set: its lead dispatches
+  // on main whatever the card chose for up next, and it merges as it did before up next was the queue. A copy's runs land on
+  // their own, and nothing but the owner's confirm ships a copy (D15). Building up next into a copy, ship never merges main.
+  if (cfg.mode === 'ship' && (!target || goalActive)) for (const run of stagedFor(project).filter(run => !run.copyId)) {
     const result = await integrate(run);
     if (!result.ok) { setAuto(project, { mode: 'stage', note: 'Merge paused: ' + result.detail }); break; }
     await notify('Merged ' + (run.title ?? run.id) + ' on ' + project);
   }
-  const goal = goals()[project];
-  if (cfg.mode !== 'suggest' && goal && !goal.done) return roadmapTurn(project, autoConfig()[project], recent);
+  if (cfg.mode !== 'suggest' && goalActive) return roadmapTurn(project, autoConfig()[project], recent);
   if (cfg.mode === 'suggest') return suggestTurn(project);
   return buildUpNext(project, autoConfig()[project], target, notify);
 }

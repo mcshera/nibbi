@@ -1384,7 +1384,8 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       }));
       refreshDisabled();
     }
-    entry.intoField.hidden = choices.length < 2;
+    // while a /goal is set its lead builds on main from the roadmap, so there is no choice to show; it is kept for after
+    entry.intoField.hidden = choices.length < 2 || !!data.goalActive;
     for (const [id, el] of entry.intoButtons) el.setAttribute('aria-pressed', String(id === (chosen.copyId ?? MAIN)));
     const note = typeof data.autoNote === 'string' ? data.autoNote.trim() : '';
     entry.autoNote.hidden = !note; setText(entry.autoNote, note); entry.autoNote.title = note;

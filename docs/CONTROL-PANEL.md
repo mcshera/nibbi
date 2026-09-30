@@ -942,7 +942,10 @@ an up-next improvement on its own. Now the modes work the Improvements list:
   made, shipping or catching up is waited for.
 - **A set /goal keeps the roadmap**, as before: stage or ship with an unfinished goal run the lead's
   roadmap turn (dispatch allowed), and "Roadmap complete" ends the goal and turns it off. suggest always
-  suggests improvements.
+  suggests improvements. The goal's lead builds on main, so ship with a goal merges main's staged runs
+  as it did, whatever copy **Builds into** names (review F2: with a copy chosen, the goal's runs stayed
+  staged and the goal never finished); the choice is kept for after the goal, and the card doesn't draw
+  **Builds into** while a goal is set.
 - **Words.** The card: `automation picks up up next · builds into main` (`WORDS.auto.line`), or
   `automation works toward your goal, from plans/<project>.md` while a goal is set, and automation's last
   note under it (`AutoCfg.note`, two lines, whole in its title). An up-next ticket says `automation builds

@@ -1304,10 +1304,12 @@ test('the project card: automation picks up up next, into main or the copy you c
     // a /goal keeps the roadmap; automation's last word is under it, whole in its title
     await page.evaluate(() => { model.projects[0].goalActive = true; model.projects[0].autoNote = 'dev was retired, so automation builds into main now'; ui.update(model); });
     assert.equal(await line.innerText(), 'automation works toward your goal, from plans/alpha.md');
+    assert.equal(await card.locator('.margin-into-field').isVisible(), false, 'the goal builds on main: builds into is not offered while it is set');
     assert.equal(await card.locator('.margin-auto-note').innerText(), 'dev was retired, so automation builds into main now');
     assert.equal(await card.locator('.margin-auto-note').getAttribute('title'), 'dev was retired, so automation builds into main now');
     await page.evaluate(() => { model.projects[0].goalActive = false; model.projects[0].autoNote = ''; model.busy = true; ui.update(model); });
     assert.equal(await card.locator('.margin-auto-note').isVisible(), false);
+    assert.equal(await card.locator('.margin-into-field').isVisible(), true, 'the goal done, the choice is back');
     assert.deepEqual(await into.locator('button').evaluateAll(els => els.map(el => el.disabled)), [true, true, true], 'while nibbi answers, like the other settings');
     // the copies go: nothing to choose, and the choice falls to main
     await page.evaluate(() => { model.busy = false; model.projects[0].builds = model.projects[0].builds.slice(0, 1); ui.update(model); });

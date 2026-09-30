@@ -230,3 +230,21 @@ test('a set goal keeps the roadmap, as before', async () => {
   assert.deepEqual(runsOf('goal').map(f => f.issueIds), [[item]]);
   fixer.setAuto('goal', { mode: 'off' });
 });
+
+test('a set goal in ship still merges its runs into main when a copy is chosen for up next', async () => {
+  const repo = await project('goalship');
+  writeFileSync(join(vault, 'plans', 'goalship.md'), '# Goal\n\n## M1 <!-- nibbi-milestone:m1 -->\n- [ ] Boot screen <!-- nibbi-task:t1 -->\n');
+  const view = await copies.createCopy('goalship', 'dev'); await copies.waitForCopy(view.id);
+  const dev = copyOf(view.id);
+  fixer.setAuto('goalship', { copyId: dev.id });   // chosen on the card for up next, before the goal
+  setGoal('goalship', { text: 'finish M1', focus: 'M1', mode: 'ship' });
+  assert.equal(fixer.autoConfig().goalship.copyId, dev.id, 'the choice is kept for after the goal');
+  // What the goal's lead does with dispatch_fixer: a run on main for roadmap task t1.
+  const boot = fixer.spawnFixer('goalship', 'boot.txt boot screen', notify, { taskId: 't1' }); await fixer.waitForFixer(boot.id);
+  assert.deepEqual([run(boot.id).status, run(boot.id).copyId, run(boot.id).verification?.status], ['staged', undefined, 'passed']);
+  await automationCycle(notify);
+  assert.equal(run(boot.id).status, 'merged', 'a goal in ship merges into main, as before'); assert.ok(existsSync(join(repo, 'boot.txt')));
+  await automationCycle(notify);
+  assert.deepEqual([goals().goalship.done, fixer.autoConfig().goalship.mode, fixer.autoConfig().goalship.note], [true, 'off', 'Roadmap complete']);
+  assert.equal(copyOf(dev.id).ships.length, 0, 'and it ships no copy'); assert.equal(copyOf(dev.id).headSha, dev.headSha, 'nor builds into one');
+});
