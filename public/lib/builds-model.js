@@ -1,22 +1,31 @@
-/** The control panel's model, phase 1 (docs/CONTROL-PANEL.md §3–§5; the shapes are in ./control-panel-contract.js).
+/** The control panel's model (docs/CONTROL-PANEL.md §3–§5 for phase 1, docs/BUILDS-AS-COPIES.md §4.2 for
+ *  phase 2; the shapes are in ./control-panel-contract.js).
  *
  *  Pure: no DOM, no fetch, no clock. `now` comes in with the input and every relative time is said
  *  against it. From one project's runs (S.fixers, merged with the builds section read), its issues (the
- *  issues section read) and its play status, it makes main's BuildVM and any improvement's TicketVM:
+ *  issues section read), its play status and its copies (GET /api/project-copies), it makes the builds —
+ *  main and every live copy — and any improvement's TicketVM:
  *
- *    buildMain(input)            → BuildVM       the bar's builds card and the build page
+ *    buildsCard(input)           → BuildsCardVM  the bar's builds card: main, then the copies; the card's badge,
+ *                                                the project's attention, + New build
+ *    buildOf(input, name)        → BuildVM|null  one build's page ('main' or a copy's name; null: that copy is gone)
+ *    buildMain(input)            → BuildVM       main alone (phase 1's call; it counts only main's improvements)
  *    ticketOf(input, id)         → TicketVM      the ticket page (gone: true when it no longer exists)
  *    improvementIdForRun(…)      → the ticket a run belongs to (notifications, chips)
  *    mergeRuns(live, read)       → runs, the live record winning (§3.3)
  *    conversationsFor(threads)   → the conversations card's rows (§4.6)
+ *    nextCopyName · copyNameProblem · normalizeCopyName   + New build's name rules, said in words
  *    previewText · splitImprovementText · parseDiffstat   the small rules the rest shares
  *
  *  An improvement is an issues.md item (`issue:<id>`) or a free-text run's retry chain (`run:<root>`);
- *  its tries are its runs, oldest first. Its state is its latest try's (RUN_STATES, GITHUB_STAGED), with
- *  the issue's own rules on top (§4.3). */
+ *  its tries are its runs, oldest first. Its state is its latest try's (RUN_STATES, GITHUB_STAGED,
+ *  COPY_RUN_STATES), with the issue's own rules on top (§4.3). It lives in the build its latest try
+ *  targets (run.copyId); a try on a copy that shipped lives in main, one on a copy that was retired
+ *  falls back to main, settled, and one whose copy the client has not read yet is held back. */
 import {
   MAIN, ID_PREFIX, STATES, STATE_WORDS, STATE_TONES, LIVE_STATES, GROUPS, RUN_STATES, GITHUB_STAGED,
   BADGE, ATTENTION_TONES, BAR_LIMITS, PAGE_LIMITS, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS,
+  COPY, COPY_STATUS, COPY_HEALTH, COPY_STATE_WORDS, COPY_STATE_TONES, COPY_LIVE, CARD_BADGE,
 } from './control-panel-contract.js';
 
 /* ------------------------------------------------------------------------------------------ small rules */
@@ -59,24 +68,38 @@ const safeUrl = value => { try { const url = new URL(str(value)); return ['https
 const GROUP_OF = Object.fromEntries(GROUPS.flatMap(group => group.states.map(state => [state, group.id])));
 const groupOf = state => GROUP_OF[state] ?? 'settled';   // SETTLED: stopped · discarded · done
 /** States that mean a try is still in play: they outrank a done issue (see issueRecord). */
-const IN_PLAY = new Set(['up_next', 'building', 'needs_you', ...GROUPS[0].states]);
+const IN_PLAY = new Set(['up_next', 'building', 'landing', 'waiting_to_land', 'needs_you', ...GROUPS[0].states]);
 const GITHUB_STATES = new Set(['to_push', 'pull_request', 'pr_ready', 'needs_attention']);
 const VERB = {
   up_next: 'queued', building: 'started', needs_you: 'asked you', ready: 'staged', to_push: 'staged', pull_request: 'staged',
   pr_ready: 'staged', needs_attention: 'staged', in: 'landed', failed: 'failed', interrupted: 'stopped', stopped: 'stopped', discarded: 'discarded',
+  landing: 'checked', waiting_to_land: 'checked',
 };
 const STEP_LABELS = Object.freeze({ install: 'install', work: 'do the work', check: 'run the checks', stage: 'stage it for review' });
 const NOTE_GONE = 'its note is gone from issues.md';
+/** Run statuses that mean a try is on its copy right now: retire refuses while any is (project-copies.ts). */
+const ON_COPY = new Set(['queued', 'preparing', 'installing', 'running', 'checking', 'verifying', 'merging', 'awaiting_input']);
 
 /** A GitHub-mode run: bound to a pull request flow, or started in a project whose workflow is GitHub's. */
 const githubRun = run => run.github?.mode === 'github' || run.workflowMode === 'github';
 
-/** A run's status → the state of its try, alone (§4.1, §4.2). null: superseded (an earlier try) or unknown. */
-function runState(run) {
+/** A run's status → the state of its try, alone (§4.1, §4.2; BUILDS-AS-COPIES §4.2 for a copy's).
+    null: superseded (an earlier try) or unknown. */
+function runState(run, ctx = null) {
   const base = Object.hasOwn(RUN_STATES, status(run)) ? RUN_STATES[status(run)] : null;
+  if (str(run.copyId)) return copyRunState(run, base, ctx);
   if (base !== 'ready' || !githubRun(run)) return base;
   for (const [flag, state] of GITHUB_STAGED) if (run.github?.[flag] === true) return state;
   return 'ready';
+}
+/** A copy's try (COPY_RUN_STATES): staged is landing — it lands on its own once its checks pass — or waiting
+    to land while its copy plays; shipped is in, in main; on a copy that is gone and never shipped, discarded. */
+function copyRunState(run, base, ctx) {
+  if (base === null) return null;
+  if (isRecord(run.shipped)) return 'in';
+  if (ctx?.copiesRead && !ctx.liveById.has(run.copyId)) return 'discarded';
+  if (base === 'ready') return run.landing?.state === 'waiting' ? 'waiting_to_land' : 'landing';
+  return base;
 }
 /** When a try landed: a GitHub merge's own time (the run keeps its staging endedAt), else endedAt. */
 const landedAt = run => iso(run.remoteMerge?.mergedAt) || iso(run.remoteMerge?.at) || iso(run.endedAt) || iso(run.startedAt);
@@ -137,7 +160,8 @@ export function parseDiffstat(diffstat) {
 
 /** §3.3: by id, the live record winning for what the events carry; the read's allowedActions, preview
     and currentActivity only while the two agree on the status (else null: not known yet). */
-const LIVE_WINS = ['status', 'endedAt', 'summary', 'verification', 'commitSha', 'diffstat', 'github'];
+// landing and shipped too (phase 2): a landing that finished clears run.landing, and the read must not bring it back
+const LIVE_WINS = ['status', 'endedAt', 'summary', 'verification', 'commitSha', 'diffstat', 'github', 'landing', 'shipped'];
 const FROM_READ = ['allowedActions', 'preview', 'currentActivity'];
 export function mergeRuns(liveRuns, sectionRuns) {
   const live = (Array.isArray(liveRuns) ? liveRuns : []).filter(run => isRecord(run) && typeof run.id === 'string');
@@ -195,10 +219,39 @@ export function conversationsFor(threads, { activeId = null, liveText = null, pr
   });
 }
 
+/* ------------------------------------------------------------------------------------------ + New build's names */
+
+/** What the field's words become before they are checked or sent: trimmed, lowercase, spaces and
+    underscores to dashes ("Dev 2" → "dev-2"). */
+export function normalizeCopyName(text) {
+  return str(text).trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+/** 'dev', then 'dev1', 'dev2' … — the first that no live copy has. */
+export function nextCopyName(taken) {
+  const used = new Set((Array.isArray(taken) ? taken : []).map(normalizeCopyName));
+  if (!used.has(COPY.first)) return COPY.first;
+  for (let n = 1; ; n++) if (!used.has(COPY.first + n)) return COPY.first + n;
+}
+const NAME = new RegExp(COPY.namePattern);
+/** '' when a new copy may be called this, else the words why not (the daemon refuses the same, §2.3). The
+    name is normalized first, so the words say the name as it would be made. `taken`: the live copies' names. */
+export function copyNameProblem(name, taken) {
+  const list = (Array.isArray(taken) ? taken : []).map(normalizeCopyName), value = normalizeCopyName(name);
+  if (!value) return WORDS.copy.nameEmpty;
+  if (value.length > COPY.nameMax) return WORDS.copy.nameLong;
+  if (!NAME.test(value)) return WORDS.copy.nameShape;
+  if (COPY.reserved.includes(value)) return fill(WORDS.copy.nameReserved, { name: value });
+  if (list.includes(value)) return fill(WORDS.copy.nameTaken, { name: value });
+  if (list.length >= COPY.limit) return WORDS.copy.tooMany;
+  return '';
+}
+
 /* ------------------------------------------------------------------------------------------ the project */
 
-/** One read of the input, shared by buildMain and ticketOf. */
+const nat = value => Number.isSafeInteger(value) && value > 0 ? value : 0;
+/** One read of the input, shared by every build and ticket. */
 function contextOf(input = {}) {
+  input = isRecord(input) ? input : {};
   const project = isRecord(input.project) ? input.project : {};
   const name = str(project.name);
   const runs = mergeRuns(input.runs, input.sectionRuns).filter(run => { const owner = run.game || run.project; return !owner || !name || owner === name; });
@@ -206,18 +259,35 @@ function contextOf(input = {}) {
   const list = ['ready', 'loading', 'unavailable'].includes(input.list) ? input.list : input.issues ? 'ready' : 'loading';
   const connection = isRecord(project.github) ? project.github : null;
   const githubMode = connection?.workflowMode === 'github';
-  const newest = runs.filter(run => str(run.targetBranch)).sort((a, b) => (ms(b.startedAt) || 0) - (ms(a.startedAt) || 0))[0];
+  // main's branch is where main's runs land: a copy's run lands on the copy (§9.3 — it would rename main nibbi/copy/dev)
+  const newest = runs.filter(run => !str(run.copyId) && str(run.targetBranch)).sort((a, b) => (ms(b.startedAt) || 0) - (ms(a.startedAt) || 0))[0];
   const branch = (githubMode && str(connection.integrationBranch)) || str(newest?.targetBranch) || str(project.targetBranch) || str(project.branch) || MAIN;
   const now = Number.isFinite(input.now) ? input.now : NaN;
   const maxConcurrent = Number.isSafeInteger(input.maxConcurrent) && input.maxConcurrent > 0 ? input.maxConcurrent : 2;
+  const check = { command: str(project.check), real: realCheck(project.check) };
+  // the copies read: null until it lands (a copy's improvements are held back until then)
+  const copiesRead = isRecord(input.copies) && Array.isArray(input.copies.copies) ? input.copies : null;
+  const seenNames = new Set();
+  const copies = copiesRead ? copiesRead.copies.filter(c => {
+    if (!isRecord(c) || typeof c.id !== 'string' || !c.id || c.status === 'retired' || !str(c.name) || seenNames.has(c.name)) return false;
+    seenNames.add(c.name); return true;
+  }) : [];
+  const liveById = new Map(copies.map(c => [c.id, c]));
+  const copyNames = new Map(copies.map(c => [c.id, c.name]));
+  for (const r of Array.isArray(copiesRead?.retired) ? copiesRead.retired : []) if (isRecord(r) && str(r.id) && !copyNames.has(r.id) && str(r.name)) copyNames.set(r.id, r.name);
+  for (const s of Array.isArray(copiesRead?.ships) ? copiesRead.ships : []) if (isRecord(s) && str(s.copyId) && !copyNames.has(s.copyId) && str(s.name)) copyNames.set(s.copyId, s.name);
+  // why no copy can be made or changed here: the daemon's read, else what the client can tell on its own
+  const disabled = copiesRead ? (['github', 'no_check'].includes(copiesRead.disabled) ? copiesRead.disabled : '') : githubMode ? 'github' : !check.real ? 'no_check' : '';
   return {
     name, project, runs, items, list, branch, now, maxConcurrent, busy: input.busy === true, demo: input.demo === true,
-    revision: str(input.issues?.revision), play: isRecord(input.play) ? input.play : null,
-    check: { command: str(project.check), real: realCheck(project.check) },
+    revision: str(input.issues?.revision), play: isRecord(input.play) ? input.play : null, check,
     github: connection ? { mode: githubMode ? 'github' : 'local', repository: str(connection.repository) || null,
       integrationBranch: str(connection.integrationBranch) || null, releaseBranch: str(connection.releaseBranch) || null } : null,
+    copiesRead, copies, liveById, copyNames, disabled,
+    limit: Number.isSafeInteger(copiesRead?.limit) && copiesRead.limit > 0 ? copiesRead.limit : COPY.limit,
   };
 }
+const copyName = (ctx, id) => ctx.copyNames.get(id) || 'the copy';
 
 const byStart = tries => tries.map((run, i) => ({ run, i })).sort((a, b) => (ms(a.run.startedAt) || 0) - (ms(b.run.startedAt) || 0) || a.i - b.i).map(x => x.run);
 const lastWhere = (list, test) => { for (let i = list.length - 1; i >= 0; i--) if (test(list[i])) return list[i]; return null; };
@@ -247,7 +317,7 @@ function collect(ctx, goneIssue = null) {
 
 /** §4.3: an issue's state is its latest try's, with the item's own rules on top. */
 function issueRecord(ctx, id, item, index, tries, gone) {
-  const states = tries.map(run => ({ run, state: runState(run) }));
+  const states = tries.map(run => ({ run, state: runState(run, ctx) }));
   const latest = lastWhere(states, t => t.state !== null), merged = lastWhere(states, t => t.state === 'in');
   let state, basis = latest, fromIssue = false, context = '';
   if (item && item.done === true) {
@@ -272,7 +342,7 @@ function issueRecord(ctx, id, item, index, tries, gone) {
 }
 /** §4.4: a free-text run's retry chain. */
 function runRecord(ctx, root, rootRun, tries) {
-  const states = tries.map(run => ({ run, state: runState(run) })), latest = lastWhere(states, t => t.state !== null);
+  const states = tries.map(run => ({ run, state: runState(run, ctx) })), latest = lastWhere(states, t => t.state !== null);
   const first = rootRun || tries[0];
   const orphaned = !!ctx.items && tries.some(run => issueIdsOf(run).length);   // its issue left issues.md
   return finish(ctx, { id: ID_PREFIX.run + root, kind: 'run', issueId: null, item: null, index: Infinity, tries,
@@ -286,11 +356,43 @@ function finish(ctx, rec) {
     id: rec.id, kind: rec.kind, title: rec.title, state, word: STATE_WORDS[state], tone: STATE_TONES[state], live: LIVE_STATES.includes(state),
     group: groupOf(state), context: rec.context, when,
     reason: ['failed', 'interrupted', 'stopped'].includes(state) && rec.basis ? reasonOf(rec.basis) : '',
-    issueId: rec.issueId, runIds: rec.tries.map(run => run.id), latestRunId: rec.latest?.id ?? null, order: 0,
+    issueId: rec.issueId, runIds: rec.tries.map(run => run.id), latestRunId: rec.latest?.id ?? null, order: 0, build: MAIN,
   };
   rec.at = ms(when?.at);
   return rec;
 }
+
+/** Which build an improvement lives in (BUILDS-AS-COPIES §4.2): its latest try — the record's basis, else its
+    latest — decides; with no try at all, the issue's own copy (issue.create with a copyId). Sets rec.build
+    ('main' | a copy's name), rec.copyId (its live copy's id, else null), rec.held (its copy is not read yet:
+    drawn nowhere, counted nowhere), rec.shippedFrom / rec.retiredFrom (the copy's name, for the words). */
+function settle(ctx, rec) {
+  const basis = rec.basis || rec.latest;
+  const copyId = basis ? str(basis.copyId) : str(rec.item?.copyId);
+  Object.assign(rec, { build: MAIN, copyId: null, held: false, shippedFrom: '', retiredFrom: '' });
+  if (copyId && !ctx.copiesRead) rec.held = true;
+  else if (copyId && basis && isRecord(basis.shipped)) {
+    // it went to main when its copy shipped: in main, "shipped from dev", at the ship's time
+    rec.shippedFrom = copyName(ctx, copyId);
+    if (rec.state === 'in') {
+      const at = iso(basis.shipped.at) || landedAt(basis);
+      rec.vm.when = at ? { verb: 'shipped', at } : null;
+      rec.vm.context = fill(WORDS.copy.shippedContext, { name: rec.shippedFrom });
+    }
+  } else if (copyId && ctx.liveById.has(copyId)) {
+    rec.build = ctx.liveById.get(copyId).name; rec.copyId = copyId;
+    if (rec.state === 'waiting_to_land') { rec.vm.when = null; rec.vm.context = fill(WORDS.copy.landsAfterPlay, { name: rec.build }); }
+  } else if (copyId && basis) {
+    // its copy was retired before it shipped: back in main, settled (an issue is up next again, phase 1's rule)
+    rec.retiredFrom = copyName(ctx, copyId);
+    if (['discarded', 'up_next'].includes(rec.state)) { rec.vm.context = fill(WORDS.copy.retiredBefore, { name: rec.retiredFrom }); if (rec.state === 'discarded') rec.vm.when = null; }
+  }
+  rec.vm.build = rec.build;
+  rec.at = ms(rec.vm.when?.at);
+  return rec;
+}
+/** Every improvement, placed in its build. */
+const placed = (ctx, goneIssue = null) => collect(ctx, goneIssue).map(rec => settle(ctx, rec));
 
 /* ------------------------------------------------------------------------------------------ order */
 
@@ -330,37 +432,247 @@ function badgeOf(byState) {
   return { text: '', tone: 'quiet' };
 }
 
-/** Main, the one build of phase 1, holding every improvement (§3.1, §4). */
-export function buildMain(input) {
-  const ctx = contextOf(input);
-  let records = collect(ctx);
+/** One build's improvements (§3.1): ordered by GROUPS, counted, badged. `records` are the build's own. */
+function contents(ctx, records) {
   // issues.md unread or unreadable: its own up-next rows are not known to be true; queued runs still are (§2.1.3).
   if (ctx.list !== 'ready') records = records.filter(rec => !(rec.kind === 'issue' && rec.fromIssue && rec.state === 'up_next'));
   const groups = ordered(records), of = id => groups.get(id) || [];
   const byState = Object.fromEntries(STATES.map(state => [state, records.filter(rec => rec.state === state).length]));
   const landed = of('in'), windowStart = ctx.now - BAR_LIMITS.inWindowMs;
   const counts = {
-    waiting: of('waiting').length, needsYou: byState.needs_you, ready: byState.ready, building: byState.building, upNext: byState.up_next,
+    waiting: of('waiting').length, needsYou: byState.needs_you, ready: byState.ready, building: of('building').length, upNext: byState.up_next,
     in: landed.length, inToday: landed.filter(rec => Number.isFinite(rec.at) && rec.at >= windowStart).length,
     failed: byState.failed, interrupted: byState.interrupted,
   };
-  const badge = badgeOf(byState);
-  const play = playOf(ctx);
   const improvements = GROUPS.flatMap(group => (group.id === 'in' ? of('in').slice(0, PAGE_LIMITS.inKept) : of(group.id)).map(rec => rec.vm));
+  return { records, of, byState, counts, badge: badgeOf(byState), improvements, settled: of('settled').slice(0, PAGE_LIMITS.settledKept).map(rec => rec.vm) };
+}
+/** What a build wants from you: its badge when it is attention or error; else "N building" (BADGE's last row,
+    tone active — the toggle shows it, the rollup does not); else nothing. */
+const attentionOf = badge => ATTENTION_TONES.includes(badge.tone) || badge.tone === 'active' ? { ...badge } : { text: '', tone: 'quiet' };
+const history = rows => rows.filter(row => row.at).sort((a, b) => safe(desc(ms(a.at), ms(b.at)))).slice(0, 30);
+const LANDED_RUN = run => status(run) === 'merged';
+
+/** Main (§3.1, §4; BUILDS-AS-COPIES §4.2): what ships. `full` adds the phase-2 keys to the two objects phase 1's
+    suite pins whole — blocked (ship · catchUp · retire) and play (stops · kind); every other phase-2 field is
+    always there, neutral. `copies`: the live copies' BuildVMs, for "copies of main" and what main's Play stops. */
+function mainVM(ctx, records, copies, full) {
+  const c = contents(ctx, records);
+  const play = playOf(ctx);
+  const playingCopy = copies.find(b => b.play.running);
+  if (full) Object.assign(play, { stops: playingCopy ? playingCopy.name : '', kind: ['server', 'url', 'none'].includes(ctx.play?.kind) ? ctx.play.kind : play.playable ? 'server' : 'none' });
+  const line = ctx.branch === MAIN ? WORDS.mainLine : fill(WORDS.mainLineOther, { branch: ctx.branch });
+  const blocked = {
+    start: ctx.demo ? WORDS.demoStart : ctx.busy ? WORDS.busy : '',
+    queue: ctx.demo ? WORDS.demoChange : ctx.list !== 'ready' || !ctx.revision ? WORDS.noList : '',
+    play: play.blocked,
+  };
+  if (full) Object.assign(blocked, { ship: WORDS.copy.mainShips, catchUp: '', retire: '' });
+  // what landed in main, and one row per ship into it from a copy ("dev shipped 2")
+  const landed = c.of('in').filter(rec => rec.vm.when?.verb === 'landed').map(rec => ({ kind: 'landed', at: rec.vm.when.at, text: rec.vm.title, tone: 'pass', improvementId: rec.id, sha: str(rec.basis?.commitSha) }));
+  const ships = (Array.isArray(ctx.copiesRead?.ships) ? ctx.copiesRead.ships : []).filter(isRecord).map(s => ({
+    kind: 'shipped', at: iso(s.at), text: fill(WORDS.copy.shippedLine, { name: str(s.name) || copyName(ctx, str(s.copyId)), n: Array.isArray(s.runIds) ? s.runIds.length : 0 }),
+    tone: 'pass', improvementId: null, sha: str(s.sha) }));
   return {
-    id: MAIN, name: MAIN, branch: ctx.branch,
-    line: ctx.branch === MAIN ? WORDS.mainLine : fill(WORDS.mainLineOther, { branch: ctx.branch }),
-    // What the project wants from you: the badge when it is attention or error; else "N building" (BADGE's
-    // last row, tone active — the toggle shows it, the rollup does not); else nothing.
-    word: 'live', badge, attention: ATTENTION_TONES.includes(badge.tone) || badge.tone === 'active' ? { ...badge } : { text: '', tone: 'quiet' },
-    counts, play, check: { ...ctx.check }, github: ctx.github, improvements,
-    settled: of('settled').slice(0, PAGE_LIMITS.settledKept).map(rec => rec.vm), list: ctx.list,
-    blocked: {
-      start: ctx.demo ? WORDS.demoStart : ctx.busy ? WORDS.busy : '',
-      queue: ctx.demo ? WORDS.demoChange : ctx.list !== 'ready' || !ctx.revision ? WORDS.noList : '',
-      play: play.blocked,
+    vm: {
+      id: MAIN, name: MAIN, kind: 'main', copyId: null, branch: ctx.branch, line,
+      word: 'live', state: 'live', tone: 'quiet', live: false,
+      note: line.startsWith('live · ') ? line.slice('live · '.length) : line, count: play.running ? WORDS.copy.playing : '', detail: '', copyLine: line,
+      ahead: null, behind: null, head: '', status: 'live', health: 'ok', healthWords: '', verified: null, checks: [], madeAt: null, madeFrom: null,
+      badge: c.badge, attention: attentionOf(c.badge), counts: c.counts, play, check: { ...ctx.check }, github: ctx.github,
+      improvements: c.improvements, settled: c.settled, list: ctx.list, blocked, ship: null, catchUp: null, retire: null,
+      history: history([...landed, ...ships]),
+      copies: copies.map(b => ({ name: b.name, copyId: b.copyId, word: b.word, tone: b.tone, live: b.live, note: b.note })),
+    },
+    byState: c.byState,
+  };
+}
+
+/** A copy's headline (COPY_STATES): the first that holds. */
+function headlineOf({ status, health, counts, behind, playedAfterLanding }) {
+  if (status === 'creating') return 'making';
+  if (['broken', 'retiring', 'shipping', 'catching_up'].includes(status)) return status;
+  if (health === 'missing') return 'missing';
+  if (health === 'moved' || health === 'dirty') return 'changed';
+  if (counts.building) return 'building';
+  if (behind) return 'behind';
+  if (counts.waiting) return 'waiting';
+  if (counts.in) return playedAfterLanding ? 'ready_to_ship' : 'ready_to_play';
+  if (counts.upNext) return 'up_next';
+  return 'nothing';
+}
+
+/** A live copy (BUILDS-AS-COPIES §4.2): the read's git facts, its improvements, the words for what it can do. */
+function copyVM(ctx, copy, records, allRecords, others) {
+  const c = contents(ctx, records), { counts } = c;
+  const name = copy.name, copyId = copy.id, headSha = str(copy.headSha), head = headSha.slice(0, 7);
+  const phase = COPY_STATUS.includes(copy.status) ? copy.status : 'ready';
+  const health = COPY_HEALTH.includes(copy.health) ? copy.health : 'ok';
+  const ahead = nat(copy.ahead), behind = nat(copy.behind);
+  const read = isRecord(copy.play) ? copy.play : {};
+  const running = read.running === true;
+  const kind = ['server', 'url', 'none'].includes(read.kind) ? read.kind : read.playable === true ? 'server' : 'none';
+  const played = ms(copy.playedAt), landedAtMs = ms(copy.lastLandedAt);
+  const playedAfterLanding = Number.isFinite(played) && (!Number.isFinite(landedAtMs) || played >= landedAtMs);
+  const state = headlineOf({ status: phase, health, counts, behind, playedAfterLanding });
+  const word = fill(COPY_STATE_WORDS[state], { n: state === 'building' ? counts.building : counts.upNext, badge: c.badge.text });
+
+  // what it can't do now, and why — in the order the spec's table gives
+  const github = ctx.disabled === 'github' ? fill(WORDS.copy.githubMode, { project: ctx.name || 'this project' }) : '';
+  const notReady = phase !== 'ready' ? fill(WORDS.copy.notReady, { name, status: WORDS.copy.statusWords[phase] || phase.replace(/_/g, ' ') }) : '';
+  const brokenWhy = firstLine(copy.error, 160).replace(/[.\s]+$/, '') || 'something went wrong';
+  const healthWords = phase === 'broken' ? fill(WORDS.copy.broken, { name, error: brokenWhy }) : health !== 'ok' ? fill(WORDS.copy[health], { name }) : '';
+  const unwell = phase === 'ready' && health !== 'ok' ? healthWords : '';
+  const gate = github || notReady || unwell;
+  const building = records.some(rec => rec.vm.group === 'building')
+    || ctx.runs.some(run => run.copyId === copyId && ON_COPY.has(status(run)));
+  const project = ctx.project;
+  const blocked = {
+    start: ctx.demo ? WORDS.demoStart : ctx.busy ? WORDS.busy : gate,
+    queue: ctx.demo ? WORDS.demoChange : gate || (ctx.list !== 'ready' || !ctx.revision ? WORDS.noList : ''),
+    play: ctx.demo ? WORDS.demoPlay : running ? '' : gate || (kind === 'url' ? fill(WORDS.copy.fixedAddress, { project: ctx.name || 'this project' })
+      : read.playable !== true ? fill(WORDS.copy.nothingToPlay, { name }) : ''),
+    ship: ctx.demo ? WORDS.demoChange : github || (!ctx.check.real ? WORDS.copy.noCheck : '') || notReady || unwell
+      || (!counts.in ? fill(WORDS.copy.shipNothing, { name }) : '') || (behind ? fill(WORDS.copy.shipBehind, { name }) : '')
+      || (str(project.branch) && str(copy.base) && project.branch !== copy.base ? fill(WORDS.copy.shipCheckoutOther, { branch: project.branch, base: copy.base }) : '')
+      || (Number(project.dirty) > 0 ? WORDS.copy.shipCheckoutDirty : ''),
+    catchUp: ctx.demo ? WORDS.demoChange : gate || (!behind ? fill(WORDS.copy.catchUpLevel, { name }) : ''),
+    retire: ctx.demo ? WORDS.demoChange : ['creating', 'shipping', 'catching_up', 'retiring'].includes(phase) ? notReady
+      : building ? fill(WORDS.copy.retireBuilding, { name })
+      // its branch or folder moved outside nibbi: retire could drop commits nibbi didn't make, so it waits until it's put back
+      : health === 'moved' ? fill(WORDS.copy.moved, { name }) : '',
+  };
+
+  const verifiedSha = str(copy.lastVerifiedSha);
+  const verified = headSha && verifiedSha === headSha ? { sha: headSha, at: iso(copy.lastVerifiedAt), command: ctx.check.command } : null;
+  const checks = [{ name: ctx.check.command || 'the project check', ok: verified ? true : null,
+    note: verified ? `verified ${[ago(verified.at, ctx.now), 'on ' + head].filter(Boolean).join(' ')}` : `not run on ${name} yet` }];
+  const stops = ctx.play?.running === true && ctx.play.kind !== 'url' ? MAIN : others.find(b => b.copyId !== copyId && b.play?.running)?.name || '';
+  const play = { playable: read.playable === true, running, starting: read.starting === true, url: str(read.url) || null, blocked: blocked.play,
+    note: fill(WORDS.copy.playNote, { name, sha: head }), lastCommit: '', stops, kind, playedAt: str(copy.playedAt) || null };
+
+  const inList = c.of('in').map(rec => rec.vm);
+  const ship = {
+    ready: !blocked.ship, why: blocked.ship, ships: inList, stays: c.improvements.filter(vm => vm.state !== 'in'),
+    lead: blocked.ship || (inList.length === 1 ? WORDS.copy.shipLeadOne : fill(WORDS.copy.shipLeadMany, { n: inList.length })),
+    checks, checksLine: fill(WORDS.copy.shipChecks, { command: ctx.check.command || 'the project check' }),
+    facts: [
+      playedAfterLanding ? fill(WORDS.copy.shipPlayed, { name, ago: ago(copy.playedAt, ctx.now) || 'just now' }) : fill(WORDS.copy.shipNotPlayed, { name }),
+      ...(!behind ? [fill(WORDS.copy.shipLevel, { name })] : []),
+    ],
+    yes: inList.length === 1 ? WORDS.copy.shipYesOne : fill(WORDS.copy.shipYesMany, { n: inList.length }), no: WORDS.copy.shipNo,
+    payload: { copyId, expectedHead: headSha },
+  };
+  const catchUps = (Array.isArray(copy.catchUps) ? copy.catchUps : []).filter(isRecord);
+  const catchWhy = rec => rec.reason === 'conflict' || (Array.isArray(rec.conflicts) && rec.conflicts.length)
+    ? fill(WORDS.copy.catchUpConflict, { name, files: (rec.conflicts || []).slice(0, 3).join(', ') || 'the same files' })
+    : rec.reason === 'checkfail' ? fill(WORDS.copy.catchUpCheckfail, { name })
+    : fill(WORDS.copy.catchUpFailed, { why: firstLine(rec.detail, 160) || rec.reason || 'it was refused' });
+  const lastCatch = catchUps[0];
+  const catchUp = {
+    needed: behind > 0, blocked: blocked.catchUp,
+    confirm: running ? { words: fill(WORDS.copy.catchUpPlaying, { name }), yes: WORDS.copy.catchUpYes, no: WORDS.copy.catchUpNo, armed: false } : null,
+    payload: { copyId, expectedHead: headSha, stopPlay: running },
+    last: lastCatch ? { at: iso(lastCatch.at), ok: lastCatch.ok === true, words: lastCatch.ok === true ? WORDS.copy.caughtUp : catchWhy(lastCatch) } : null,
+  };
+  const unshipped = counts.in;
+  const retire = {
+    blocked: blocked.retire, note: fill(WORDS.copy.retireNote, { name }), unshipped, payload: { copyId, expectedHead: headSha },
+    confirm: {
+      words: fill(WORDS.copy.retireConfirm, { name, unshipped: unshipped === 1 ? WORDS.copy.retireUnshippedOne : unshipped > 1 ? fill(WORDS.copy.retireUnshippedMany, { n: unshipped }) : '' })
+        + (running ? WORDS.copy.retirePlaying : ''),
+      yes: fill(WORDS.copy.retireYes, { name }), no: fill(WORDS.copy.retireNo, { name }), armed: true,
     },
   };
+
+  // its history: made · each try (started / landed / failed) · each ship · each catch-up
+  const improvementOf = new Map(allRecords.flatMap(rec => rec.tries.map(run => [run.id, rec.id])));
+  const tries = ctx.runs.filter(run => run.copyId === copyId && status(run) !== 'superseded').map(run => {
+    const st = runState(run, ctx), title = str(run.title) || firstLine(run.issue) || 'an improvement', improvementId = improvementOf.get(run.id) ?? null;
+    if (LANDED_RUN(run)) return { kind: 'landed', at: iso(run.endedAt) || iso(run.startedAt), text: title, tone: 'pass', improvementId, sha: str(run.commitSha) };
+    if (st === 'failed' || st === 'interrupted') { const why = reasonOf(run); return { kind: 'failed', at: iso(run.endedAt) || iso(run.startedAt), text: why ? `${title} — ${why}` : title, tone: st === 'failed' ? 'error' : 'attention', improvementId, sha: '' }; }
+    return { kind: 'started', at: iso(run.startedAt), text: title, tone: st && LIVE_STATES.includes(st) ? 'active' : 'quiet', improvementId, sha: '' };
+  });
+  const rows = [
+    { kind: 'made', at: iso(copy.createdAt), text: fill(WORDS.copy.made, { sha: str(copy.baseSha).slice(0, 7) }), tone: 'quiet', improvementId: null, sha: str(copy.baseSha) },
+    ...tries,
+    ...(Array.isArray(copy.ships) ? copy.ships : []).filter(isRecord).map(s => ({ kind: 'shipped', at: iso(s.at), text: fill(WORDS.copy.shipped, { n: Array.isArray(s.runIds) ? s.runIds.length : 0 }), tone: 'pass', improvementId: null, sha: str(s.sha) })),
+    ...catchUps.map(rec => rec.ok === true
+      ? { kind: 'caught_up', at: iso(rec.at), text: WORDS.copy.caughtUp, tone: 'pass', improvementId: null, sha: str(rec.to) }
+      : { kind: 'catch_up_failed', at: iso(rec.at), text: catchWhy(rec), tone: 'error', improvementId: null, sha: '' }),
+  ];
+
+  const detail = [
+    state !== 'building' && counts.building ? `${counts.building} building` : '',
+    state !== 'waiting' && counts.waiting ? c.badge.text : '',
+    counts.in ? `${counts.in} in` : '', counts.failed ? `${counts.failed} failed` : '',
+    state !== 'up_next' && counts.upNext ? `${counts.upNext} up next` : '',
+    state !== 'behind' && behind ? 'behind main' : '',
+  ].filter(Boolean);
+  return {
+    vm: {
+      id: name, name, kind: 'copy', copyId, branch: str(copy.branch) || COPY.branchPrefix + name, line: WORDS.copy.line,
+      word, state, tone: COPY_STATE_TONES[state], live: COPY_LIVE.includes(state),
+      note: ahead ? fill(WORDS.copy.lineAhead, { ahead }) : WORDS.copy.line,
+      count: [counts.in ? `${counts.in} in` : '', counts.failed ? `${counts.failed} failed` : '', running ? WORDS.copy.playing : ''].filter(Boolean).join(' · '),
+      detail: [...new Set(detail)].join(' · '), copyLine: fill(WORDS.copy.copyLine, { ahead, behind }),
+      ahead, behind, head, status: phase, health, healthWords, verified, checks,
+      madeAt: iso(copy.createdAt), madeFrom: { branch: str(copy.base) || MAIN, sha: str(copy.baseSha) },
+      badge: c.badge, attention: attentionOf(c.badge), counts, play, check: { ...ctx.check }, github: ctx.github,
+      improvements: c.improvements, settled: c.settled, list: ctx.list, blocked, ship, catchUp, retire,
+      history: history(rows), copies: [],
+    },
+    byState: c.byState,
+  };
+}
+
+/** Every build of the project, from one read of the input: main first, then the live copies oldest first. */
+function buildsOf(ctx, records, full) {
+  const live = records.filter(rec => !rec.held);
+  const partial = ctx.copies.map(copy => ({ copyId: copy.id, name: copy.name, play: { running: isRecord(copy.play) && copy.play.running === true } }));
+  const copies = ctx.copies.map(copy => copyVM(ctx, copy, live.filter(rec => rec.copyId === copy.id), records, partial));
+  const main = mainVM(ctx, live.filter(rec => rec.build === MAIN), copies.map(x => x.vm), full);
+  return { main, copies };
+}
+
+/** The builds card's badge (CARD_BADGE): improvement rows count improvements across every build by state,
+    copy rows count copies by headline ({name} for one). */
+function cardBadgeOf(byState, copies) {
+  for (const [kind, state, one, many, tone] of CARD_BADGE) {
+    if (kind === 'improvement') { const n = byState[state] || 0; if (n) return { text: fill(n === 1 ? one : many, { n }), tone }; }
+    else { const hit = copies.filter(b => b.state === state); if (hit.length) return { text: fill(hit.length === 1 ? one : many, { n: hit.length, name: hit[0].name }), tone }; }
+  }
+  return { text: '', tone: 'quiet' };
+}
+
+/** The bar's builds card (BUILDS-AS-COPIES §4.2): main, then every live copy; the card's badge across them;
+    the project's attention; and what + New build says. */
+export function buildsCard(input) {
+  const ctx = contextOf(input);
+  const { main, copies } = buildsOf(ctx, placed(ctx), true);
+  const builds = [main.vm, ...copies.map(x => x.vm)];
+  const byState = Object.fromEntries(STATES.map(state => [state, [main, ...copies].reduce((n, x) => n + (x.byState[state] || 0), 0)]));
+  const badge = cardBadgeOf(byState, builds.slice(1));
+  const buildingRow = CARD_BADGE.find(row => row[0] === 'improvement' && row[1] === 'building');
+  const attention = ATTENTION_TONES.includes(badge.tone) ? { ...badge }
+    : byState.building ? { text: fill(byState.building === 1 ? buildingRow[2] : buildingRow[3], { n: byState.building }), tone: 'active' } : { text: '', tone: 'quiet' };
+  const taken = ctx.copies.map(copy => copy.name);
+  const why = ctx.disabled === 'github' ? fill(WORDS.copy.githubMode, { project: ctx.name || 'this project' }) : ctx.disabled === 'no_check' ? WORDS.copy.noCheck : '';
+  const blocked = ctx.demo ? WORDS.demoChange : why || (!ctx.copiesRead ? WORDS.reading : taken.length >= ctx.limit ? WORDS.copy.tooMany : '');
+  return { builds, badge, attention, newCopy: { blocked, why, suggested: nextCopyName(taken), taken, limit: ctx.limit } };
+}
+
+/** One build's page: 'main' or a copy's name. null: no live copy has that name (retired, or not read yet). */
+export function buildOf(input, name) {
+  const wanted = str(name) || MAIN;
+  return buildsCard(input).builds.find(b => b.id === wanted) ?? null;
+}
+
+/** Main alone (phase 1's call, kept): it holds only main's improvements. An input with no `copies` key (a
+    phase-1 caller) gets phase 1's blocked and play objects; with one, it is buildsCard(input).builds[0]. */
+export function buildMain(input) {
+  const ctx = contextOf(input);
+  return buildsOf(ctx, placed(ctx), isRecord(input) && Object.hasOwn(input, 'copies')).main.vm;
 }
 
 /* ------------------------------------------------------------------------------------------ the ticket */
@@ -412,23 +724,26 @@ function activityOf(run) {
   const lines = str(run.currentActivity).replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   return cut(lines[lines.length - 1] || '', 120);
 }
-function attemptOf(run, n) {
-  const state = runState(run), s = status(run), live = state !== null && LIVE_STATES.includes(state);
+function attemptOf(run, n, ctx = null) {
+  const state = runState(run, ctx), s = status(run), live = state !== null && LIVE_STATES.includes(state);
   const shown = state ?? 'stopped';
   const word = state ? STATE_WORDS[state] : s === 'superseded' ? 'replaced' : (s.replace(/_/g, ' ') || 'unknown');
   const files = parseDiffstat(run.diffstat), github = githubOf(run);
   const tabs = ['log', ...(files.count || str(run.commitSha) ? ['changes'] : []), ...(github || githubRun(run) ? ['github'] : [])];
   const initialTab = (GITHUB_STATES.has(state) || (state === 'ready' && githubRun(run))) && tabs.includes('github') ? 'github'
-    : ['ready', 'in', 'discarded'].includes(state) && tabs.includes('changes') ? 'changes' : 'log';
+    : ['ready', 'landing', 'waiting_to_land', 'in', 'discarded'].includes(state) && tabs.includes('changes') ? 'changes' : 'log';
   const preview = isRecord(run.preview) ? { running: run.preview.running === true, url: str(run.preview.url) || null } : null;
   return {
     runId: run.id, n, status: str(run.status), state: shown, word, tone: state ? STATE_TONES[state] : 'quiet', live,
-    title: str(run.title) || firstLine(run.issue), branch: str(run.branch), target: str(run.targetBranch) || str(run.github?.baseBranch),
-    sha: str(run.commitSha).slice(0, 7), startedAt: iso(run.startedAt) || str(run.startedAt), endedAt: live || state === 'up_next' || state === 'needs_you' ? null : iso(run.endedAt),
+    // a copy's try says the copy's name as its target (nibbi/copy/dev is the daemon's)
+    title: str(run.title) || firstLine(run.issue), branch: str(run.branch),
+    target: (str(run.copyId) && ctx ? ctx.copyNames.get(run.copyId) : '') || str(run.targetBranch) || str(run.github?.baseBranch),
+    // a landing try pulses (it is landing) but its work has ended: only a try still at work has no end yet
+    sha: str(run.commitSha).slice(0, 7), startedAt: iso(run.startedAt) || str(run.startedAt), endedAt: ['building', 'up_next', 'needs_you'].includes(state) ? null : iso(run.endedAt),
     costUsd: Number.isFinite(run.costUsd) ? run.costUsd : null,
     summary: ['failed', 'interrupted', 'stopped'].includes(state) ? '' : str(run.summary),
     reason: ['failed', 'interrupted', 'stopped'].includes(state) ? reasonOf(run) : '',
-    activity: live ? activityOf(run) : '', steps: stepsOf(run), checks: checksOf(run), files, github, preview,
+    activity: state === 'building' ? activityOf(run) : '', steps: stepsOf(run), checks: checksOf(run), files, github, preview,
     allowedActions: Array.isArray(run.allowedActions) ? run.allowedActions.filter(a => typeof a === 'string') : null,
     tabs, initialTab, attemptId: str(run.attemptId) || null,
   };
@@ -439,7 +754,7 @@ const LIST_ACTIONS = new Set(['queueImprovement', 'editImprovement', 'completeIm
 /** §5.2: the words a key says when it can't go now, before anything about the run itself. */
 function gate(ctx, action, payload) {
   const inDemo = REFUSED_IN_DEMO.includes(action) && !(action === 'previewRun' && payload?.action === 'open');
-  if (ctx.demo && inDemo) return START_ACTIONS.has(action) ? WORDS.demoStart : action === 'previewRun' || action === 'playMain' ? WORDS.demoPlay : WORDS.demoChange;
+  if (ctx.demo && inDemo) return START_ACTIONS.has(action) ? WORDS.demoStart : ['previewRun', 'playMain', 'playCopy'].includes(action) ? WORDS.demoPlay : WORDS.demoChange;
   if (ctx.busy && WAITS_FOR_REPLY.includes(action)) return WORDS.busy;
   if (LIST_ACTIONS.has(action) && (ctx.list !== 'ready' || !ctx.revision)) return WORDS.noList;
   return '';
@@ -452,6 +767,16 @@ function key(ctx, action, label, cpKey, payload, { tone = 'seated', confirm = nu
 
 function statusLineOf(ctx, rec, attempts) {
   const { state } = rec.vm, basis = attempts.find(a => a.runId === rec.basis?.id) || null, run = rec.basis;
+  // the build it lives in, by name: main, or the copy ("dev is unchanged")
+  const where = rec.build;
+  if (rec.copyId) {
+    if (state === 'landing') return fill(WORDS.copy.landing, { name: where });
+    // waiting on the copy: its preview plays (the words say so), or a ship or catch-up holds it a moment
+    if (state === 'waiting_to_land') return run?.landing?.reason === 'busy' ? fill(WORDS.copy.landing, { name: where }) : fill(WORDS.copy.waitingToLand, { name: where });
+    if (state === 'in') return fill(WORDS.copy.inCopy, { name: where, when: since(landedAt(run), ctx.now) || 'just now' });
+  }
+  if (rec.shippedFrom && state === 'in') return fill(WORDS.copy.shippedFrom, { name: rec.shippedFrom, when: since(run?.shipped?.at || landedAt(run), ctx.now) || 'just now' });
+  if (rec.retiredFrom && state === 'discarded') return fill(WORDS.copy.retiredBefore, { name: rec.retiredFrom });
   if (state === 'up_next') {
     if (rec.fromIssue) return 'it waits here until you start it — nothing builds it on its own';
     return ctx.maxConcurrent === 1 ? 'queued — it starts when its one slot frees' : `queued — it starts when one of the ${ctx.maxConcurrent} slots frees`;
@@ -480,9 +805,9 @@ function statusLineOf(ctx, rec, attempts) {
     const when = since(landedAt(run), ctx.now);
     return [`in ${MAIN}${when ? ' since ' + when : ''}`, basis && `landed with try ${basis.n}`].filter(Boolean).join(' · ');
   }
-  if (state === 'failed') return `${rec.vm.reason || 'it failed'} — ${MAIN} is unchanged`;
+  if (state === 'failed') return `${rec.vm.reason || 'it failed'} — ${where} is unchanged`;
   if (state === 'interrupted') return 'the backend stopped mid-run — its work is kept; try again when you’re ready';
-  if (state === 'stopped') return `you stopped it — ${MAIN} is unchanged`;
+  if (state === 'stopped') return `you stopped it — ${where} is unchanged`;
   if (state === 'discarded') return 'you discarded it — its branch and worktree are kept';
   if (state === 'done') return 'marked done in issues.md';
   return '';
@@ -494,12 +819,14 @@ function actionsOf(ctx, rec, attempts) {
   const latest = attempts.find(a => a.runId === rec.basis?.id) || attempts[attempts.length - 1] || null;
   const runId = latest?.runId, allowed = latest?.allowedActions ?? null, known = Array.isArray(allowed);
   const may = name => known && allowed.includes(name);
-  const target = latest?.target || ctx.branch, title = rec.vm.title, ask = () => add(key(ctx, 'talkAbout', WORDS.keys.ask, 'ask', { improvementId: rec.id }));
+  // a copy's try says the copy's name: "dev is unchanged"
+  const target = (rec.copyId && rec.build) || latest?.target || ctx.branch, title = rec.vm.title, ask = () => add(key(ctx, 'talkAbout', WORDS.keys.ask, 'ask', { improvementId: rec.id }));
   const gated = (name, action, label, cpKey, payload, opts = {}) => {   // drawn only when the run allows it; null → drawn, waiting on the read
     if (known && !may(name)) return null;
     return add(key(ctx, action, label, cpKey, payload, { ...opts, blocked: known ? opts.blocked || '' : WORDS.reading }));
   };
-  const retry = () => add(key(ctx, 'retryRun', WORDS.keys.retry, 'retry', { runId }, { tone: 'ink' }));
+  // a try on a copy that was retired can't be tried again there (the daemon refuses it)
+  const retry = () => add(key(ctx, 'retryRun', WORDS.keys.retry, 'retry', { runId }, { tone: 'ink', blocked: rec.retiredFrom ? fill(WORDS.copy.retiredBefore, { name: rec.retiredFrom }) : '' }));
   const stop = () => add(key(ctx, 'stopRun', WORDS.keys.stop, 'stop', { runId }, { confirm: { words: fill(WORDS.confirm.stop, { n: latest?.n ?? 1, branch: target }), yes: WORDS.keys.stopYes, no: WORDS.keys.stopNo, armed: true } }));
   const discard = (words = WORDS.confirm.discard) => gated('run.discard', 'discardRun', WORDS.keys.discard, 'discard', { runId }, { confirm: { words: fill(words, { title, n: latest?.n ?? 1 }), yes: WORDS.keys.discardYes, no: WORDS.keys.keep, armed: true } });
   const unverified = latest && latest.checks[0]?.ok !== true;
@@ -512,12 +839,25 @@ function actionsOf(ctx, rec, attempts) {
 
   if (state === 'up_next' && rec.fromIssue && rec.item) {
     itemKeys();
-    add(key(ctx, 'buildIssue', WORDS.keys.buildNow, 'build-now', { issueId: rec.issueId }, { tone: 'ink' }));
+    add(key(ctx, 'buildIssue', WORDS.keys.buildNow, 'build-now', rec.copyId ? { issueId: rec.issueId, copyId: rec.copyId } : { issueId: rec.issueId }, { tone: 'ink' }));
   } else if (state === 'up_next' && runId) {
     add(key(ctx, 'stopRun', WORDS.keys.cancelQueued, 'cancel', { runId }));
   } else if (state === 'building' || state === 'needs_you') {
     gated('run.steer', 'steerRun', WORDS.keys.guide, 'guide', { runId, text: '' }, { opens: 'form', tone: state === 'needs_you' ? 'ink' : 'seated' });
     stop();
+  } else if (state === 'landing') {
+    // a copy's try lands on its own once its checks pass: nothing to approve (D5) — play it while it does, or put it away
+    const playing = latest?.preview?.running === true || may('preview.stop'), previewable = playing || may('preview.start');
+    if (!known) add(key(ctx, 'previewRun', WORDS.keys.playRun, 'play-run', { runId, action: 'start' }, { tone: 'ink', blocked: WORDS.reading }));
+    else if (playing) {
+      add(key(ctx, 'previewRun', WORDS.keys.open, 'open-run', { runId, action: 'open' }, { tone: 'ink' }));
+      add(key(ctx, 'previewRun', WORDS.keys.stopPlaying, 'stop-playing', { runId, action: 'stop' }));
+    } else if (previewable) add(key(ctx, 'previewRun', WORDS.keys.playRun, 'play-run', { runId, action: 'start' }, { tone: 'ink' }));
+    discard(openItem ? WORDS.confirm.discardTry : WORDS.confirm.discard);
+  } else if (state === 'waiting_to_land') {
+    // it lands when its copy stops playing: stopping it is the one thing to do
+    if (rec.copyId) add(key(ctx, 'playCopy', fill(WORDS.copyKeys.stopPlayingCopy, { name: rec.build }), 'stop-playing-copy', { copyId: rec.copyId, action: 'stop' }, { tone: 'ink' }));
+    discard(openItem ? WORDS.confirm.discardTry : WORDS.confirm.discard);
   } else if (state === 'ready' && !githubRun(rec.basis)) {
     const playing = latest?.preview?.running === true || may('preview.stop'), previewable = playing || may('preview.start');
     if (!known) add(key(ctx, 'previewRun', WORDS.keys.playRun, 'play-run', { runId, action: 'start' }, { tone: 'ink', blocked: WORDS.reading }));
@@ -555,7 +895,7 @@ function actionsOf(ctx, rec, attempts) {
 
 function factsOf(ctx, rec, attempts) {
   const latest = attempts.find(a => a.runId === rec.basis?.id) || attempts[attempts.length - 1] || null;
-  const live = latest && (latest.live || latest.state === 'needs_you') ? latest : null;
+  const live = latest && ['building', 'needs_you'].includes(latest.state) ? latest : null;   // a landing try has finished its work
   let time = 'not started';
   if (live) time = `running ${span(ctx.now - ms(rec.basis?.latestAttemptStartedAt || rec.basis?.startedAt)) || 'just now'}`;
   else {
@@ -572,7 +912,7 @@ function factsOf(ctx, rec, attempts) {
   }
   const root = rec.tries[0];
   return [
-    { label: 'build', value: MAIN, key: 'fact-build' },
+    { label: 'build', value: rec.build || MAIN, key: 'fact-build' },
     { label: 'asked', value: rec.kind === 'issue' ? 'from issues.md' : ago(root?.startedAt, ctx.now) || 'unknown' },
     { label: 'tries', value: attempts.length ? String(attempts.length) : 'none yet' },
     { label: 'time', value: time },
@@ -591,14 +931,17 @@ function linksOf(item) {
 }
 
 function ticketFrom(ctx, rec) {
-  const attempts = rec.tries.map((run, i) => attemptOf(run, i + 1)), root = rec.tries[0];
+  const attempts = rec.tries.map((run, i) => attemptOf(run, i + 1, ctx)), root = rec.tries[0];
+  const copy = rec.copyId ? ctx.liveById.get(rec.copyId) : null;
   const words = rec.item ? { text: str(rec.item.text) || rec.title, description: str(rec.item.description) } : (() => {
     try { const split = splitImprovementText(root?.issue); return { text: split.title, description: split.description }; }
     catch { return { text: rec.title, description: '' }; }
   })();
   const context = str(rec.latest?.context) || str(root?.context);
   return {
-    improvement: rec.vm, build: MAIN, branch: ctx.branch, statusLine: statusLineOf(ctx, rec, attempts), facts: factsOf(ctx, rec, attempts),
+    improvement: rec.vm, build: rec.build || MAIN, buildKind: copy ? 'copy' : 'main', copyId: copy ? copy.id : null,
+    branch: copy ? str(copy.branch) || COPY.branchPrefix + copy.name : ctx.branch,
+    statusLine: statusLineOf(ctx, rec, attempts), facts: factsOf(ctx, rec, attempts),
     asked: { ...words, context, at: rec.kind === 'run' ? iso(root?.startedAt) : null, source: rec.kind },
     attempts, actions: actionsOf(ctx, rec, attempts), links: linksOf(rec.item), gone: false,
   };
@@ -606,20 +949,28 @@ function ticketFrom(ctx, rec) {
 function goneTicket(ctx, id, words = WORDS.gone) {
   const kind = id.startsWith(ID_PREFIX.run) ? 'run' : 'issue', issueId = kind === 'issue' && id.startsWith(ID_PREFIX.issue) ? id.slice(ID_PREFIX.issue.length) : null;
   const improvement = { id, kind, title: '', state: 'done', word: STATE_WORDS.done, tone: STATE_TONES.done, live: false, group: 'settled', context: '',
-    when: null, reason: '', issueId, runIds: [], latestRunId: null, order: 0 };
-  return { improvement, build: MAIN, branch: ctx.branch, statusLine: words, facts: [], asked: { text: '', description: '', context: '', at: null, source: kind },
+    when: null, reason: '', issueId, runIds: [], latestRunId: null, order: 0, build: MAIN };
+  return { improvement, build: MAIN, buildKind: 'main', copyId: null, branch: ctx.branch, statusLine: words, facts: [], asked: { text: '', description: '', context: '', at: null, source: kind },
     attempts: [], actions: [], links: [], gone: words === WORDS.gone };
 }
 
-/** The ticket page for one improvement (§2.2.1, §4.5). An issue whose note left issues.md while runs
-    still name it renders from those runs; one the unread list can't find yet waits in words. */
+/** The ticket page for one improvement (§2.2.1, §4.5), in the build it lives in. An issue whose note left
+    issues.md while runs still name it renders from those runs; one the unread list can't find yet — or
+    whose copy the client has not read yet — waits in words. */
 export function ticketOf(input, id) {
   const ctx = contextOf(input), wanted = str(id);
-  const records = collect(ctx), found = records.find(rec => rec.id === wanted);
-  if (found) { ordered(records); return ticketFrom(ctx, found); }
+  const records = placed(ctx), found = records.find(rec => rec.id === wanted);
+  const reading = () => {
+    const waiting = goneTicket(ctx, wanted, WORDS.reading);
+    Object.assign(waiting.improvement, { state: 'up_next', word: STATE_WORDS.up_next, tone: STATE_TONES.up_next, group: 'up_next' });
+    return waiting;
+  };
+  if (found?.held) return reading();
+  if (found) { ordered(records.filter(rec => !rec.held && rec.build === found.build)); return ticketFrom(ctx, found); }
   if (wanted.startsWith(ID_PREFIX.issue)) {
     const issueId = wanted.slice(ID_PREFIX.issue.length);
-    const gone = issueId && collect(ctx, issueId).find(rec => rec.id === wanted && rec.gone);
+    const gone = issueId && placed(ctx, issueId).find(rec => rec.id === wanted && rec.gone);
+    if (gone?.held) return reading();
     if (gone) return ticketFrom(ctx, gone);
     if (issueId && ctx.list !== 'ready') {
       // Not read yet (or unreadable): it may well exist. The page says so rather than "gone".

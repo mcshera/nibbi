@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {progressLine} from '../public/lib/margin-ui.js';
 import {GROUPS, STATE_TONES, STATE_WORDS, WORDS} from '../public/lib/control-panel-contract.js';
+import {buildsCard, conversationsFor, copyNameProblem} from '../public/lib/builds-model.js';
 
 // The bar is loaded into the page as a data: module, and a data: module cannot resolve a relative
 // import, so the two modules margin-ui.js imports (./empty.js, ./control-panel-contract.js) are inlined the same way.
@@ -39,6 +40,11 @@ async function harness(page, {extra = '', onAction = 'calls.push({action, id, va
   return errors;
 }
 const frame = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+/** What a held control shows. The press eases in on --t1 and reads as its rest value until a frame is drawn, which a loaded runner can put off past 160ms, so poll (up to 2s) until `prop` leaves `rest`, or matches `want`. */
+const held = (locator, rest, {prop = 'backgroundColor', want = null} = {}) => locator.evaluate((el, [rest, prop, want]) => new Promise(resolve => {
+  const end = performance.now() + 2000;
+  (function look() { const now = getComputedStyle(el)[prop]; if ((want ? new RegExp(want).test(now) : now !== rest) || performance.now() > end) resolve(now); else setTimeout(look, 16); })();
+}), [rest, prop, want]);
 const probeColor = (page, locator, value) => locator.evaluate((el, value) => { const probe = document.createElement('i'); probe.style.color = value; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }, value);
 
 test('progress line reports verified merges without proposing a next goal', () => {
@@ -124,7 +130,7 @@ test('the bar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await page.locator('.project-group').count(), 3);
     assert.equal(await switcher.getAttribute('data-current-project'), 'alpha', 'the switcher names the project the model says is active');
     assert.equal(await switcher.locator('.cp-badge').innerText(), '1 ready to review', 'and says what it wants from you, in words');
-    assert.deepEqual(await page.locator('[data-bar-build]').evaluateAll(els => els.map(el => el.dataset.barBuild)), ['main'], 'one build in phase 1, for the current project only');
+    assert.deepEqual(await page.locator('[data-bar-build]').evaluateAll(els => els.map(el => el.dataset.barBuild)), ['main'], 'a project with no copies draws main alone, for the current project only');
     assert.equal(await page.locator('[data-build-id]').count(), 0, 'the lobby’s hook is nowhere in the bar');
     assert.deepEqual(await page.locator('.cp-group').evaluateAll(els => els.map(el => el.dataset.cpGroup)), ['conversations', 'builds'], 'both groups, pinned open');
     assert.equal(await page.locator('.margin-switch-menu').isVisible(), false, 'the list starts closed');
@@ -527,9 +533,17 @@ test('the builds badge says one fact once, a failed row keeps its reason, and a 
     assert.equal(await builds.locator('.cp-group-head .cp-badge').innerText(), '1 ready to review');
     assert.equal((await builds.locator('.cp-group-head').innerText()).split('1 ready to review').length - 1, 1, 'the header says its fact once');
     assert.equal(await builds.locator('.cp-group-head .cp-badge').getAttribute('data-tone'), 'attention');
-    assert.equal(await builds.locator('.cp-group-head button').count(), 0, 'no + New build in phase 1: + improvement lives inside main');
+    assert.equal(await builds.locator('.cp-group-head button').count(), 0, 'no + New build while the model says nothing about copies (BarProjectVM.newCopy absent): + improvement lives inside main');
     const edge = await builds.locator('.cp-group-head .cp-badge').evaluate(el => Math.round(el.getBoundingClientRect().right - document.querySelector('#workspace-sidebar').getBoundingClientRect().left));
     assert.equal(edge, 207, 'the badge ends on the right-hand edge, like every word under it');
+    // phase 2: with newCopy the header holds exactly one key, + New build, on the trailing column; the badge still ends on 207
+    await page.evaluate(() => { model.projects[0].newCopy = {blocked: '', why: '', suggested: 'dev', taken: [], limit: 5}; ui.update(model); });
+    assert.deepEqual(await builds.locator('.cp-group-head button').evaluateAll(els => els.map(el => el.dataset.cpRole)), ['new-build']);
+    const plus = await builds.locator('[data-cp-role="new-build"]').evaluate(el => { const r = el.getBoundingClientRect(), left = document.querySelector('#workspace-sidebar').getBoundingClientRect().left; return {w: Math.round(r.width), h: Math.round(r.height), centre: Math.round(r.left + r.width / 2 - left)}; });
+    assert.deepEqual(plus, {w: 32, h: 32, centre: 223}, 'a 32px quiet key centred on the trailing column');
+    assert.equal(await builds.locator('.cp-group-head .cp-badge').evaluate(el => Math.round(el.getBoundingClientRect().right - document.querySelector('#workspace-sidebar').getBoundingClientRect().left)), 207, 'and the badge stops at the key');
+    await page.evaluate(() => { delete model.projects[0].newCopy; ui.update(model); });
+    assert.equal(await builds.locator('.cp-group-head button').count(), 0, 'absent again when newCopy is');
     // failed and interrupted: two, so both show; each word on the right-hand edge and its reason under it, never cut
     for (const [id, word, tone] of [['run:f1', 'failed', 'error'], ['run:x1', 'interrupted', 'attention']]) {
       const row = page.locator(`[data-bar-improvement="${id}"]`);
@@ -805,10 +819,9 @@ test('every bar control presses, answers on --t1, is 44px at a touch, and speaks
         const box = await el.boundingBox();
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
-        await page.waitForTimeout(160);   // the press eases in on --t1; read it once it has landed
-        const held = await el.evaluate(el => getComputedStyle(el).backgroundColor);
+        const pressed = await held(el, rest.bg);
         await page.mouse.move(1150, 800); await page.mouse.up();
-        assert.notEqual(held, rest.bg, `${kind} answers a press: ${rest.bg} → ${held}`);
+        assert.notEqual(pressed, rest.bg, `${kind} answers a press: ${rest.bg} → ${pressed}`);
         assert.match(rest.property, /background-color/, `${kind} moves its background in a transition: ${rest.property}`);
         assert.doesNotMatch(rest.property, /\ball\b/, `${kind} never transitions all`);
         assert.equal(rest.duration.split(', ')[rest.property.split(', ').indexOf('background-color')], '0.12s', `${kind} answers on --t1`);
@@ -820,8 +833,8 @@ test('every bar control presses, answers on --t1, is 44px at a touch, and speaks
       const start = page.locator('[data-cp-role="start-now"]');
       const box = await start.boundingBox();
       await page.mouse.move(box.x + 10, box.y + 10); await page.mouse.down();
-      await page.waitForTimeout(200);
-      assert.match(await start.evaluate(el => getComputedStyle(el).transform), /^matrix\(0\.96/, 'start now presses to .96');
+      const scaled = await held(start, null, {prop: 'transform', want: '^matrix\\(0\\.96'});
+      assert.match(scaled, /^matrix\(0\.96/, 'start now presses to .96');
       await page.mouse.move(1150, 800); await page.mouse.up();
       assert.equal(await page.locator('[data-cp-role="up-next"]').evaluate(el => getComputedStyle(el).transitionProperty.includes('transform')), false, 'up next does not scale');
       // one row, one header: two-line rows are 44 at a desk too; every word ends on the right-hand edge
@@ -913,6 +926,427 @@ test('a long project name is cut before the project card’s state word is', {ti
       assert.equal(head.badge, '1 ready to review');
       assert.equal(head.badgeCut, false, `at ${width} the state word is whole: ${JSON.stringify(head)}`);
       assert.equal(head.titleCut, true, `at ${width} the long name gives way instead: ${JSON.stringify(head)}`);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
+/* ================================================================================== phase 2: copies in the bar */
+// docs/BUILDS-AS-COPIES.md §4.3. The VMs are the model's own (builds-model.js buildsCard over a CopiesRead), so the
+// bar is held to what the app will hand it.
+const T0 = Date.now();
+const minsAgo = m => new Date(T0 - m * 60000).toISOString();
+const cid = n => `copy-${String(n).repeat(8)}-${String(n).repeat(4)}-${String(n).repeat(4)}-${String(n).repeat(4)}-${String(n).repeat(12)}`;
+const DEV = cid(1), DEV1 = cid(2), DEV3 = cid(3);
+const sha = c => c.repeat(40);
+const PLAYING = {running: true, starting: false, url: 'http://127.0.0.1:5199/', playable: true, kind: 'server', error: null};
+const copyView = (id, name, over = {}) => ({id, project: 'alpha', name, branch: 'nibbi/copy/' + name, base: 'main', baseSha: sha('a'), worktree: '/w/' + name,
+  headSha: sha('b'), lastVerifiedSha: sha('b'), lastVerifiedAt: minsAgo(60), status: 'ready', createdAt: minsAgo(600), updatedAt: minsAgo(60), lastLandedAt: minsAgo(60),
+  playedAt: null, error: null, ships: [], catchUps: [], intent: null, retiredAt: null, retiredHead: null, ahead: 2, behind: 0, health: 'ok', dirtyFiles: [],
+  play: {running: false, starting: false, url: null, playable: true, kind: 'server', error: null}, ...over});
+const runOf = (id, extra = {}) => ({id, game: 'alpha', project: 'alpha', title: id, issue: id, branch: 'nibbi/fx-' + id, targetBranch: 'main', status: 'merged',
+  startedAt: minsAgo(90), endedAt: minsAgo(80), verification: {status: 'passed', command: 'npm test'}, github: {mode: 'local'}, ...extra});
+const onCopy = (copyId, name, id, extra) => runOf(id, {copyId, targetBranch: 'nibbi/copy/' + name, ...extra});
+/** A BarModel for one project with main, dev (building, 2 in) and dev1 (1 up next, 1 failed; behind when asked). */
+function copiesModel({behind = 0, catchUps = [], devPlay = null, mainPlays = false, github = false, demo = false, busy = false, extra = [], view = null, copies} = {}) {
+  const runs = [
+    runOf('tighten the round timer', {endedAt: minsAgo(300)}),
+    onCopy(DEV, 'dev', 'double-tap on join starts two games', {status: 'running', startedAt: minsAgo(12), latestAttemptStartedAt: minsAgo(12), endedAt: undefined}),
+    onCopy(DEV, 'dev', 'remember the last lobby', {endedAt: minsAgo(120)}),
+    onCopy(DEV, 'dev', 'bigger join code on the tv', {endedAt: minsAgo(360)}),
+    onCopy(DEV1, 'dev1', 'lobby: show who is ready', {status: 'failed', endedAt: minsAgo(40), summary: 'the lobby test timed out'}),
+  ];
+  const issues = {status: 'ready', revision: 'r'.repeat(64), items: [{id: 'q1', text: 'queue music between rounds', title: 'queue music between rounds', done: false, heading: 'alpha issues', description: '', copyId: DEV1}]};
+  const live = copies || [copyView(DEV, 'dev', devPlay ? {play: devPlay, playedAt: minsAgo(1)} : {}), copyView(DEV1, 'dev1', {ahead: 0, behind, catchUps, headSha: sha('a'), lastVerifiedSha: null, lastLandedAt: null}), ...extra];
+  const card = buildsCard({
+    project: {name: 'alpha', branch: 'main', lastCommit: '', check: 'npm test', github: github ? {workflowMode: 'github', integrationBranch: 'v2', repository: 'o/alpha'} : null, dirty: 0},
+    runs, sectionRuns: null, issues, list: 'ready', play: mainPlays ? {running: true, playable: true, url: 'http://127.0.0.1:5173/', kind: 'server'} : {running: false, playable: true, kind: 'server'},
+    maxConcurrent: 2, busy, demo, now: T0,
+    copies: {project: 'alpha', mode: github ? 'github' : 'local', disabled: github ? 'github' : '', limit: 5, main: {branch: 'main', sha: sha('a')}, copies: live, retired: [], ships: [], fetchedAt: T0},
+  });
+  return {projects: [{id: 'alpha', name: 'Alpha', active: true, branch: 'main', mode: 'stage', attention: card.attention,
+    conversations: conversationsFor([{id: 'home', title: 'Home', lastAt: minsAgo(30)}], {activeId: 'home', project: 'alpha'}),
+    builds: card.builds, buildsBadge: card.badge, newCopy: card.newCopy}],
+  projectsLoaded: true, activeProject: 'alpha', view, busy, now: T0, settings: {demo}};
+}
+const put = (page, m) => page.evaluate(m => { window.model = m; ui.update(m); }, m);
+
+test('copies draw under main in order, each row opens its page, its caret folds what is inside it and is remembered', {timeout: 90000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+    const errors = await harness(page);
+    await put(page, copiesModel());
+    const shownBuilds = () => page.locator('[data-bar-build]').evaluateAll(els => els.map(el => el.dataset.barBuild));
+    assert.deepEqual(await shownBuilds(), ['main', 'dev', 'dev1'], 'main first, then the copies');
+    assert.equal(await page.locator('[data-build-id]').count(), 0, 'no data-build-id anywhere');
+    assert.deepEqual(await page.locator('.cp-builds > .cp-build').evaluateAll(els => els.map(el => [el.dataset.build, el.dataset.copyId ?? null, el.classList.contains('cp-copy')])),
+      [['main', null, false], ['dev', 'copy-11111111-1111-1111-1111-111111111111', true], ['dev1', 'copy-22222222-2222-2222-2222-222222222222', true]]);
+    // the row: the branch glyph · name and headline · what it is and its counts
+    const dev = page.locator('.cp-copy[data-build="dev"]'), dev1 = page.locator('.cp-copy[data-build="dev1"]');
+    const devRow = page.locator('[data-bar-build="dev"]');
+    assert.deepEqual(await devRow.evaluate(el => [el.querySelector('.cp-primary').textContent, el.querySelector('.cp-line-1 .cp-word').textContent, el.querySelector('.cp-line-1 .cp-word').dataset.tone, el.querySelector('.cp-line-1 .cp-word').classList.contains('cp-live'),
+      el.querySelector('.cp-note').textContent, el.querySelector('.cp-count').textContent]), ['dev', '1 building', 'active', true, 'copy of main · 2 ahead', '2 in']);
+    assert.equal(await devRow.getAttribute('aria-label'), 'dev, 1 building — copy of main · 2 ahead · 2 in. Open its page');
+    assert.equal(await page.locator('[data-bar-build="dev1"] .cp-line-1 .cp-word').textContent(), '1 up next');
+    await devRow.click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'openBuild', id: 'alpha', value: 'dev'});
+    await page.locator('[data-bar-build="dev1"]').click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'openBuild', id: 'alpha', value: 'dev1'});
+    // inside a copy: one step in, on its own trunk; the improvements that live in it, and none of main's
+    const inside = name => page.locator(`[data-bar-build-body="${name}"] [data-bar-improvement]`).evaluateAll(els => els.map(el => [el.dataset.barImprovement, el.dataset.state]));
+    assert.deepEqual(await inside('dev'), [['run:double-tap on join starts two games', 'building'], ['run:remember the last lobby', 'in'], ['run:bigger join code on the tv', 'in']]);
+    assert.deepEqual(await inside('dev1'), [['issue:q1', 'up_next'], ['run:lobby: show who is ready', 'failed']]);
+    assert.deepEqual(await page.locator('.cp-build[data-build="main"] [data-bar-improvement]').evaluateAll(els => els.map(el => el.dataset.barImprovement)), ['run:tighten the round timer']);
+    assert.deepEqual(await page.locator('[data-bar-build-body="dev"]').evaluate(el => [el.getAttribute('role'), el.getAttribute('aria-label')]), ['group', 'inside dev']);
+    // the caret: unfolded to start, folds, is remembered across a refresh, unfolds again
+    const caret = dev.locator('[data-cp-role="build-disclosure"]');
+    assert.deepEqual([await caret.getAttribute('aria-expanded'), await caret.getAttribute('aria-label'), await caret.getAttribute('title')], ['true', 'Hide what is in dev', 'fold dev']);
+    assert.equal(await caret.getAttribute('aria-controls'), await page.locator('[data-bar-build-body="dev"]').getAttribute('id'));
+    await caret.click();
+    assert.equal(await page.locator('[data-bar-build-body="dev"]').count(), 0, 'folded: nothing inside it is drawn');
+    assert.deepEqual([await caret.getAttribute('aria-expanded'), await caret.getAttribute('title')], ['false', 'show what is in dev']);
+    assert.equal(await caret.evaluate(el => el === document.activeElement), true, 'focus stays on the caret');
+    assert.equal(await page.evaluate(() => calls.filter(c => c.action !== 'openBuild').length), 0, 'folding is the bar’s own: nothing is sent');
+    await put(page, copiesModel());
+    assert.equal(await page.locator('[data-bar-build-body="dev"]').count(), 0, 'remembered across an update');
+    assert.equal(await page.locator('[data-bar-build-body="dev1"]').count(), 1, 'per copy');
+    await caret.click();
+    assert.equal(await page.locator('[data-bar-build-body="dev"]').count(), 1);
+    // the keys: ArrowLeft on a copy's row folds it, ArrowRight unfolds it, then steps inside; ArrowLeft from inside goes to its row
+    await devRow.focus();
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await caret.getAttribute('aria-expanded'), 'false');
+    assert.equal(await devRow.evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await caret.getAttribute('aria-expanded'), 'true');
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.barImprovement), 'run:double-tap on join starts two games');
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await devRow.evaluate(el => el === document.activeElement), true, 'from inside dev, ArrowLeft goes to dev');
+    await page.locator('.cp-build[data-build="main"] [data-cp-role="new-improvement"]').focus();
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await devRow.evaluate(el => el === document.activeElement), true, 'the arrows walk every build’s rows');
+    await page.keyboard.press('ArrowUp');
+    assert.equal(await page.evaluate(() => document.activeElement.closest('.cp-build').dataset.build), 'main');
+    // marking: exactly one row, with a copy's page or one of its tickets open
+    const marked = () => page.locator('.margin-body [aria-current]').evaluateAll(els => els.map(el => [el.dataset.threadId ?? el.dataset.barBuild ?? el.dataset.barImprovement, el.getAttribute('aria-current')]));
+    await page.evaluate(() => { model.view = {project: 'alpha', page: 'build', id: 'dev'}; ui.update(model); });
+    assert.deepEqual(await marked(), [['dev', 'page']]);
+    assert.equal(await page.locator('.cp-copyrow.is-current').count(), 1, 'dev’s whole line lifts, its caret with it');
+    await page.evaluate(() => { model.view = {project: 'alpha', page: 'ticket', id: 'issue:q1'}; ui.update(model); });
+    assert.deepEqual(await marked(), [['issue:q1', 'page']]);
+    // a folded copy unfolds when its page or one of its tickets opens
+    await page.evaluate(() => { model.view = null; ui.update(model); });
+    await dev1.locator('[data-cp-role="build-disclosure"]').click();
+    assert.equal(await page.locator('[data-bar-build-body="dev1"]').count(), 0);
+    await page.evaluate(() => { model.view = {project: 'alpha', page: 'ticket', id: 'run:lobby: show who is ready'}; ui.update(model); });
+    assert.equal(await page.locator('[data-bar-build-body="dev1"]').count(), 1, 'its ticket opened: dev1 unfolds');
+    assert.deepEqual(await marked(), [['run:lobby: show who is ready', 'page']]);
+    // a copy that goes (retired): its row goes, and focus inside it goes to main
+    await page.locator('[data-bar-build="dev1"]').focus();
+    await put(page, copiesModel({copies: [copyView(DEV, 'dev')]}));
+    assert.deepEqual(await shownBuilds(), ['main', 'dev']);
+    assert.equal(await page.locator('[data-bar-build="main"]').evaluate(el => el === document.activeElement), true);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('a copy’s + improvement, play and ship to main, catch up — each sends what it should, and says why when it can’t', {timeout: 90000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+    const errors = await harness(page, {onAction: `calls.push({action, id, value}); if (window.hold) return new Promise((resolve, reject) => { window.release = resolve; window.refuse = reject; });`});
+    await put(page, copiesModel({behind: 1}));
+    const form = page.locator('[data-cp-role="improvement-form"]'), field = form.locator('textarea');
+    const addOn = name => page.locator(`[data-cp-role="new-improvement"][data-build="${name}"]`);
+    // + improvement in dev: the one form moves into dev, says where it lands, and its words carry dev's id
+    assert.equal(await addOn('dev').getAttribute('aria-label'), 'New improvement on dev');
+    await addOn('dev').click();
+    assert.equal(await form.evaluate(el => el.closest('[data-bar-build-body]')?.dataset.barBuildBody), 'dev', 'the form opens inside dev');
+    assert.equal(await field.getAttribute('placeholder'), 'it lands on dev');
+    assert.equal(await form.locator('.cp-form-hint').innerText(), 'start now builds it on dev right away · up next keeps it in dev’s list until you start it');
+    assert.equal(await addOn('dev').getAttribute('aria-expanded'), 'true');
+    assert.equal(await field.evaluate(el => el === document.activeElement), true);
+    await field.fill('the join code blinks');
+    await field.press('Enter');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'startImprovement', id: 'alpha', value: {text: 'the join code blinks', copyId: DEV}});
+    await form.waitFor({state: 'hidden'});
+    assert.equal(await addOn('dev').evaluate(el => el === document.activeElement), true, 'focus back on dev’s + improvement');
+    await addOn('dev1').click();
+    await field.fill('a lobby countdown');
+    await form.locator('[data-cp-role="up-next"]').click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'queueImprovement', id: 'alpha', value: {text: 'a lobby countdown', copyId: DEV1}});
+    // drafts are per build: dev1's words wait while main's form is used, and main's send no copyId
+    await addOn('dev1').click();
+    await field.fill('half-typed on dev1');
+    await addOn('main').click();
+    assert.equal(await form.evaluate(el => el.closest('.cp-build').dataset.build), 'main');
+    assert.equal(await field.inputValue(), '', 'main’s own (empty) draft');
+    assert.equal(await field.getAttribute('placeholder'), WORDS.form.placeholder);
+    await field.fill('main only');
+    await field.press('Enter');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'startImprovement', id: 'alpha', value: {text: 'main only'}}, 'main’s form is phase 1’s: no copyId');
+    await addOn('dev1').click();
+    assert.equal(await field.inputValue(), 'half-typed on dev1', 'dev1’s draft came back');
+    await page.keyboard.press('Escape');
+    assert.equal(await form.isVisible(), false);
+    // folding the copy the form is open in closes it
+    await addOn('dev1').click();
+    await page.locator('.cp-copy[data-build="dev1"] [data-cp-role="build-disclosure"]').click();
+    assert.equal(await form.isVisible(), false);
+    await page.locator('.cp-copy[data-build="dev1"] [data-cp-role="build-disclosure"]').click();
+    // play a copy: start, then stop; one plays at a time, in its title
+    const play = page.locator('.cp-copy[data-build="dev"] [data-cp-role="play-copy"]');
+    assert.deepEqual(await play.evaluate(el => [el.getAttribute('aria-label'), el.title, el.querySelector('[data-on]').textContent, el.getAttribute('aria-pressed')]), ['Play dev', 'play dev', 'play', null]);
+    await page.evaluate(() => { calls.length = 0; });
+    const playWidth = await play.evaluate(el => el.getBoundingClientRect().width);
+    await play.click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'playCopy', id: 'alpha', value: {copyId: DEV, action: 'start'}});
+    await put(page, copiesModel({behind: 1, mainPlays: true}));
+    assert.equal(await play.getAttribute('title'), 'one plays at a time — this stops main');
+    assert.equal(await page.locator('[data-cp-role="play-main"]').getAttribute('title'), 'main is playing — press to stop it');
+    await put(page, copiesModel({behind: 1, devPlay: PLAYING}));
+    assert.deepEqual(await play.evaluate(el => [el.getAttribute('aria-label'), el.title, el.querySelector('[data-on]').textContent, el.getAttribute('aria-pressed')]), ['Stop dev', 'dev is playing — press to stop it', 'playing', 'true']);
+    assert.equal(await play.evaluate(el => el.getBoundingClientRect().width), playWidth, 'play → playing keeps the key’s width (both faces in one cell)');
+    assert.equal(await page.locator('[data-cp-role="play-main"]').getAttribute('title'), 'one plays at a time — this stops dev');
+    assert.match(await page.locator('[data-bar-build="dev"] .cp-count').textContent(), /playing$/);
+    await play.click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'playCopy', id: 'alpha', value: {copyId: DEV, action: 'stop'}});
+    // the key holds while it is out
+    await page.evaluate(() => { window.hold = true; });
+    await play.click();
+    assert.equal(await play.getAttribute('aria-busy'), 'true');
+    await page.evaluate(() => release());
+    await page.waitForFunction(() => !document.querySelector('.cp-copy[data-build="dev"] [data-cp-role="play-copy"]').hasAttribute('aria-busy'));
+    await page.evaluate(() => { window.hold = false; });
+    // ship to main opens dev's page on its confirm; the bar never ships
+    const ship = name => page.locator(`.cp-copy[data-build="${name}"] [data-cp-role="ship-copy"]`);
+    assert.deepEqual(await ship('dev').evaluate(el => [el.disabled, el.title, el.getAttribute('aria-label'), el.textContent]), [false, 'ship dev to main — its page asks first', 'Ship dev to main', 'ship to main']);
+    await ship('dev').click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'openShip', id: 'alpha', value: 'dev'});
+    assert.equal(await page.evaluate(() => calls.some(c => c.action === 'shipCopy')), false);
+    assert.deepEqual(await ship('dev1').evaluate(el => [el.disabled, el.title]), [true, 'nothing to ship yet — no improvement is in dev1']);
+    assert.deepEqual(await page.locator('.cp-copy[data-build="dev1"] .cp-keys-why').evaluate(el => [...el.children].map(p => p.textContent)), ['nothing to ship yet — no improvement is in dev1'], 'why, in words, once');
+    // catch up: behind, the row sends the catch-up straight to the daemon …
+    const catchRow = name => page.locator(`[data-cp-role="catch-up"][data-build="${name}"]`);
+    assert.equal(await catchRow('dev').count(), 0, 'not behind: no row');
+    assert.deepEqual(await catchRow('dev1').evaluate(el => [el.querySelector('.cp-primary').textContent, el.querySelector('.cp-note').textContent, el.disabled]), ['catch up with main', 'main moved on — 1 behind', false]);
+    assert.equal(await page.locator('[data-bar-build-body="dev1"] > :first-child').getAttribute('data-cp-role'), 'catch-up', 'first inside the copy');
+    assert.equal(await page.locator('[data-bar-build="dev1"] .cp-line-1 .cp-word').textContent(), 'main moved on · catch up');
+    await catchRow('dev1').click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'catchUpCopy', id: 'alpha', value: {copyId: DEV1, expectedHead: sha('a'), stopPlay: false}});
+    // … its last failure on line two until the next try …
+    await put(page, copiesModel({behind: 1, catchUps: [{at: minsAgo(2), ok: false, mainSha: sha('f'), from: sha('a'), to: null, reason: 'conflict', detail: 'CONFLICT', conflicts: ['src/lobby.js']}]}));
+    assert.equal(await catchRow('dev1').locator('.cp-note').textContent(), 'main and dev1 both changed src/lobby.js — dev1 stays as it is; ask nibbi to bring them together');
+    // … and while it plays, its page (which asks first)
+    await put(page, copiesModel({copies: [copyView(DEV, 'dev'), copyView(DEV1, 'dev1', {behind: 1, play: PLAYING})]}));
+    await page.evaluate(() => { calls.length = 0; });
+    await catchRow('dev1').click();
+    assert.deepEqual(await page.evaluate(() => calls), [{action: 'openBuild', id: 'alpha', value: 'dev1'}]);
+    // in demo every copy key says so; its row can't catch up and says why on line two
+    await put(page, copiesModel({behind: 1, demo: true}));
+    assert.deepEqual(await play.evaluate(el => [el.disabled, el.title]), [true, WORDS.demoPlay]);
+    assert.deepEqual(await catchRow('dev1').evaluate(el => [el.disabled, el.querySelector('.cp-note').textContent]), [true, WORDS.demoChange]);
+    assert.deepEqual(await page.locator('.cp-copy[data-build="dev"] .cp-keys-why p').allTextContents(), [WORDS.demoPlay, WORDS.demoChange]);
+    await addOn('dev').click();
+    assert.equal(await form.locator('[data-cp-role="start-now"]').isDisabled(), true);
+    assert.equal(await form.locator('.cp-form-note').innerText(), WORDS.demoStart);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('+ New build: the suggested name selected, name problems in words, Enter makes it, focus goes to the new row; the can’t state', {timeout: 90000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+    const errors = await harness(page, {onAction: `calls.push({action, id, value}); if (window.hold && action === 'newCopy') return new Promise((resolve, reject) => { window.release = resolve; window.refuse = reject; });`});
+    await put(page, copiesModel());
+    const plus = page.locator('[data-cp-role="new-build"]'), buildForm = page.locator('[data-cp-role="build-form"]');
+    const name = page.locator('[data-cp-role="build-name"]'), make = page.locator('[data-cp-role="make-build"]'), note = buildForm.locator('.cp-form-note');
+    const focused = l => l.evaluate(el => el === document.activeElement);
+    assert.deepEqual(await plus.evaluate(el => [el.getAttribute('aria-label'), el.title, el.getAttribute('aria-expanded'), el.disabled, el.closest('.cp-group-head') !== null]), ['New build', WORDS.copy.newTitle, 'false', false, true]);
+    assert.equal(await plus.getAttribute('aria-controls'), await buildForm.getAttribute('id'));
+    assert.equal(await buildForm.isVisible(), false);
+    await plus.click();
+    assert.equal(await buildForm.isVisible(), true);
+    assert.equal(await buildForm.evaluate(el => el.previousElementSibling.classList.contains('cp-group-head')), true, 'it opens under the header');
+    assert.equal(await plus.getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(await name.evaluate(el => [el.value, el.selectionStart, el.selectionEnd, el === document.activeElement, el.maxLength, el.getAttribute('autocapitalize'), el.spellcheck]), ['dev2', 0, 4, true, 32, 'off', false], 'the suggested name, selected');
+    assert.equal(await buildForm.locator('.cp-form-label').innerText(), 'name the new build');
+    assert.equal(await buildForm.locator('.cp-form-sub').innerText(), 'a copy of main, as it is now');
+    assert.match(await make.innerText(), /^make it/);
+    assert.equal(await buildForm.locator('.cp-primary-key').count(), 1, 'one ink key');
+    // name problems are said in words before anything is sent; focus stays in the field
+    for (const [typed, words] of [['', WORDS.copy.nameEmpty], ['main', '“main” belongs to the build that ships — pick another'], ['dev', 'there’s already a build called dev'], ['-dev', WORDS.copy.nameShape], ['dév', WORDS.copy.nameShape]]) {
+      await name.fill(typed);
+      await name.press('Enter');
+      assert.equal(await note.innerText(), words, JSON.stringify(typed));
+      assert.equal(await focused(name), true);
+    }
+    assert.equal(await page.evaluate(() => calls.length), 0, 'nothing sent');
+    await name.fill('Try Out');
+    assert.equal(await note.isVisible(), false, 'typing clears the words');
+    // Enter makes it: newCopy with the name as it will be made; the key holds while it goes
+    await page.evaluate(() => { window.hold = true; });
+    await name.press('Enter');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'newCopy', id: 'alpha', value: {name: 'try-out'}});
+    assert.equal(await make.getAttribute('aria-busy'), 'true');
+    // a refusal keeps the name and says the daemon's words
+    await page.evaluate(() => refuse(new Error('a branch called nibbi/copy/try-out is already in the repository')));
+    await note.filter({hasText: 'already in the repository'}).waitFor();
+    assert.equal(await name.inputValue(), 'Try Out');
+    assert.equal(await buildForm.isVisible(), true);
+    assert.equal(await make.getAttribute('aria-busy'), null);
+    // ok: the form closes and clears; focus goes to the new copy's row once it is drawn
+    await make.click();
+    await page.evaluate(() => release());
+    await buildForm.waitFor({state: 'hidden'});
+    assert.equal(await focused(plus), true, 'no row yet: focus waits on +');
+    await put(page, copiesModel({extra: [copyView(DEV3, 'try-out', {status: 'creating', ahead: 0, lastVerifiedSha: null})]}));
+    assert.equal(await page.locator('[data-bar-build="try-out"]').evaluate(el => el === document.activeElement), true, 'then moves to the new row');
+    assert.deepEqual(await page.locator('[data-bar-build="try-out"] .cp-line-1 .cp-word').evaluate(el => [el.textContent, el.classList.contains('cp-live')]), ['making the copy', true], 'it pulses while it is made');
+    await plus.click();
+    assert.equal(await name.inputValue(), 'dev2', 'opened again: the next suggestion');
+    await page.evaluate(() => { window.hold = false; });
+    // Escape closes it, focus back to +; + improvement and + New build are one form at a time
+    await page.keyboard.press('Escape');
+    assert.equal(await buildForm.isVisible(), false);
+    assert.equal(await focused(plus), true);
+    await plus.click();
+    await page.locator('[data-cp-role="new-improvement"][data-build="dev"]').click();
+    assert.equal(await buildForm.isVisible(), false, '+ improvement closed + New build');
+    await plus.click();
+    assert.equal(await page.locator('[data-cp-role="improvement-form"]').isVisible(), false, 'and the other way round');
+    await page.keyboard.press('Escape');
+    // it goes while nibbi answers
+    await put(page, copiesModel({busy: true}));
+    await plus.click();
+    assert.equal(await make.isDisabled(), false);
+    await name.fill('late');
+    await name.press('Enter');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'newCopy', id: 'alpha', value: {name: 'late'}});
+    // the can't state: GitHub mode. The key is drawn, never disabled; its title and the form say why
+    await put(page, copiesModel({github: true}));
+    const githubWords = 'copies are local for now — alpha ships through GitHub pull requests';
+    assert.equal(await plus.getAttribute('title'), githubWords);
+    assert.equal(await plus.isDisabled(), false);
+    await page.evaluate(() => { calls.length = 0; });
+    await plus.click();
+    assert.equal(await buildForm.isVisible(), true);
+    assert.deepEqual([await note.innerText(), await name.isDisabled(), await make.isDisabled(), await name.inputValue()], [githubWords, true, true, '']);
+    assert.equal(await focused(buildForm.locator('.cp-form-x')), true, '× has focus: it is the one thing to do');
+    await buildForm.evaluate(el => el.requestSubmit());
+    assert.equal(await page.evaluate(() => calls.length), 0, 'nothing is sent');
+    await buildForm.locator('.cp-form-x').click();
+    assert.equal(await buildForm.isVisible(), false);
+    // the same can't form for five copies and for demo
+    await put(page, copiesModel({extra: [3, 4, 5].map(n => copyView(cid(n), 'dev' + n))}));
+    await plus.click();
+    assert.deepEqual([await note.innerText(), await name.isDisabled()], [WORDS.copy.tooMany, true]);
+    await page.keyboard.press('Escape');
+    await put(page, copiesModel({demo: true}));
+    await plus.click();
+    assert.equal(await note.innerText(), WORDS.demoChange);
+    await page.keyboard.press('Escape');
+    // the bar's name rule says what the model's copyNameProblem says (the bar imports only the contract)
+    const names = ['', '  ', 'main', 'Master', 'HEAD', 'dev', 'Dev', 'dev 2', 'my_try', '-x', 'x-', 'dév', 'a'.repeat(32), 'ok'];
+    await put(page, copiesModel());
+    await plus.click();
+    for (const typed of names) {
+      await name.fill(typed);
+      await name.press('Enter');
+      const said = await note.isVisible() ? await note.innerText() : '';
+      const expected = copyNameProblem(typed, ['dev', 'dev1']);
+      if (expected) assert.equal(said, expected, JSON.stringify(typed));
+      else assert.equal((await page.evaluate(() => calls.at(-1))).action, 'newCopy', JSON.stringify(typed));
+      if (!expected) { await put(page, copiesModel()); if (!await buildForm.isVisible()) await plus.click(); }
+    }
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('copies at 390 touch: every row and key 44 to press, no sideways scroll; every new control presses on --t1 and speaks lowercase', {timeout: 90000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    {
+      const page = await browser.newPage({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+      const errors = await harness(page);
+      await put(page, copiesModel({behind: 1}));
+      await page.locator('#sidebar-toggle').click();
+      await page.evaluate(() => Promise.all(document.querySelector('#workspace-sidebar').getAnimations().map(a => a.finished.catch(() => {}))));
+      await page.locator('[data-cp-role="new-build"]').click();
+      const small = await page.locator('#workspace-sidebar button, #workspace-sidebar input').evaluateAll(els => els.filter(el => el.getClientRects().length && !el.closest('[hidden]')).map(el => { const r = el.getBoundingClientRect(); return {name: el.getAttribute('aria-label') || el.textContent.trim().slice(0, 24) || el.className, w: Math.round(r.width), h: Math.round(r.height), icon: el.matches('.cp-icon-key, .cp-play')}; }).filter(b => b.h < 44 || (b.icon && b.w < 44)));
+      assert.deepEqual(small, [], 'every visible control in the drawer is 44px to press, icon keys 44 wide too');
+      for (const sel of ['[data-bar-build="dev"]', '.cp-copy[data-build="dev"] [data-cp-role="build-disclosure"]', '.cp-copy[data-build="dev"] [data-cp-role="play-copy"]', '.cp-copy[data-build="dev"] [data-cp-role="ship-copy"]', '[data-cp-role="catch-up"]', '[data-cp-role="new-build"]']) {
+        const box = await page.locator(sel).first().boundingBox();
+        assert.ok(box && box.height >= 44, `${sel} is 44 to press: ${JSON.stringify(box)}`);
+      }
+      const trailing = await page.evaluate(() => { const left = document.querySelector('#workspace-sidebar').getBoundingClientRect().left;
+        return [...document.querySelectorAll('.cp-trail, .sidebar-collapse')].filter(el => el.getClientRects().length).map(el => { const r = el.getBoundingClientRect(); return Math.round(r.left + r.width / 2 - left); }); });
+      assert.deepEqual([...new Set(trailing)], [262], 'the drawer’s trailing column holds the carets and + New build: ' + JSON.stringify(trailing));
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+      assert.equal(await page.locator('.margin-body').evaluate(el => el.scrollWidth <= el.clientWidth), true, 'and none inside the bar');
+      // a copy row puts the drawer away before its page opens
+      await page.keyboard.press('Escape');
+      await page.locator('[data-bar-build="dev"]').click();
+      assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'openBuild', id: 'alpha', value: 'dev'});
+      assert.equal(await page.locator('#workspace-sidebar').getAttribute('aria-hidden'), 'true');
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+    {
+      const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+      const errors = await harness(page);
+      await put(page, copiesModel({behind: 1}));
+      await page.mouse.move(1150, 800);
+      const kinds = {
+        'a copy’s row': '[data-bar-build="dev"]', 'a copy’s caret': '.cp-copy[data-build="dev"] [data-cp-role="build-disclosure"]',
+        'play a copy': '.cp-copy[data-build="dev"] [data-cp-role="play-copy"]', 'ship to main': '.cp-copy[data-build="dev"] [data-cp-role="ship-copy"]',
+        'catch up': '[data-cp-role="catch-up"]', '+ New build': '[data-cp-role="new-build"]', 'a copy’s + improvement': '[data-cp-role="new-improvement"][data-build="dev"]',
+      };
+      for (const [kind, selector] of Object.entries(kinds)) {
+        const el = page.locator(selector).first();
+        await el.scrollIntoViewIfNeeded(); await page.mouse.move(1150, 800); await page.waitForTimeout(160);
+        const rest = await el.evaluate(el => ({bg: getComputedStyle(el).backgroundColor, property: getComputedStyle(el).transitionProperty, duration: getComputedStyle(el).transitionDuration}));
+        const box = await el.boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        const pressed = await held(el, rest.bg);
+        await page.mouse.move(1150, 800); await page.mouse.up();
+        assert.notEqual(pressed, rest.bg, `${kind} answers a press: ${rest.bg} → ${pressed}`);
+        assert.match(rest.property, /background-color/, `${kind} moves its background in a transition`);
+        assert.doesNotMatch(rest.property, /\ball\b/, `${kind} never transitions all`);
+        assert.equal(rest.duration.split(', ')[rest.property.split(', ').indexOf('background-color')], '0.12s', `${kind} answers on --t1`);
+      }
+      assert.deepEqual(await page.evaluate(() => calls), [], 'pressing and letting go elsewhere dispatches nothing');
+      // one right-hand edge and one trailing column, copies included
+      const edges = await page.evaluate(() => { const left = document.querySelector('#workspace-sidebar').getBoundingClientRect().left;
+        return [...document.querySelectorAll('.cp-copy-row .cp-line-1 > .cp-word, .cp-copy-row .cp-line-2 > .cp-word, .cp-group-head .cp-badge')].filter(el => el.getClientRects().length && el.textContent).map(el => Math.round(el.getBoundingClientRect().right - left)); });
+      assert.deepEqual([...new Set(edges)], [207], 'every word of a copy’s row ends on the right-hand edge: ' + JSON.stringify(edges));
+      const trailing = await page.evaluate(() => { const left = document.querySelector('#workspace-sidebar').getBoundingClientRect().left;
+        return [...document.querySelectorAll('.cp-trail')].filter(el => el.getClientRects().length).map(el => { const r = el.getBoundingClientRect(); return Math.round(r.left + r.width / 2 - left); }); });
+      assert.deepEqual([...new Set(trailing)], [223]);
+      const firstWords = await page.evaluate(() => { const left = document.querySelector('#workspace-sidebar').getBoundingClientRect().left;
+        return [...document.querySelectorAll('.cp-copy-row .cp-line-1')].map(el => Math.round(el.getBoundingClientRect().left - left)); });
+      assert.deepEqual([...new Set(firstWords)], [48], 'a copy’s name stands on the words’ edge');
+      // a long headline beside a name takes its own line; the name is never cut
+      assert.equal(await page.locator('[data-bar-build="dev1"] .cp-primary').evaluate(el => el.scrollWidth <= el.clientWidth), true, 'dev1 is whole beside “main moved on · catch up”');
+      assert.equal(await page.locator('[data-bar-build="dev1"] .cp-line-1 .cp-word').evaluate(el => el.scrollWidth <= el.clientWidth), true, 'and so is its headline');
+      // lowercase and spoken: every word and title a copy's controls say
+      const said = await page.evaluate(() => {
+        const out = [];
+        for (const el of document.querySelectorAll('.cp-copy .cp-word, .cp-copy .cp-note, .cp-copy .cp-catch, .cp-copy .cp-build-keys, .cp-copy .cp-keys-why, .cp-copy .cp-add')) if (el.textContent.trim()) out.push(el.textContent.trim());
+        for (const el of document.querySelectorAll('.cp-copy button, [data-cp-role="new-build"]')) if (el.title) out.push(el.title);
+        return out;
+      });
+      for (const words of said) assert.doesNotMatch(words, /[A-Z]/, `the bar speaks lowercase: "${words}"`);
+      // reduced motion: the copy's headline stands still
+      await page.emulateMedia({reducedMotion: 'reduce'});
+      assert.equal(await page.locator('[data-bar-build="dev"] .cp-line-1 .cp-word').evaluate(el => el.getAnimations().length), 0);
+      await page.emulateMedia({reducedMotion: 'no-preference'});
+      assert.equal(await page.locator('[data-bar-build="dev"] .cp-line-1 .cp-word').evaluate(el => el.getAnimations().map(a => a.animationName).join()), 'cp-bar-pulse');
       assert.deepEqual(errors, []);
       await page.close();
     }

@@ -13,6 +13,7 @@ import { scopedPath } from './paths.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
 import { setDispatchNotify, shutdownSessions } from './session.js';
 import { reconcileFixers, shutdownFixers } from './fixer.js';
+import { reconcileCopies, stopCopyWork } from './project-copies.js';
 import { stopPreviews } from './previews.js';
 import { stopProcesses, execute } from './processes.js';
 import { closeToolService } from './tool-service.js';
@@ -40,7 +41,7 @@ export async function startBackend(options: { open?: boolean } = {}): Promise<{ 
   const publicDir = join(root, 'dist', 'ui');
   try {
     if (!existsSync(join(publicDir, 'index.html'))) throw new Error('UI build is missing. Run npm run build.');
-    mkdirSync(config.vaultDir, { recursive: true }); runtime().interruptCommands(); await reconcileFixers();
+    mkdirSync(config.vaultDir, { recursive: true }); runtime().interruptCommands(); await reconcileFixers(); await reconcileCopies();
     for (const name of ['nibbi-fixer-brief', 'nibbi-verify-change']) {
       const directory = join(root, 'skills', name); if (!existsSync(directory)) continue;
       const skill = inspectSkill(directory, 'bundled');
@@ -83,7 +84,7 @@ export async function startBackend(options: { open?: boolean } = {}): Promise<{ 
       if (closing) return; closing = true;
       process.off('SIGTERM', onSignal); process.off('SIGINT', onSignal);
       const closedServers = servers.map(server => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }));
-      await Promise.all([stopGithubCoordinator(), stopPreviews(), stopScheduler(), shutdownSessions(), shutdownFixers(), stopAuth()]);
+      await Promise.all([stopGithubCoordinator(), stopPreviews(), stopScheduler(), shutdownSessions(), shutdownFixers(), stopCopyWork(), stopAuth()]);
       await stopMcpClients(); await stopMcpServer(); await stopProcesses(); await closeToolService(); await Promise.all(closedServers); closeRuntime(); release();
     };
     const onSignal = (): void => { void close().catch(error => { console.error('[nibbi] shutdown:', (error as Error).message); process.exitCode = 1; }); };

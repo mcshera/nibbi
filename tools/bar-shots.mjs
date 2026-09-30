@@ -41,5 +41,25 @@ try {
       await context.close();
     }
   }
+  // A copy under main (docs/BUILDS-AS-COPIES.md §6.5): made on the same backend once main's shots are taken,
+  // with one improvement landed in it, and its build page.
+  const kit = await fixture.enableCopies();
+  await kit.improve(kit.dev.id, 'Say hello on the title screen');
+  for (const [width, height] of [[1180, 820], [390, 844]]) {
+    const context = await browser.newContext({ viewport: { width, height }, hasTouch: width < 900 });
+    const page = await context.newPage();
+    await page.goto(fixture.base + '/?demo=1&nosw=1');
+    await page.waitForFunction(() => window.nibbiApp);
+    if (width < 900) { await page.locator('#sidebar-toggle').click(); await page.waitForTimeout(300); }
+    await page.locator('[data-bar-build="dev"]').waitFor();
+    await page.locator('[data-cp-role="ship-copy"][data-build="dev"]').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${out}copy-bar-${width}x${height}.png` });
+    await page.locator('[data-bar-build="dev"]').click();
+    await page.waitForFunction(() => document.querySelector('#project-workspace .cp-page')?.dataset.cpId === 'dev' && document.querySelector('#project-workspace .cp-page').getAttribute('aria-busy') === 'false');
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${out}copy-page-${width}x${height}.png` });
+    await context.close();
+  }
   console.log('Bar shots written to output/playwright/bar/');
 } finally { await browser?.close(); await fixture.close(); }

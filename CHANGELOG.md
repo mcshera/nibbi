@@ -2,6 +2,44 @@
 
 ## 0.9.0 — Unreleased
 
+### The control panel, phase 2: builds are copies
+
+**A build is a clone of the app.** `+ New build` on the builds card makes one — `dev`, then `dev1` — and
+it is a real one: a branch, `nibbi/copy/dev`, made from main's head and checked out in its own folder
+under the work dir, playable on its own. The bar lists it under main with what it is (`copy of main · 2
+ahead`) and one word for where it stands: making the copy, 1 building, ready to play, ready to ship,
+main moved on · catch up, nothing to ship yet. Its page has its own play, its checks, how it stands
+against main, its improvements and its history.
+
+**Improvements live inside a build.** `+ improvement` in a copy aims the run at it. Once its checks pass
+on the copy's tree it lands there on its own, by a fast-forward inside the copy's folder — main is not
+touched, and there is no review step inside a copy. A failed landing leaves the copy as it was and says
+why.
+
+**Ship to main is the reviewed step.** It asks on the copy's page, listing what goes into main and what
+stays, and sends nothing until its second press. nibbi then runs the checks again on exactly what main
+would become and fast-forwards main where it is checked out — or refuses, changing nothing, when your
+project folder has uncommitted changes, is on another branch, or main moved on (catch up first, so main
+becomes exactly the head you played). The copy stays, level with main, and only now are its
+improvements done: their checkboxes in `issues.md`, their roadmap tasks, the progress count.
+
+**Catch up, retire, one at a time.** When main moves on, a copy says so and catch up brings main's
+newest in, checked the same way; a conflict names the files and changes nothing. Retire asks, armed,
+names what hasn't shipped, and takes the copy's folder and branch off the machine — never forced, and
+not while an improvement is building on it. One build plays at a time: playing a copy stops main's
+preview, and playing main stops the copies'.
+
+**Defaults the owner can change.** An improvement on a copy is done when the copy ships; copies are
+made from main only; five at most; a copy needs a real project check; GitHub-connected projects keep
+copies local for now, and the `+` says so; automation and the lead still build on main
+(`docs/BUILDS-AS-COPIES.md` §1 lists all sixteen).
+
+**Checked.** `daemon/test/project-copies.test.ts` proves the rules in temp repos — main moves only
+through the verified merge, a copy's branch only by `--ff-only` inside its own folder, nothing moves a
+branch from outside, and every refusal leaves main and the copy as they were (26 tests). Eight new
+checks in `tools/control-panel-verify.mjs` drive the real app through it: make dev, land two
+improvements, ship them, catch up, play one at a time, retire, a GitHub-mode project, and 390 touch.
+
 ### The control panel, phase 1
 
 **The bar is a control panel.** It was a switcher, a strip of four glyphs and whatever section the

@@ -1,5 +1,8 @@
 # Control panel — phase 1
 
+Phase 2 — dev, dev1 … as real copies of main — is [BUILDS-AS-COPIES.md](BUILDS-AS-COPIES.md). It extends
+this spec; where the two disagree it wins, and §11 below says what it changed here.
+
 The spec three builders work from in parallel, and the integrator after them. It binds. Where it and
 the lab disagree, this wins; where it is silent, the lab's round six Cards bar and round five Console
 pages win (`design/sidebar-lab/` on branch `design/control-panel-lab`, served read-only from the
@@ -874,3 +877,28 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
 | margins.css `.margin-card-right` ≤899px | the lab's 8px foot | 12px: arrive rises 10px, and the card arrived 2px past a 568px phone |
 | tools/control-panel-verify.mjs | — | paper-garden plays at a URL in its fixture, so ▶ is a live key whose press can be measured (check 11) |
 | tools/kanban-verify.mjs | retire | deleted; its intent is checks 4 and 5 |
+
+## 11. Phase 2
+
+Built on `ui/builds-branches` (draft PR #25, stacked on #24) from [BUILDS-AS-COPIES.md](BUILDS-AS-COPIES.md).
+The builds card now holds main and its **copies**: `+ New build` on its header makes one (`dev`, then
+`dev1` …) — a real branch, `nibbi/copy/<name>`, made from main's head and checked out in its own
+worktree under the work dir. `+ improvement` inside a copy aims the run at it, and once its checks pass
+on the copy's tree it lands there on its own, by `merge --ff-only` inside the copy's worktree. **Ship to
+main**, asked twice on the copy's page, sends the copy's head through the same verified merge main's
+runs use; the copy stays, level with main. Catch up brings main's newest in; retire takes the copy off
+the machine; one build plays at a time. Main's own path is unchanged.
+
+What phase 2 changed here:
+
+| phase 1 | phase 2 |
+|---|---|
+| D9: no header `+` on the builds card | `+ New build` is its one key; the form opens under the header, and in its *can't* state in GitHub mode, without a real check, at five copies and in demo |
+| §3 `buildMain(input)` for the bar and the pages | `buildsCard(input)` (main, then the live copies; the card's badge and attention; `newCopy`); `buildMain` stays for phase-1 callers |
+| §6 `S.projectView.id` is `'main'` on a build page | main or a copy's name, and `intent: 'ship'` for the bar's ship to main |
+| §8 three reads per project | four: the builds and issues sections, `/api/play`, and `/api/project-copies` |
+| an improvement lives in main | in the build its latest try aims at (`copyId`); a copy's improvement is done when the copy ships (D1) |
+
+The decisions phase 2 took (D1–D16, BUILDS-AS-COPIES.md §1) are defaults for the owner to override;
+where the integration departed from that spec is its §10.
+

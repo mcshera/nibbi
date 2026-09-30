@@ -10,10 +10,12 @@ import { parseProjectDocument, pinDocument, planPath, type RoadmapTask } from '.
 import { issueDocument } from './project-issues.js';
 import { editDocuments, readDocument, WorkspaceConflict, type WorkspaceDocument } from './workspace-documents.js';
 import type { GameCfg } from './projects.js';
+import { issueCopy, requireLiveCopy, setIssueCopy, refuse } from './copy-records.js';
+import { connectionFor } from './github-repositories.js';
 
 const projectSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(150);
 const actionSchema = z.enum(['issue.create', 'issue.status', 'issue.edit', 'issue.complete', 'issue.reopen', 'issue.build', 'issue.plan', 'task.create', 'task.edit', 'task.reorder', 'task.build', 'milestone.create', 'milestone.edit', 'milestone.reorder', 'milestone.select']);
-const inputSchema = z.object({ project: projectSchema, action: actionSchema, status: z.enum(['backlog', 'in-progress', 'done']).optional(), expectedRevision: z.string().length(64), id: z.string().min(1).max(150).optional(), title: z.string().trim().min(1).max(1000).optional(), description: z.string().max(40_000).optional(), milestoneId: z.string().max(150).nullable().optional(), ids: z.array(z.string().min(1).max(150)).max(5000).optional(), planRevision: z.string().length(64).optional(), idempotencyKey: z.string().min(1).max(250) }).strict();
+const inputSchema = z.object({ project: projectSchema, action: actionSchema, status: z.enum(['backlog', 'in-progress', 'done']).optional(), expectedRevision: z.string().length(64), id: z.string().min(1).max(150).optional(), title: z.string().trim().min(1).max(1000).optional(), description: z.string().max(40_000).optional(), milestoneId: z.string().max(150).nullable().optional(), ids: z.array(z.string().min(1).max(150)).max(5000).optional(), planRevision: z.string().length(64).optional(), idempotencyKey: z.string().min(1).max(250), copyId: z.string().regex(/^copy-[0-9a-f-]{36}$/).optional() }).strict();
 export type ProjectCommandInput = z.infer<typeof inputSchema>;
 const registry = (): Record<string, GameCfg> => runtime().get('config', 'projects') ?? runtime().get('legacy', 'games.json') ?? {};
 function checkProject(project: string): void { projectSchema.parse(project); if (project !== 'vault' && !registry()[project]) throw new Error('Unknown project'); }
@@ -62,7 +64,9 @@ export function projectSection(project: string, section: string, runSnapshot?: R
   const view = (item: RoadmapTask): Record<string, any> => ({ ...item, line: item.line + 1, title: item.text,
     githubIssueLinks: section === 'issues' ? runtime().list<any>('github-issue-links').filter(link => link.project === project && link.issueId === item.id) : [],
     linkedTaskIds: section === 'issues' ? tasks.filter(task => task.issueIds.includes(item.id)).map(task => task.id) : [],
-    linkedBuilds: runs.filter(run => section === 'issues' ? run.issueIds?.includes(item.id) : run.taskId === item.id) });
+    linkedBuilds: runs.filter(run => section === 'issues' ? run.issueIds?.includes(item.id) : run.taskId === item.id),
+    // Phase 2: the copy an up-next issue was put on, while that copy is live.
+    ...(section === 'issues' ? { copyId: issueCopy(project, item.id) } : {}) });
   const items = parsed.items.map(view);
   const milestones = parsed.milestones.map(milestone => ({ ...milestone, line: milestone.line + 1, tasks: items.filter(item => item.milestoneId === milestone.id) }));
   return { ...base, ...parsed, path: relative(config.vaultDir, doc.path), revision: doc.revision, items, linkedBuildCount: new Set(items.flatMap(item => item.linkedBuilds.map((run: Fixer) => run.id))).size, headings: parsed.headings.map(heading => ({ ...heading, line: heading.line + 1 })), milestones,
@@ -154,6 +158,11 @@ export async function projectCommand(value: unknown, dependencies: ProjectComman
     requireRevision(doc, input.expectedRevision);
     let next = pinDocument(doc.markdown, kind), itemId: string | undefined = input.id, run: unknown, changedPlan = false;
     const action = input.action;
+    if (input.copyId && !['issue.create', 'issue.build'].includes(action)) throw new Error('Only a new or built issue can be aimed at a build');
+    if (action === 'issue.create' && input.copyId) {
+      if (connectionFor(input.project)?.workflowMode === 'github') throw refuse('githubMode', { project: input.project });
+      requireLiveCopy(input.project, input.copyId);
+    }
     if (action === 'issue.create' || action === 'task.create') {
       itemId = randomUUID(); const block = itemBlock(itemId, safeTitle(input.title), input.description ?? '', kind);
       next = kind === 'task' ? insertTask(next, block, input.milestoneId) : next + (next && !next.endsWith('\n\n') ? '\n\n' : '') + block.join('\n') + '\n';
@@ -191,11 +200,14 @@ export async function projectCommand(value: unknown, dependencies: ProjectComman
       if (duplicate) throw new Error('This item already has an active or reviewable build: ' + duplicate.id);
       editDocuments([{ ...doc, next }]);
       const dispatch = dependencies.dispatch ?? (await import('./command-service.js')).executeCommand;
-      const dispatched = await dispatch({ name: 'run.dispatch', projectId: input.project, idempotencyKey: 'project-build:' + input.idempotencyKey, args: { issue: item.text + (item.description ? '\n\n' + item.description : ''), title: item.text, ...(kind === 'task' ? { taskId: item.id } : {}), issueIds } });
+      // The issue's build: the one asked for, else the copy it was put up next on (while that copy is live and the project is local).
+      const copyId = input.copyId ?? (kind === 'issue' && connectionFor(input.project)?.workflowMode !== 'github' ? issueCopy(input.project, item.id) ?? undefined : undefined);
+      const dispatched = await dispatch({ name: 'run.dispatch', projectId: input.project, idempotencyKey: 'project-build:' + input.idempotencyKey, args: { issue: item.text + (item.description ? '\n\n' + item.description : ''), title: item.text, ...(kind === 'task' ? { taskId: item.id } : {}), issueIds, ...(copyId ? { copyId } : {}) } });
       if (!dispatched.ok) throw new Error(dispatched.error?.message ?? 'Build could not be dispatched');
       run = dispatched.data;
     }
     if (!changedPlan && !action.endsWith('.build')) editDocuments([{ ...doc, next }]);
+    if (action === 'issue.create' && input.copyId && itemId) setIssueCopy(input.project, itemId, input.copyId);
     store.emit({ type: 'project.workspace_updated', projectId: input.project, payload: { section, action, itemId } });
     store.emit({ type: 'vault.updated', projectId: input.project, payload: { path: relative(config.vaultDir, doc.path) } });
     if (changedPlan) store.emit({ type: 'vault.updated', projectId: input.project, payload: { path: `plans/${input.project}.md` } });

@@ -1,4 +1,5 @@
 /** The backend owns document parsing, identities, progress and revision checks. */
+import {COPY} from './control-panel-contract.js';
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const sections = ['builds', 'issues', 'plans'];
 export class ProjectDataError extends Error {
@@ -81,4 +82,13 @@ export async function githubCommand(project, name, args = {}, {fetcher, signal, 
   validateProject(project);
   const value = await request('/api/commands', 'GitHub operation', {fetcher, signal, method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({name, args, projectId:project, idempotencyKey})});
   return value.data ?? value;
+}
+
+/** A project's copies (docs/BUILDS-AS-COPIES.md §2.4.2): git facts only — the client groups runs by copyId itself. */
+const COPY_ID = new RegExp(COPY.idPattern);
+export async function loadProjectCopies({project, signal, fetcher} = {}) {
+  validateProject(project);
+  const value = await request(COPY.route + '?project=' + encodeURIComponent(project), 'copies', {signal, fetcher});
+  if (value.project !== project || !Array.isArray(value.copies) || value.copies.some(copy => !record(copy) || copy.project !== project || typeof copy.id !== 'string' || !COPY_ID.test(copy.id))) throw new ProjectDataError('copies', 'The copies did not match this project.');
+  return value;
 }

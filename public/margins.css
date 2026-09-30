@@ -6,7 +6,7 @@
       16       a row's edge: a card's 4px padding (the row's radius 8 is concentric with the card's 12)
       24–40    the icon column: every row's glyph, 16px. A header leaves it empty. The logo stands on 24.
       48       the words' edge: the project's name, both labels, every row's first word, the foot. One edge.
-      64       one step in (16): inside main. Its nodes, its fold and its + sit in the column at 40–56
+      64       one step in (16): inside a build (main, or a copy). Its nodes, its fold and its + sit in the column at 40–56
       207      the right-hand edge: every word, count, badge and time ends here (240 in the drawer)
       207–239  the trailing column: every caret and +, main's ▶, the head's keys, a gear: 32 wide, centred on 223
                (44 wide, centred on 262, in the drawer and at a coarse pointer)
@@ -324,6 +324,40 @@ body.sidebar-open .workspace-sidebar { transform: none; visibility: visible; }
 .cp-fold[aria-expanded="true"] > .cp-glyph svg { rotate: 180deg; }   /* it turns without a motion */
 .cp-build-body > .cp-why { padding-left: var(--cp-text); }
 
+/* ---------------------------------------------------------------- card 3: a copy (docs/BUILDS-AS-COPIES.md §4.3) */
+/* A copy's line is two keys side by side (.cp-rowwrap): its row, and its caret on the trailing column. The row's
+   words stop at the caret, on 207. Line two's counts give way before its note does not. */
+/* words carry state: line one's headline and line two's counts are never cut. A long headline ("main moved on · catch
+   up") beside a name takes its own line under it rather than cutting the name to "d…" — the row grows by a line; line
+   two's note is facts, and one that doesn't fit drops whole to a second line nobody sees */
+.cp-copy-row .cp-line-1 { flex-wrap: wrap; row-gap: var(--space-0); }
+.cp-copy-row .cp-line-1 > .cp-word { margin-left: auto; }
+.cp-copy-row .cp-count { flex: none; }
+.cp-copy-row .cp-facts { height: 16px; white-space: normal; text-overflow: clip; }
+/* its trunk is its own, and only while it is unfolded: the branch glyph's stem carried on down past what is inside
+   it. x: the stem sits at 4 of the glyph's 16 (6 of its 24-grid), 8 + 4 = 12 in, drawn from 11.5. top: 28 leaves the
+   lower node's outer edge (the glyph sits 14 down its row, 4 + 10, and that node ends 13.7 into the glyph) — measured
+   from the copy, not its body, so a row that grows by a line keeps its stem on its node. It ends 12 above the build's
+   foot, beside its keys (main's rule) */
+.cp-build.cp-copy::before { left: calc(var(--cp-rowpad) + 3.5px); top: calc(var(--space-8) + var(--space-1)); }
+.cp-build.cp-copy:not(.is-open)::before { content: none; }
+/* unfolded: its glyph in ink, as a current row's */
+.cp-copy.is-open > .cp-copyrow > .cp-row > .cp-glyph { color: var(--ink); }
+/* the caret turns without a motion (LANGUAGE §7.2); unfolded is its rest, never held */
+.cp-disclose[aria-expanded="true"] svg { rotate: 180deg; }
+.cp-icon-key.cp-disclose[aria-expanded="true"]:not(:active) { background: none; color: var(--ink-2); }
+@media (hover: hover) { .cp-icon-key.cp-disclose:hover:not(:disabled):not(:active) { background: var(--veil-hover); color: var(--ink); } }
+/* play and ship to main at the copy's foot, on the inside rows' edge: play's ▶ lands in the inside icon column and its
+   word on the inside words' edge. Wells, a row's weight; playing is held, never a chip */
+.cp-build-keys { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-1) 0 0; }
+.cp-build-keys > .cp-play { width: auto; justify-content: flex-start; padding: 0 var(--space-5) 0 var(--cp-rowpad); }
+.cp-keys-why { padding-top: var(--space-1); }
+.cp-keys-why > p { margin: 0; }
+/* a stable-width label: every face in one cell, so play → playing never moves the key beside it */
+.cp-stack { display: inline-grid; }
+.cp-stack > .cp-stack-face { grid-area: 1 / 1; }
+.cp-stack > .cp-stack-face:not([data-on]) { visibility: hidden; }
+
 /* ================================================================ the form (transient; the one ink is its submit) */
 .cp-form { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) var(--space-3) var(--space-3); margin: 0 0 var(--cp-gap); border-radius: var(--r-well); background: var(--paper-raised); box-shadow: var(--cp-edge); }
 .cp-form:not([hidden]) { animation: arrive var(--t3) var(--ease); }   /* arrive: it came from the key under it */
@@ -335,6 +369,10 @@ body.sidebar-open .workspace-sidebar { transform: none; visibility: visible; }
 .workspace-sidebar .cp-form-field:focus-visible { outline-offset: -1px; }
 .cp-form-note { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--r-inline); background: var(--notice-bed); color: var(--ink-2); font-size: var(--type-meta); line-height: 16px; overflow-wrap: anywhere; }
 .cp-form-note[data-kind="error"] { color: var(--fail-text); }
+/* + New build: one line for the name, and what it copies under it */
+.cp-form-field.cp-name { min-height: var(--cp-key); height: var(--cp-key); padding-block: 0; font-variant-numeric: tabular-nums; }
+.cp-form-field:disabled { opacity: var(--dim-disabled); cursor: default; }
+.cp-form-sub { margin: 0; font-size: var(--type-meta); line-height: 16px; color: var(--ink-3); }
 .cp-form-keys { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .cp-form-hint { margin: 0; font-size: var(--type-meta); line-height: 16px; color: var(--ink-3); }
 /* the one ink: flat, a squircle like send, and the only control that scales when held */
