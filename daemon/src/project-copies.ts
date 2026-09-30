@@ -17,10 +17,10 @@ import { completeTask } from './roadmap.js';
 import { completeLinkedIssues } from './project-issues.js';
 import { buildIsActive, hasCheck, landOnCopy, listFixers, noteDelivery, saveFixer, type Fixer } from './fixer.js';
 import { previewCommand, previewStatus, startPreview, stopAndWait, ownedPreviews } from './previews.js';
-import { changedPaths, discardPendingMerges, firstLine, refreshInstall, statusEntries, verifiedFastForward, type MergeFailure } from './verified-merge.js';
+import { changedPaths, discardPendingMerges, firstLine, ignoredPaths, refreshInstall, statusEntries, verifiedFastForward, type MergeFailure } from './verified-merge.js';
 import {
-  COPY_RULES, COPY_WORDS, CopyRefusal, allCopies, copyBranch, copyById, copyPath, copyPreviewId, fill, liveCopies, notReadyWords,
-  patchCopy, pruneTombstones, refuse, removeCopyRecord, requireLiveCopy, retiredCopies, saveCopy,
+  COPY_RULES, COPY_WORDS, CopyRefusal, allCopies, copyBranch, copyById, copyPath, copyPreviewId, fill, liveCopies, madeByInstall, notReadyWords,
+  noteRefresh, patchCopy, pruneTombstones, refuse, removeCopyRecord, requireLiveCopy, retiredCopies, saveCopy,
   type CopyHealth, type CopyRecord, type ShipRecord,
 } from './copy-records.js';
 
@@ -147,12 +147,15 @@ function installCopy(cfg: GameCfg, copy: CopyRecord): void {
       // A copy whose install changes files in it would never be clean: nothing could land or ship. It is broken.
       const dirty = await changedPaths(copy.worktree);
       if (dirty.length) throw new Error('its install changed files in it: ' + dirty.slice(0, 5).join(', '));
-      if (copyById(copy.id)?.status === 'creating') patchCopy(copy.id, record => { record.status = 'ready'; record.error = null; });
+      // Nothing of the owner's is in a copy before it is made: what git ignores in it now, its install left. Retire removes only that.
+      const installed = await ignoredPaths(copy.worktree);
+      if (copyById(copy.id)?.status === 'creating') patchCopy(copy.id, record => { record.status = 'ready'; record.error = null; record.installed = installed; });
     } catch (error) {
       if (copyById(copy.id)?.status === 'creating') {
         // What its own install changed goes back first, so retire (never forced) can remove the broken copy.
         await putBackInstall(copy).catch(() => undefined);
-        patchCopy(copy.id, record => { record.status = 'broken'; record.error = abort.signal.aborted ? COPY_WORDS.stoppedWhileMaking : firstLine(error); });
+        const installed = await ignoredPaths(copy.worktree).catch(() => undefined);
+        patchCopy(copy.id, record => { record.status = 'broken'; record.error = abort.signal.aborted ? COPY_WORDS.stoppedWhileMaking : firstLine(error); if (installed) record.installed = installed; });
       }
     } finally { work.delete(copy.id); }
   })();
@@ -260,8 +263,7 @@ export async function catchUpCopy(project: string, id: string, expectedHead: str
         record.headSha = result.candidate; record.lastVerifiedSha = result.candidate; record.lastVerifiedAt = at; record.lastLandedAt = at; record.intent = null; record.status = 'ready';
         record.catchUps = [{ at, ok: true, mainSha, from, to: result.candidate, reason: '' as const, detail: '', conflicts: [] }, ...record.catchUps].slice(0, COPY_RULES.history);
       });
-      const installError = await refreshInstall(cfg, copy.worktree, from, result.candidate);
-      if (installError) patchCopy(copy.id, record => { record.error = installError; });
+      noteRefresh(copy.id, await refreshInstall(cfg, copy.worktree, from, result.candidate));
       return { copy: await viewOf(cfg, copyById(copy.id)!) };
     });
   } finally { void landWaiting(project, id); }
@@ -343,8 +345,9 @@ export async function retireCopy(project: string, id: string, expectedHead: stri
 async function removeCopyWorktree(cfg: GameCfg, copy: CopyRecord): Promise<void> {
   const listed = (await worktrees(cfg)).find(entry => samePath(entry.path, copy.worktree));
   if (!existsSync(copy.worktree)) { if (listed) await git(cfg.repo, 'worktree', 'remove', copy.worktree); return; }   // the folder went; git still lists it
-  const dirty = await changedPaths(copy.worktree);
-  if (dirty.length) throw refuse('retireDirty', { name: copy.name, files: dirty.slice(0, 5).join(', ') });
+  // `worktree remove` deletes what git ignores without a word (a local save, a .env): only what nibbi's own installs left goes with it.
+  const kept = [...await changedPaths(copy.worktree), ...(await ignoredPaths(copy.worktree)).filter(path => !madeByInstall(copy, path))];
+  if (kept.length) throw refuse('retireDirty', { name: copy.name, files: kept.slice(0, 5).join(', ') });
   const at = await checkedOutAt(cfg, copy.branch);
   if (!listed || at.length !== 1 || !samePath(at[0], copy.worktree)) throw refuse('notNibbis', { name: copy.name });
   await git(cfg.repo, 'worktree', 'remove', copy.worktree);

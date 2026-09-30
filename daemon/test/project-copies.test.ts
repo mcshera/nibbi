@@ -418,6 +418,38 @@ test('retire leaves a copy with files nibbi didn’t make', async () => {
   assert.equal(await exists(repo, 'refs/heads/nibbi/copy/dev'), false); assert.equal((await git(repo, 'worktree', 'list', '--porcelain')).includes('copies/retire-dirty/dev'), false);
 });
 
+test('retire leaves files git ignores unless nibbi’s install left them', async () => {
+  // Its install leaves node_modules, and a build folder too once there is a package.json; the owner's saves are *.local.
+  const repo = await project('retire-ignored', { install: 'mkdir -p node_modules && touch node_modules/stamp && if [ -f package.json ]; then mkdir -p build && touch build/out; fi' });
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\nbuild\n*.local\n'); await git(repo, 'add', '.'); await git(repo, 'commit', '-m', 'ignore installs and saves');
+  const copy = await makeCopy('retire-ignored');
+  const retire = (target: CopyRecord) => copies.retireCopy('retire-ignored', target.id, copyOf(target.id).headSha);
+  // A save git ignores: `status --porcelain` says the folder is clean, and `worktree remove` would delete it without a word.
+  writeFileSync(join(copy.worktree, 'save.local'), 'the owner’s save\n');
+  assert.equal(await git(copy.worktree, 'status', '--porcelain'), '');
+  const before = await snapshot(repo, copy);
+  await refused(retire(copy), fill(W.retireDirty, { name: 'dev', files: 'save.local' }));
+  assert.equal(readFileSync(join(copy.worktree, 'save.local'), 'utf8'), 'the owner’s save\n'); assert.ok(existsSync(join(copy.worktree, 'node_modules', 'stamp')));
+  assert.deepEqual(await snapshot(repo, copy), before);
+  // A landing that changes the dependency files reinstalls: what that install left is nibbi's too, and only the save is named.
+  assert.equal((await improve('retire-ignored', 'package.json {}', copy)).status, 'merged'); assert.ok(existsSync(join(copy.worktree, 'build', 'out')));
+  assert.deepEqual(copyOf(copy.id).installed, ['node_modules/', 'build/']);
+  await refused(retire(copy), fill(W.retireDirty, { name: 'dev', files: 'save.local' }));
+  assert.ok(existsSync(join(copy.worktree, 'save.local'))); assert.equal(copyOf(copy.id).status, 'ready');
+  // The save gone, retire goes, and what nibbi's installs left goes with the folder.
+  rmSync(join(copy.worktree, 'save.local'));
+  await retire(copy);
+  assert.equal(copyOf(copy.id).status, 'retired'); assert.equal(existsSync(copy.worktree), false); assert.equal(await exists(repo, 'refs/heads/nibbi/copy/dev'), false);
+  // A copy made before nibbi wrote down what its install left: its node_modules is nibbi's, and nothing else git ignores.
+  const old = await makeCopy('retire-ignored', 'dev1');
+  records.patchCopy(old.id, record => { delete record.installed; });
+  writeFileSync(join(old.worktree, 'notes.local'), 'the owner’s notes\n');
+  await refused(retire(old), fill(W.retireDirty, { name: 'dev1', files: 'notes.local' }));
+  assert.ok(existsSync(join(old.worktree, 'notes.local')));
+  rmSync(join(old.worktree, 'notes.local'));
+  await retire(old); assert.equal(copyOf(old.id).status, 'retired'); assert.equal(existsSync(old.worktree), false);
+});
+
 test('an install that changes files makes a broken copy, and retire still removes it', async () => {
   // A lockless npm project's shape: its install writes a lockfile main doesn't have (a stand-in for `npm install`).
   const repo = await project('install-dirty', { install: 'mkdir -p node_modules && touch node_modules/stamp && echo {} > package-lock.json' });

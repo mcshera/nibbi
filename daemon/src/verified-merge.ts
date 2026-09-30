@@ -63,6 +63,10 @@ export async function statusEntries(cwd: string, options: { ignored?: boolean } 
   }
   return entries;
 }
+/** What git ignores in a checkout: `git status --porcelain` never lists it, and `worktree remove` deletes it without --force. */
+export async function ignoredPaths(cwd: string): Promise<string[]> {
+  return (await statusEntries(cwd, { ignored: true })).filter(entry => entry.code === '!!').map(entry => entry.path);
+}
 const clean = async (cwd: string): Promise<boolean> => !(await git(cwd, 'status', '--porcelain'));
 const isMergeWorktree = (path: string): boolean => /^merge-[0-9a-f-]{36}$/.test(basename(path)) && within(config.workDir, path);
 
@@ -131,13 +135,17 @@ export async function discardPendingMerges(): Promise<void> {
 }
 
 const LOCKFILES = new Set(['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml']);
-/** After a copy's head changed: reinstall in its worktree when the dependency files changed. '' or the failure's first line. */
-export async function refreshInstall(cfg: GameCfg, worktree: string, from: string, to: string): Promise<string> {
-  if (!cfg.install || cfg.install === 'true' || from === to) return '';
+/** After a copy's head changed: reinstall in its worktree when the dependency files changed. `error` is '' or the failure's first
+    line; `installed`, what git ignores that the install left there and that wasn't there before it (nibbi's, for retire). */
+export async function refreshInstall(cfg: GameCfg, worktree: string, from: string, to: string): Promise<{ error: string; installed: string[] }> {
+  if (!cfg.install || cfg.install === 'true' || from === to) return { error: '', installed: [] };
+  let before: string[] | undefined;
+  const added = async (): Promise<string[]> => before ? (await ignoredPaths(worktree).catch(() => [])).filter(path => !before!.includes(path)) : [];
   try {
     const changed = (await git(cfg.repo, 'diff', '--name-only', from, to)).split('\n').filter(Boolean);
-    if (!changed.some(path => LOCKFILES.has(basename(path)))) return '';
+    if (!changed.some(path => LOCKFILES.has(basename(path)))) return { error: '', installed: [] };
+    before = await ignoredPaths(worktree);
     await sandboxCommand(worktree, cfg.install, { domains: cfg.installDomains ?? ['registry.npmjs.org'], readableRoots: [cfg.repo] });
-    return '';
-  } catch (error) { return 'its install failed after the change landed: ' + firstLine(error); }
+    return { error: '', installed: await added() };
+  } catch (error) { return { error: 'its install failed after the change landed: ' + firstLine(error), installed: await added() }; }
 }

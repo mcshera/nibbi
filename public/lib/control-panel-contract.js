@@ -729,6 +729,7 @@ export const WORDS = Object.freeze({
  * @property {CopyIntent|null} intent        a ship or catch-up between its intent and its bookkeeping (crash recovery)
  * @property {string|null} retiredAt
  * @property {string|null} retiredHead       the head it had when it was retired (recoverable with git branch <name> <sha> while the objects last)
+ * @property {string[]} [installed]          what git ignores that nibbi's installs left in its folder (made, reinstalled); retire removes only that of what git ignores
  */
 /** @typedef {{ id: string, at: string, sha: string, mainBefore: string, runIds: string[] }} ShipRecord   sha: main after the ship (= the copy's head) */
 /** @typedef {{ at: string, ok: boolean, mainSha: string, from: string, to: string|null, reason: ''|'conflict'|'checkfail'|'changed', detail: string, conflicts: string[] }} CatchUpRecord */

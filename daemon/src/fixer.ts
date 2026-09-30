@@ -22,7 +22,7 @@ import { isGithubBuild, reserveBuildBinding, prepareBuildBinding, githubBuildSum
 import { boundedInput, summarizeResult, diffFor } from './tool-transcript.js';
 import { recordDelivery } from './progress.js';
 import { coalesceText } from './event-text.js';
-import { copyById, copyPreviewId, patchCopy, requireLiveCopy, refuse, COPY_WORDS, fill, type CopyRecord } from './copy-records.js';
+import { copyById, copyPreviewId, noteRefresh, patchCopy, requireLiveCopy, refuse, COPY_WORDS, fill, type CopyRecord } from './copy-records.js';
 import { verifiedFastForward, refreshInstall } from './verified-merge.js';
 export { games, mergeTarget, registerProject, createProject, type GameCfg } from './projects.js';
 export { previewStart, previewStop, playStart, playStop, playStatus } from './previews.js';
@@ -386,8 +386,7 @@ export async function integrate(input: Fixer): Promise<IntegrateResult> {
     // In the copy, not yet done: its issues, task and delivery wait for the copy to ship (D1).
     const before = copy.headSha;
     patchCopy(copy.id, record => { record.headSha = result.candidate; record.lastVerifiedSha = result.candidate; record.lastVerifiedAt = at; record.lastLandedAt = at; });
-    const installError = await refreshInstall(cfg, copy.worktree, before, result.candidate);
-    if (installError) patchCopy(copy.id, record => { record.error = installError; });
+    noteRefresh(copy.id, await refreshInstall(cfg, copy.worktree, before, result.candidate));
     return { ok: true };
   });
 }

@@ -25,6 +25,9 @@ export interface CopyRecord {
   headSha: string; lastVerifiedSha: string | null; lastVerifiedAt: string | null; status: CopyStatus;
   createdAt: string; updatedAt: string; lastLandedAt: string | null; playedAt: string | null; error: string | null;
   ships: ShipRecord[]; catchUps: CatchUpRecord[]; intent: CopyIntent | null; retiredAt: string | null; retiredHead: string | null;
+  /** What git ignores that nibbi's own installs left in its folder (`status --ignored` paths; a folder ignored whole ends in '/'),
+      written when it is made and after each reinstall. Retire removes that with the folder and nothing else git ignores. */
+  installed?: string[];
 }
 export interface IssueCopy { copyId: string; at: string }
 
@@ -105,6 +108,20 @@ export function saveCopy(record: CopyRecord): CopyRecord {
 export function patchCopy(id: string, change: (record: CopyRecord) => void): CopyRecord {
   const record = copyById(id); if (!record) throw refuse('copyGone');
   change(record); return saveCopy(record);
+}
+/** What nibbi's own installs left in a copy's folder that git ignores. Not written down (a copy made before it was, or one the
+    backend stopped while its install ran): its node_modules. */
+export const installedPaths = (copy: Pick<CopyRecord, 'installed'>): string[] => copy.installed ?? ['node_modules/'];
+/** A path `status --ignored` lists is one of those, or inside one. */
+export const madeByInstall = (copy: Pick<CopyRecord, 'installed'>, path: string): boolean =>
+  installedPaths(copy).some(made => path === made || (made.endsWith('/') && path.startsWith(made)));
+/** A reinstall after a copy's head changed: its failure is said on the copy (it never undoes the change), and what it left is nibbi's. */
+export function noteRefresh(id: string, refreshed: { error: string; installed: string[] }): void {
+  if (!refreshed.error && !refreshed.installed.length) return;
+  patchCopy(id, record => {
+    if (refreshed.error) record.error = refreshed.error;
+    if (refreshed.installed.length) record.installed = [...new Set([...installedPaths(record), ...refreshed.installed])];
+  });
 }
 /** A create that failed before its worktree existed leaves no record behind. */
 export function removeCopyRecord(record: CopyRecord): void {
