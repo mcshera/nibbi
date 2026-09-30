@@ -1,7 +1,7 @@
 // The control panel's behaviour in the real built app (docs/CONTROL-PANEL.md §8.5): the Cards bar and the
 // Console pages over real routes and real Git, never the live app. projectWorkflowFixture gives isolated
 // state, deterministic providers and a real project check, so a run really stages and really merges.
-// Thirteen checks at 1180x820 and 390x844 touch, on paper-garden, and eight on observatory for its copies
+// Fourteen checks at 1180x820 and 390x844 touch, on paper-garden (the last: stage mode picks up up next), and eight on observatory for its copies
 // (docs/BUILDS-AS-COPIES.md §6.4: + New build, an improvement that lands in the copy, Ship to main asked
 // twice, catch up, one plays at a time, retire, GitHub mode, 390 touch), with real git in temp repos. Each
 // prints PASS or FAIL and a failure does not stop the rest. Screenshots in output/playwright/control-panel/.
@@ -26,6 +26,7 @@ if (existsSync(join(nibbiBin, 'rg')) && !(process.env.PATH || '').split(':').inc
 const candidate = resolve(process.env.NIBBI_CP_CANDIDATE || '.'), daemon = join(candidate, 'daemon/dist');
 const out = resolve(process.env.NIBBI_CP_OUTPUT || 'output/playwright/control-panel'); mkdirSync(out, { recursive: true });
 const { WORDS, COPY } = await import(new URL('../public/lib/control-panel-contract.js', import.meta.url));
+const fill = (template, values) => template.replace(/\{(\w+)\}/g, (all, key) => values[key] ?? all);
 const fixture = await projectWorkflowFixture({ daemon, ui: join(candidate, 'dist/ui') });
 const { updateProject } = await import(pathToFileURL(join(daemon, 'projects.js')).href);
 const PROJECT = 'paper-garden', COPIES = 'observatory';
@@ -161,7 +162,7 @@ try {
         const card = page.locator('.margin-card:not([hidden])');
         assert.deepEqual(await card.locator('.margin-pill:visible').allInnerTexts(), ['Save', 'Repository & GitHub', 'Providers'], 'the project card keeps its two doors and its cap, and nothing else');
         for (const pill of ['Plan', 'Play', 'Fix…', 'Review']) assert.equal(await card.getByRole('button', { name: pill, exact: true }).count(), 0, `no ${pill} pill`);
-        await card.getByText(`automation picks its next step from plans/${PROJECT}.md`, { exact: true }).waitFor();
+        await card.getByText(WORDS.auto.line.replace('{name}', 'main'), { exact: true }).waitFor();   // automation works up next, not the plan
         await page.keyboard.press('Escape'); await closeSwitcher(page);
       }, page);
 
@@ -319,6 +320,34 @@ try {
         assert.deepEqual(await keysOf(issue), ['edit', 'mark-done', 'build-now']);
         await page.locator('.project-close:visible').click();
         await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
+      }, page);
+
+      // The owner, 2026-09-29: automation works the up-next list. Stage mode, chosen on the card, takes the top of up next in
+      // issues.md order — two at once, the project's capacity — and the bar shows them building; the third waits, and says who starts it.
+      await check('22 stage picks up up next: the top ones turn into building', async () => {
+        const { automationCycle } = await import(pathToFileURL(join(daemon, 'scheduler.js')).href);
+        const open = (await issues()).items.filter(i => !i.done), later = open.find(i => i.text === LATER);
+        assert.deepEqual(open.slice(0, 2).map(i => i.id), ['seedling-overlap', 'keyboard-focus'], 'issues.md order');
+        const release = fixture.holdFixer();
+        try {
+          await openProjectCard(page, PROJECT);
+          await page.locator('.margin-card:not([hidden]) .margin-mode[data-mode="stage"]').click();
+          await until('stage mode', () => fixture.runtime.get('config', 'auto')?.[PROJECT]?.mode === 'stage');
+          await page.waitForFunction(() => !nibbiApp.state().busy);
+          await closeSwitcher(page);
+          await (await row(page, 'issue:' + later.id)).click();
+          const ticket = await ready(page, 'ticket', 'issue:' + later.id);
+          await ticket.locator('.cp-status-line', { hasText: fill(WORDS.upNextAuto, { name: 'main' }) }).waitFor();
+          await page.locator('.project-close:visible').click();
+          await page.waitForFunction(() => document.querySelector('#project-workspace').hidden);
+          const dispatched = commands.filter(n => n === 'run.dispatch').length;
+          await automationCycle(async () => {});
+          for (const id of ['seedling-overlap', 'keyboard-focus']) await page.waitForFunction(id => document.querySelector(`#workspace-sidebar [data-bar-improvement="issue:${id}"]`)?.dataset.state === 'building', id, { timeout: 10_000 });
+          assert.equal(await (await row(page, 'issue:' + later.id)).getAttribute('data-state'), 'up_next', 'capacity is two: the third waits');
+          assert.equal(commands.filter(n => n === 'run.dispatch').length, dispatched, 'the page started nothing: automation did');
+          await shot(page, 'automation-stage-1180');
+        } finally { fixture.fixer.setAuto(PROJECT, { mode: 'off' }); release(); }
+        for (const f of fixture.runtime.list('fixers').filter(f => f.game === PROJECT && ['seedling-overlap', 'keyboard-focus'].includes(f.issueIds?.[0]))) await fixture.fixer.waitForFixer(f.id);
       }, page);
     } finally { await context.close(); }
   }

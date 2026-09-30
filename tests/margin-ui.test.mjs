@@ -240,7 +240,8 @@ test('the bar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await card.count(), 1);
     assert.match(await card.textContent(), /\$14\.2 spent · Cap \$40/, 'what it spends and may spend, and nothing about plans');
     assert.doesNotMatch(await card.textContent(), /complete|pending|in flight/, 'the plan meter and the old counts are gone');
-    assert.match(await card.locator('.margin-roadmap').innerText(), /^automation picks its next step from plans\/.+\.md$/, 'automation still reads the roadmap, and the card says so once');
+    assert.equal(await card.locator('.margin-auto-line').innerText(), 'automation picks up up next · builds into main', 'automation works up next, and the card says so once');
+    assert.equal(await card.locator('.margin-into-field').isVisible(), false, 'with no copy there is nothing to choose between');
     for (const gone of ['Plan', 'Play', 'Fix…', 'Review']) assert.equal(await card.getByRole('button', {name: gone, exact: true}).count(), 0, `no ${gone} pill`);
     for (const kept of ['Repository & GitHub', 'Providers']) assert.equal(await card.getByRole('button', {name: kept, exact: true}).count(), 1, `${kept} stays`);
     const cap = card.locator('input[type="number"]');
@@ -1263,6 +1264,50 @@ test('+ New build: the suggested name selected, name problems in words, Enter ma
       else assert.equal((await page.evaluate(() => calls.at(-1))).action, 'newCopy', JSON.stringify(typed));
       if (!expected) { await put(page, copiesModel()); if (!await buildForm.isVisible()) await plus.click(); }
     }
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('the project card: automation picks up up next, into main or the copy you choose, and says its last word', {timeout: 60000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+    const errors = await harness(page);
+    await put(page, copiesModel());
+    const settled = () => page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished.catch(() => {}))));
+    await page.locator('.margin-switch-trigger').click(); await settled();
+    await page.locator('.project-group .project-options').first().click(); await settled();
+    const card = page.locator('.margin-card:not([hidden])'), line = card.locator('.margin-auto-line'), into = card.locator('.margin-into');
+    const keys = () => into.locator('button').evaluateAll(els => els.map(el => [el.textContent, el.getAttribute('aria-pressed')]));
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into main');
+    assert.equal(await card.locator('.margin-into-field').isVisible(), true, 'a project with copies chooses where automation builds');
+    assert.equal(await into.getAttribute('aria-label'), WORDS.auto.intoGroup);
+    assert.equal(await card.locator('.margin-into-field .margin-field-label').innerText(), WORDS.auto.into);
+    assert.deepEqual(await keys(), [['main', 'true'], ['dev', 'false'], ['dev1', 'false']], 'main, then the copies; main until you choose');
+    assert.equal(await into.locator('button', {hasText: 'dev1'}).getAttribute('title'), 'automation builds what’s up next into dev1');
+    await into.getByRole('button', {name: 'dev', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'autoTarget', id: 'alpha', value: 'copy-11111111-1111-1111-1111-111111111111'});
+    await page.evaluate(() => { model.projects[0].autoTarget = 'copy-22222222-2222-2222-2222-222222222222'; ui.update(model); });
+    assert.deepEqual(await keys(), [['main', 'false'], ['dev', 'false'], ['dev1', 'true']], 'the model says where it builds; the card shows it');
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into dev1');
+    // the chosen copy is seated like any pressed key: ink is for ship alone, even as the last key of its segment
+    const bg = locator => locator.evaluate(el => getComputedStyle(el).backgroundColor);
+    await settled();   // the key's colour moves on --t1
+    assert.equal(await bg(into.locator('[aria-pressed="true"]')), await bg(card.locator('.margin-mode[data-mode="stage"]')));
+    await into.getByRole('button', {name: 'main', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'autoTarget', id: 'alpha', value: 'main'});
+    // a /goal keeps the roadmap; automation's last word is under it, whole in its title
+    await page.evaluate(() => { model.projects[0].goalActive = true; model.projects[0].autoNote = 'dev was retired, so automation builds into main now'; ui.update(model); });
+    assert.equal(await line.innerText(), 'automation works toward your goal, from plans/alpha.md');
+    assert.equal(await card.locator('.margin-auto-note').innerText(), 'dev was retired, so automation builds into main now');
+    assert.equal(await card.locator('.margin-auto-note').getAttribute('title'), 'dev was retired, so automation builds into main now');
+    await page.evaluate(() => { model.projects[0].goalActive = false; model.projects[0].autoNote = ''; model.busy = true; ui.update(model); });
+    assert.equal(await card.locator('.margin-auto-note').isVisible(), false);
+    assert.deepEqual(await into.locator('button').evaluateAll(els => els.map(el => el.disabled)), [true, true, true], 'while nibbi answers, like the other settings');
+    // the copies go: nothing to choose, and the choice falls to main
+    await page.evaluate(() => { model.busy = false; model.projects[0].builds = model.projects[0].builds.slice(0, 1); ui.update(model); });
+    assert.equal(await card.locator('.margin-into-field').isVisible(), false);
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into main');
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

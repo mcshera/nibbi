@@ -278,7 +278,12 @@ function contextOf(input = {}) {
   for (const s of Array.isArray(copiesRead?.ships) ? copiesRead.ships : []) if (isRecord(s) && str(s.copyId) && !copyNames.has(s.copyId) && str(s.name)) copyNames.set(s.copyId, s.name);
   // why no copy can be made or changed here: the daemon's read, else what the client can tell on its own
   const disabled = copiesRead ? (['github', 'no_check'].includes(copiesRead.disabled) ? copiesRead.disabled : '') : githubMode ? 'github' : !check.real ? 'no_check' : '';
+  // automation (the owner's decision, 2026-09-29): stage and ship build what is up next — into main, or the copy chosen on the card —
+  // unless a /goal is set, when it works the roadmap. auto: { mode, copyId, goal, onAt }, from /api/auto and the goals.
+  const auto = isRecord(input.auto) ? input.auto : {};
+  const autoTarget = str(auto.copyId) && liveById.has(auto.copyId) ? auto.copyId : null;
   return {
+    auto: { on: ['stage', 'ship'].includes(auto.mode) && auto.goal !== true, target: autoTarget, into: autoTarget ? liveById.get(autoTarget).name : MAIN, onAt: iso(auto.onAt) },
     name, project, runs, items, list, branch, now, maxConcurrent, busy: input.busy === true, demo: input.demo === true,
     revision: str(input.issues?.revision), play: isRecord(input.play) ? input.play : null, check,
     github: connection ? { mode: githubMode ? 'github' : 'local', repository: str(connection.repository) || null,
@@ -288,6 +293,9 @@ function contextOf(input = {}) {
   };
 }
 const copyName = (ctx, id) => ctx.copyNames.get(id) || 'the copy';
+/** Where automation builds what is up next in this build (main: null, else a copy's id): the build's name it goes into, or ''
+    when it doesn't pick this build's list up. Main's list is built into the chosen copy; a copy's own list only when it is chosen. */
+const autoInto = (ctx, copyId) => !ctx.auto.on || (copyId && copyId !== ctx.auto.target) ? '' : ctx.auto.into;
 
 const byStart = tries => tries.map((run, i) => ({ run, i })).sort((a, b) => (ms(a.run.startedAt) || 0) - (ms(b.run.startedAt) || 0) || a.i - b.i).map(x => x.run);
 const lastWhere = (list, test) => { for (let i = list.length - 1; i >= 0; i--) if (test(list[i])) return list[i]; return null; };
@@ -327,7 +335,8 @@ function issueRecord(ctx, id, item, index, tries, gone) {
     else if (merged) { state = 'in'; basis = merged; }
     else { state = 'done'; basis = null; fromIssue = true; context = 'marked done in issues.md'; }
   } else if (item) {
-    if (!latest) { state = 'up_next'; fromIssue = true; context = item.boardStatus === 'in-progress' ? 'you marked it in progress' : str(item.heading) || firstLine(item.description, 160); }
+    // Suggest mode's own (item.suggested) say so until something happens to them (the owner's decision, 2026-09-29).
+    if (!latest) { state = 'up_next'; fromIssue = true; context = item.boardStatus === 'in-progress' ? 'you marked it in progress' : item.suggested === true ? WORDS.suggested : str(item.heading) || firstLine(item.description, 160); }
     else if (latest.state === 'stopped' || latest.state === 'discarded') { state = 'up_next'; basis = null; fromIssue = true; context = `its last try was ${latest.state}`; }
     else state = latest.state;
   } else {
@@ -475,7 +484,7 @@ function mainVM(ctx, records, copies, full) {
     tone: 'pass', improvementId: null, sha: str(s.sha) }));
   return {
     vm: {
-      id: MAIN, name: MAIN, kind: 'main', copyId: null, branch: ctx.branch, line,
+      id: MAIN, name: MAIN, kind: 'main', copyId: null, branch: ctx.branch, line, autoInto: autoInto(ctx, null),
       word: 'live', state: 'live', tone: 'quiet', live: false,
       note: line.startsWith('live · ') ? line.slice('live · '.length) : line, count: play.running ? WORDS.copy.playing : '', detail: '', copyLine: line,
       ahead: null, behind: null, head: '', status: 'live', health: 'ok', healthWords: '', verified: null, checks: [], madeAt: null, madeFrom: null,
@@ -611,7 +620,7 @@ function copyVM(ctx, copy, records, allRecords, others) {
   ].filter(Boolean);
   return {
     vm: {
-      id: name, name, kind: 'copy', copyId, branch: str(copy.branch) || COPY.branchPrefix + name, line: WORDS.copy.line,
+      id: name, name, kind: 'copy', copyId, branch: str(copy.branch) || COPY.branchPrefix + name, line: WORDS.copy.line, autoInto: autoInto(ctx, copyId),
       word, state, tone: COPY_STATE_TONES[state], live: COPY_LIVE.includes(state),
       note: ahead ? fill(WORDS.copy.lineAhead, { ahead }) : WORDS.copy.line,
       count: [counts.in ? `${counts.in} in` : '', counts.failed ? `${counts.failed} failed` : '', running ? WORDS.copy.playing : ''].filter(Boolean).join(' · '),
@@ -778,7 +787,11 @@ function statusLineOf(ctx, rec, attempts) {
   if (rec.shippedFrom && state === 'in') return fill(WORDS.copy.shippedFrom, { name: rec.shippedFrom, when: since(run?.shipped?.at || landedAt(run), ctx.now) || 'just now' });
   if (rec.retiredFrom && state === 'discarded') return fill(WORDS.copy.retiredBefore, { name: rec.retiredFrom });
   if (state === 'up_next') {
-    if (rec.fromIssue) return 'it waits here until you start it — nothing builds it on its own';
+    if (rec.fromIssue) {
+      // automation picks it up, unless it already tried it since it was turned on (a try you stopped or discarded waits for you)
+      const into = autoInto(ctx, rec.copyId), tried = !!ctx.auto.onAt && rec.tries.some(r => (iso(r.startedAt) || '') >= ctx.auto.onAt);
+      return into && !tried ? fill(WORDS.upNextAuto, { name: into }) : 'it waits here until you start it — nothing builds it on its own';
+    }
     return ctx.maxConcurrent === 1 ? 'queued — it starts when its one slot frees' : `queued — it starts when one of the ${ctx.maxConcurrent} slots frees`;
   }
   if (state === 'building') {

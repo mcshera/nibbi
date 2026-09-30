@@ -213,7 +213,9 @@ Focus survives `update()`: rows are keyed and reused while their signature is un
 Unchanged except: the plan progress label, meter and the "pending" stat go (margin-ui.js:323-327,
 689-698); the pills **Plan · Play · Fix… · Review** go (margin-ui.js:361); **Repository & GitHub** and
 **Providers** stay, labels unchanged. Under the Automation segment, one quiet line (ROUND3 decided 8):
-`automation picks its next step from plans/<name>.md`. The stats line becomes `<spend> spent · <cap>`.
+`automation picks up up next · builds into <build>` — until §12.1 it read `automation picks its next
+step from plans/<name>.md` — then, when the project has a copy, the **Builds into** segment, and
+automation's last note. The stats line becomes `<spend> spent · <cap>`.
 
 #### 2.1.5 Premium baseline (every bar control)
 
@@ -828,7 +830,8 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
    drains the roadmap (scheduler.ts:75-90), and queued runs drain within ten seconds (`drainQueues`,
    fixer.ts:187-200), so the queued half is nearly always empty and an up-next item never becomes
    building on its own. The words say so ("it waits here until you start it"; the form's hint), and the
-   one path from up next to building is **build it now** (`issue.build`).
+   one path from up next to building is **build it now** (`issue.build`). **Decided 2026-09-29: stage
+   and ship drain it (§12.1).**
 2. **"A run started from free text is its own ticket" breaks on Try again.** `run.retry` makes a new
    run and marks the old superseded (fixer.ts:292-302); the ticket is the `replacesBuildId` chain (D2).
 3. **"Play main" plays the owner's checkout, not main**, on whatever branch it is on, dirty or not
@@ -861,8 +864,8 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
     :123, :129) and two tests go vacuous (tests/margin-ui.test.mjs:259-263, 334-349) — data.md §6 said
     so; the plan's commit table did not.
 13. **Open, for the owner**: whether "both of them" meant the two groups (read here, ROUND5 decided 1);
-    whether up-next items should be drained by automation (scheduler option (b), code.md §3); lowercase
-    for the progress line (D13).
+    whether up-next items should be drained by automation (scheduler option (b), code.md §3) — **yes,
+    §12.1**; lowercase for the progress line (D13).
 
 ---
 
@@ -902,3 +905,53 @@ What phase 2 changed here:
 The decisions phase 2 took (D1–D16, BUILDS-AS-COPIES.md §1) are defaults for the owner to override;
 where the integration departed from that spec is its §10.
 
+---
+
+## 12. The three open questions, decided (2026-09-29)
+
+The owner, verbatim: *"go with all three recommendations"* (the plan's "The three open questions: plan",
+`~/.claude/plans/control-panel-bar.md`). Branch `ui/automation-and-words`, draft PR #26 on #25; one
+commit each, in this order.
+
+### 12.1 Automation works up next (§9.1, §9.13)
+
+Phase 1 took Plans out of the UI, so the modes were draining a list nobody could see, and nothing moved
+an up-next improvement on its own. Now the modes work the Improvements list:
+
+| mode | before | now |
+|---|---|---|
+| suggest | one free-text note, ≤ 300 characters, from a roadmap read | the lead is asked for up to three improvements; each goes into main's up next marked **nibbi suggested** (`WORDS.suggested`, the row's line two and the ticket), for the owner to build or mark done. It builds nothing and has no dispatch tool. It asks again only once none of its last ones is still up next and the list has changed; what the owner marked done is not suggested again |
+| stage | the lead dispatched roadmap tasks, up to capacity | the top of up next, in issues.md order, through `issue.build` (its duplicate guard, its copy rules), while the project has room: `maxConcurrent` less its running **and queued** tries. No model chooses |
+| ship | stage, plus auto-merge into main | the same, into the build chosen on the card. Into main: today's auto-merge on main. Into a copy: its tries land in the copy on their own (D5), and ship **merges nothing into main** — Ship to main stays the owner's confirm |
+
+- **Builds into.** `AutoCfg.copyId` (unset: main), set with `auto.set { copyId }` (`null`: main) from
+  the card's **Builds into** segment — main and the live copies, drawn only when there is a copy. The
+  daemon refuses a copy that isn't this project's and live, and any copy in a GitHub-mode project. A
+  retired copy falls back to main with a note, and ship steps down to stage: ship into a copy never
+  merged main, and falling back must not start to (`settleAutoTarget`, run by retire and by every pass).
+- **Which improvements** (`daemon/src/auto-queue.ts`): those the bar shows up next — no try yet, the
+  latest try stopped or discarded, or tried on a copy retired before it shipped — in main's list or the
+  target copy's; one put up next on another copy is that copy's. Not one tried since automation was
+  turned on (`onAt`), so a try the owner stopped or discarded isn't started again by itself. File order,
+  not the bar's in-progress-first order: the kanban that marked items in progress left in phase 1.
+- **The guards are the old ones**: a failed, interrupted or stopped run since `onAt` turns it off; the
+  spend cap (and a provider cost it can't read, under a cap) turns it off; GitHub mode pauses ship. A
+  refused `issue.build` turns it off with its words (`AUTO_WORDS.buildFailed`). A copy that is being
+  made, shipping or catching up is waited for.
+- **A set /goal keeps the roadmap**, as before: stage or ship with an unfinished goal run the lead's
+  roadmap turn (dispatch allowed), and "Roadmap complete" ends the goal and turns it off. suggest always
+  suggests improvements.
+- **Words.** The card: `automation picks up up next · builds into main` (`WORDS.auto.line`), or
+  `automation works toward your goal, from plans/<project>.md` while a goal is set, and automation's last
+  note under it (`AutoCfg.note`, two lines, whole in its title). An up-next ticket says `automation builds
+  it into main when there’s room — or build it now` while automation would pick it up (`WORDS.upNextAuto`
+  from `BuildVM.autoInto`), and the + improvement hint says up next is picked up (`WORDS.form.hintAuto`,
+  `WORDS.copy.formHintAuto`). The ship segment's ink is `[data-mode="ship"]` now, not `:last-child`, so
+  the last copy in Builds into is seated like any pressed key.
+- **Checked.** `daemon/test/automation.test.ts` (temp state, real git, 7 tests): stage builds the top
+  item and no second past capacity, then the next, and not a discarded one again; the spend cap stops it
+  first; suggest adds three marked nibbi suggested, cleaned and none a repeat, builds nothing, and waits
+  for the owner; ship into dev lands in dev, never ships main nor merges a staged main try, and a retired
+  dev falls back to main in stage; ship into main keeps today's merge; a goal keeps the roadmap.
+  `tools/control-panel-verify.mjs` check 22: stage chosen on the card, one pass, the top two up-next rows
+  turn into building and the third waits, its ticket saying automation builds it.

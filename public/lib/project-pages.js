@@ -1131,7 +1131,9 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
       box.append(list);
       return box;
     });
-    const hint = copy ? fill(WORDS.copy.formHint, { name: b.name }) : WORDS.form.hint;
+    // with automation picking this list up (b.autoInto), up next doesn't wait for you, and the hint says so
+    const into = String(b.autoInto || '');
+    const hint = copy ? fill(into ? WORDS.copy.formHintAuto : WORDS.copy.formHint, { name: b.name }) : into ? fill(WORDS.form.hintAuto, { into }) : WORDS.form.hint;
     reconcile(s, [s._head, form, form && keep('add-hint', hint, () => node('p', 'cp-add-hint', hint)), list]);
     return s;
   }

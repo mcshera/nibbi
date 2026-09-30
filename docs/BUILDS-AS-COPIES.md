@@ -73,7 +73,7 @@ Taken here (also for the owner to override; the PR lists them):
 | D12 | A copy needs a **real project check** (fixer.ts:94's rule): without one, + New build opens in its *can't* state and says so | nothing can land in or ship from a copy without a check (fixer.ts:333) — it would be a dead end |
 | D13 | **GitHub-mode projects: copies are local-only in phase 2** — + New build opens in its *can't* state with the reason (§2.7), the daemon refuses every copy command but retire; the GitHub promotion path is deferred (§8) | §2.7 |
 | D14 | Play main still plays **the owner's checkout** (phase 1 §9.3). A detached worktree at main's head is deferred | not needed for one-at-a-time; it would add a worktree per project |
-| D15 | Runs started by the lead (chat `dispatch_fixer`, session.ts:105-114), plan execution (plan-proposals.ts:92) and automation keep targeting main; **auto ship never ships a copy** and never lands a copy's runs a second way (scheduler.ts:70) | automation stays on what it knows; copies are the owner's |
+| D15 | Runs started by the lead (chat `dispatch_fixer`, session.ts:105-114), plan execution (plan-proposals.ts:92) and automation keep targeting main; **auto ship never ships a copy** and never lands a copy's runs a second way (scheduler.ts:70). *Changed 2026-09-29 (CONTROL-PANEL.md §12.1): stage and ship can build what is up next into a copy chosen on the card; ship still never ships a copy, and building into one it merges nothing into main* | automation stays on what it knows; copies are the owner's |
 | D16 | Commands take the copy's **id** (`copy-<uuid>`), never its name; the UI keys pages and rows by the **name** | a stale page can't ship a new "dev" made after the old one was retired |
 
 ---
@@ -184,7 +184,7 @@ groups them (§4.2) and says the words from `WORDS` — one source for both. The
 | `issue.build` (project-workspace.ts:185-196) | `copyId = input.copyId ?? the item's live stored copy`; :194's args gain `copyId` **only when set** (a spread), so project-workspace.test.ts:112's dispatch stays as it is |
 | duplicate guards (fixer.ts:170, :172; project-workspace.ts:190) | unchanged: an issue has one live try anywhere, whichever build |
 | `allowedRunActions` (fixer.ts:156) | `run.merge` also needs `!f.copyId` — a copy's run lands on its own (D5). `run.merge` sent anyway still goes through `integrate()` and lands it in its copy (the same guarded path) |
-| lead / plans / automation | unchanged (D15): `session.ts:112`, `plan-proposals.ts:92`, `build-attempts.ts:190` pass no `copyId` |
+| lead / plans / automation | unchanged (D15): `session.ts:112`, `plan-proposals.ts:92`, `build-attempts.ts:190` pass no `copyId`. Since 2026-09-29 automation's `issue.build` passes the card's `copyId` (CONTROL-PANEL.md §12.1) |
 
 #### 2.4.4 Landing an improvement — `integrate()` with a destination
 
@@ -876,7 +876,8 @@ adds the fixtures and checks (§6.3-§6.4), and runs typecheck · `npm test` · 
 - **Play main at main's head** (a detached worktree), instead of the owner's checkout (D14).
 - **A copy of a copy** (D2), and choosing the base in the form.
 - **Disk**: show each copy's size; clean the local run worktrees nothing needs (still never cleaned, data.md §1).
-- **Review inside a copy** (D5's flip), and whether automation may target a copy (D15).
+- **Review inside a copy** (D5's flip). Whether automation may target a copy (D15): yes, decided
+  2026-09-29 (CONTROL-PANEL.md §12.1).
 - Whether "both of them" pinned open (ROUND5 decided 1) should also mean every copy starts unfolded —
   phase 2 unfolds them all by default (§4.3); folding is remembered.
 

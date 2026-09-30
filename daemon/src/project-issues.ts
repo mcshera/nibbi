@@ -1,7 +1,18 @@
 import { config } from './config.js';
 import { scopedPath } from './paths.js';
 import { parseProjectDocument, pinDocument } from './roadmap.js';
+import { runtime } from './store.js';
 import { editDocuments, readDocument, type WorkspaceDocument } from './workspace-documents.js';
+
+/** Who put an issue in the list, when it wasn't the owner: 'suggested' is suggest mode's (bucket issue-origins, id <project>:<issueId>).
+    Kept beside the list, as an issue's copy is (copy-records.ts setIssueCopy), so issues.md stays the owner's words. */
+export type IssueOrigin = 'suggested';
+export function setIssueOrigin(project: string, issueId: string, origin: IssueOrigin): void {
+  runtime().put('issue-origins', project + ':' + issueId, { origin, at: new Date().toISOString() });
+}
+export function issueOrigin(project: string, issueId: string): IssueOrigin | null {
+  return runtime().get<{ origin: IssueOrigin }>('issue-origins', project + ':' + issueId)?.origin ?? null;
+}
 
 export function issueDocuments(project: string): WorkspaceDocument[] {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(project)) throw new Error('Invalid project');

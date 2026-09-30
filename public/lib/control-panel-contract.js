@@ -275,6 +275,8 @@ export const WORDS = Object.freeze({
   gone: 'this improvement is gone',
   editWaits: 'a try is running on it, so the words can’t change right now — what you typed stays here; save once it stops',
   emptyImprovements: 'nothing to improve yet — or ask nibbi what it would change',
+  suggested: 'nibbi suggested',
+  upNextAuto: 'automation builds it into {name} when there’s room — or build it now',   // an up-next ticket's status line while automation picks it up             // an up-next improvement suggest mode put in the list: its line two until something happens to it
   homeLine: 'the first conversation',
   answering: 'answering',
   foldFailed: '{n} failed',
@@ -288,6 +290,7 @@ export const WORDS = Object.freeze({
   form: Object.freeze({
     label: 'what should change?', placeholder: 'a sentence is plenty',
     hint: 'start now builds it right away · up next keeps it in the list until you start it',
+    hintAuto: 'start now builds it right away · up next keeps it in the list, and automation builds it into {into} when there’s room',
     start: 'start now', queue: 'up next', close: 'close (esc)',
   }),
   keys: Object.freeze({
@@ -330,6 +333,7 @@ export const WORDS = Object.freeze({
     emptyImprovements: 'nothing in here yet — say what should change',
     formPlaceholder: 'it lands on {name}',
     formHint: 'start now builds it on {name} right away · up next keeps it in {name}’s list until you start it',
+    formHintAuto: 'start now builds it on {name} right away · up next keeps it in {name}’s list, and automation builds it there when there’s room',
     notReady: '{name} is busy — {status}',
     statusWords: Object.freeze({ creating: 'it’s still being made', shipping: 'it’s shipping', catching_up: 'it’s catching up', retiring: 'it’s being retired', broken: 'it couldn’t be made' }),
     missing: '{name}’s copy is missing from this machine — retire it, then make it again',
@@ -407,6 +411,15 @@ export const WORDS = Object.freeze({
     catchUpFailed: 'couldn’t catch up — {why}',
     shipped: 'shipped {n} to main',
   }),
+  /** Automation on the project card (the owner's decision, 2026-09-29): it picks up up next, into main or one of the copies. */
+  auto: Object.freeze({
+    line: 'automation picks up up next · builds into {name}',
+    goalLine: 'automation works toward your goal, from plans/{project}.md',   // while a /goal is set, the roadmap is still what it works
+    into: 'Builds into',                                   // the field label, as its neighbour "Automation"
+    intoGroup: 'Automation builds into',                   // the segment's accessible name
+    intoTitle: 'automation builds what’s up next into {name}',
+    intoToast: 'automation builds into {name} on {project}',
+  }),
   /** Phase 2 keys (lowercase on pages, LANGUAGE §11). */
   copyKeys: Object.freeze({
     stopPlayingCopy: 'stop playing {name}', playCopy: 'play {name}', openCopy: 'open it',
@@ -476,6 +489,8 @@ export const WORDS = Object.freeze({
  * @property {string} name         = id
  * @property {'main'|'copy'} kind
  * @property {string|null} copyId  the daemon's record id (commands take it); null for main
+ * @property {string} autoInto     '' or the build automation builds this build's up-next list into (stage/ship with no /goal):
+ *                                 main → the chosen target's name; a copy → its own name when it is the target
  * @property {string} branch       main: where its runs land — local → the newest *main-targeted* run's targetBranch, else the project's targetBranch, else its checked-out branch; github → connection.integrationBranch. A copy: 'nibbi/copy/<name>'
  * @property {string} line         main: WORDS.mainLine, or WORDS.mainLineOther when branch !== 'main'. A copy: WORDS.copy.line
  * @property {string} word         main: 'live'. A copy: its headline (COPY_STATE_WORDS[state], filled)
@@ -555,6 +570,9 @@ export const WORDS = Object.freeze({
  * @property {string} branch       checked-out branch (the project settings card)
  * @property {string} goal
  * @property {string} mode         automation: off | suggest | stage | ship | unknown
+ * @property {string|null} [autoTarget]  where stage and ship build: a live copy's id; null is main (AutoCfg.copyId)
+ * @property {boolean} [goalActive] a /goal is set and not done: automation works the roadmap, not up next
+ * @property {string} [autoNote]    automation's last word (AutoCfg.note), '' when none
  * @property {number|null} spend
  * @property {number|null} spendCap
  * @property {Words} attention     BuildsCardVM.attention (phase 1: builds[0].attention)

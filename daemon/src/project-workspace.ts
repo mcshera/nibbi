@@ -7,7 +7,7 @@ import { runtime } from './store.js';
 import { listFixers, allowedRunActions, type Fixer } from './fixer.js';
 import { previewStatus } from './previews.js';
 import { parseProjectDocument, pinDocument, planPath, type RoadmapTask } from './roadmap.js';
-import { issueDocument } from './project-issues.js';
+import { issueDocument, issueOrigin, setIssueOrigin, type IssueOrigin } from './project-issues.js';
 import { editDocuments, readDocument, WorkspaceConflict, type WorkspaceDocument } from './workspace-documents.js';
 import type { GameCfg } from './projects.js';
 import { issueCopy, requireLiveCopy, setIssueCopy, refuse } from './copy-records.js';
@@ -65,8 +65,8 @@ export function projectSection(project: string, section: string, runSnapshot?: R
     githubIssueLinks: section === 'issues' ? runtime().list<any>('github-issue-links').filter(link => link.project === project && link.issueId === item.id) : [],
     linkedTaskIds: section === 'issues' ? tasks.filter(task => task.issueIds.includes(item.id)).map(task => task.id) : [],
     linkedBuilds: runs.filter(run => section === 'issues' ? run.issueIds?.includes(item.id) : run.taskId === item.id),
-    // Phase 2: the copy an up-next issue was put on, while that copy is live.
-    ...(section === 'issues' ? { copyId: issueCopy(project, item.id) } : {}) });
+    // Phase 2: the copy an up-next issue was put on, while that copy is live; and whether suggest mode put it in the list.
+    ...(section === 'issues' ? { copyId: issueCopy(project, item.id), suggested: issueOrigin(project, item.id) === 'suggested' } : {}) });
   const items = parsed.items.map(view);
   const milestones = parsed.milestones.map(milestone => ({ ...milestone, line: milestone.line + 1, tasks: items.filter(item => item.milestoneId === milestone.id) }));
   return { ...base, ...parsed, path: relative(config.vaultDir, doc.path), revision: doc.revision, items, linkedBuildCount: new Set(items.flatMap(item => item.linkedBuilds.map((run: Fixer) => run.id))).size, headings: parsed.headings.map(heading => ({ ...heading, line: heading.line + 1 })), milestones,
@@ -139,7 +139,11 @@ function reorder(markdown: string, ids: string[] | undefined, milestoneId?: stri
   return lines.join('\n');
 }
 export type ProjectCommandResult = { ok: true; section: Record<string, any>; itemId?: string; run?: unknown; plan?: Record<string, any> } | { ok: false; error: { code: string; message: string }; revision?: string };
-export interface ProjectCommandDependencies { dispatch?: (input: Record<string, unknown>) => Promise<{ ok: boolean; data?: unknown; error?: { message: string } }> }
+export interface ProjectCommandDependencies {
+  dispatch?: (input: Record<string, unknown>) => Promise<{ ok: boolean; data?: unknown; error?: { message: string } }>;
+  /** Internal only (no route reaches it): the scheduler's suggest mode marks the issues it creates. */
+  origin?: IssueOrigin;
+}
 /** All mutations are revision guarded; dispatch still goes through the existing governed command service. */
 export async function projectCommand(value: unknown, dependencies: ProjectCommandDependencies = {}): Promise<ProjectCommandResult> {
   const parsedInput = inputSchema.safeParse(value);
@@ -208,6 +212,7 @@ export async function projectCommand(value: unknown, dependencies: ProjectComman
     }
     if (!changedPlan && !action.endsWith('.build')) editDocuments([{ ...doc, next }]);
     if (action === 'issue.create' && input.copyId && itemId) setIssueCopy(input.project, itemId, input.copyId);
+    if (action === 'issue.create' && dependencies.origin && itemId) setIssueOrigin(input.project, itemId, dependencies.origin);
     store.emit({ type: 'project.workspace_updated', projectId: input.project, payload: { section, action, itemId } });
     store.emit({ type: 'vault.updated', projectId: input.project, payload: { path: relative(config.vaultDir, doc.path) } });
     if (changedPlan) store.emit({ type: 'vault.updated', projectId: input.project, payload: { path: `plans/${input.project}.md` } });
