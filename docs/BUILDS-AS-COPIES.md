@@ -73,7 +73,7 @@ Taken here (also for the owner to override; the PR lists them):
 | D12 | A copy needs a **real project check** (fixer.ts:94's rule): without one, + New build opens in its *can't* state and says so | nothing can land in or ship from a copy without a check (fixer.ts:333) — it would be a dead end |
 | D13 | **GitHub-mode projects: copies are local-only in phase 2** — + New build opens in its *can't* state with the reason (§2.7), the daemon refuses every copy command but retire; the GitHub promotion path is deferred (§8) | §2.7 |
 | D14 | Play main still plays **the owner's checkout** (phase 1 §9.3). A detached worktree at main's head is deferred | not needed for one-at-a-time; it would add a worktree per project |
-| D15 | Runs started by the lead (chat `dispatch_fixer`, session.ts:105-114), plan execution (plan-proposals.ts:92) and automation keep targeting main; **auto ship never ships a copy** and never lands a copy's runs a second way (scheduler.ts:70) | automation stays on what it knows; copies are the owner's |
+| D15 | Runs started by the lead (chat `dispatch_fixer`, session.ts:105-114), plan execution (plan-proposals.ts:92) and automation keep targeting main; **auto ship never ships a copy** and never lands a copy's runs a second way (scheduler.ts:70). *Changed 2026-09-29 (CONTROL-PANEL.md §12.1): stage and ship can build what is up next into a copy chosen on the card; ship still never ships a copy, and building into one it merges nothing into main* | automation stays on what it knows; copies are the owner's |
 | D16 | Commands take the copy's **id** (`copy-<uuid>`), never its name; the UI keys pages and rows by the **name** | a stale page can't ship a new "dev" made after the old one was retired |
 
 ---
@@ -184,7 +184,7 @@ groups them (§4.2) and says the words from `WORDS` — one source for both. The
 | `issue.build` (project-workspace.ts:185-196) | `copyId = input.copyId ?? the item's live stored copy`; :194's args gain `copyId` **only when set** (a spread), so project-workspace.test.ts:112's dispatch stays as it is |
 | duplicate guards (fixer.ts:170, :172; project-workspace.ts:190) | unchanged: an issue has one live try anywhere, whichever build |
 | `allowedRunActions` (fixer.ts:156) | `run.merge` also needs `!f.copyId` — a copy's run lands on its own (D5). `run.merge` sent anyway still goes through `integrate()` and lands it in its copy (the same guarded path) |
-| lead / plans / automation | unchanged (D15): `session.ts:112`, `plan-proposals.ts:92`, `build-attempts.ts:190` pass no `copyId` |
+| lead / plans / automation | unchanged (D15): `session.ts:112`, `plan-proposals.ts:92`, `build-attempts.ts:190` pass no `copyId`. Since 2026-09-29 automation's `issue.build` passes the card's `copyId` (CONTROL-PANEL.md §12.1) |
 
 #### 2.4.4 Landing an improvement — `integrate()` with a destination
 
@@ -497,7 +497,7 @@ PAGE_LIMITS as main), `list`, `blocked`, `ship`, `catchUp`, `retire`, `history`,
 
 | key | order |
 |---|---|
-| start (+ improvement → start now) | demo `demoStart` · busy `busy` · `disabled === 'github'` `githubMode` · status ≠ ready `notReady` · health ≠ ok `healthWords` |
+| start (+ improvement → start now) | demo `demoStart` · ~~busy `busy`~~ (gone, CONTROL-PANEL.md §12.2) · `disabled === 'github'` `githubMode` · status ≠ ready `notReady` · health ≠ ok `healthWords` |
 | queue (up next) | demo `demoChange` · github · status · health · list not ready `noList` |
 | play | demo `demoPlay` · github · status · health · `play.kind === 'url'` `fixedAddress` · not playable `nothingToPlay` |
 | ship (ShipVM.why) | demo `demoChange` · github `githubMode` · no check `noCheck` · status `notReady` · health · in = 0 `shipNothing` · behind > 0 `shipBehind` · `project.branch ≠ copy.base` `shipCheckoutOther` · `project.dirty > 0` `shipCheckoutDirty` |
@@ -704,7 +704,7 @@ ticket crumb for a copy; 390×844 touch: every key ≥ 44, no sideways scroll; t
 
 The bar and pages call `onAction(name, projectId, value)`; the integrator answers in
 `handleControlPanelAction` (app.js:2146). WAITS_FOR_REPLY is unchanged: nothing about a copy waits for
-nibbi's reply.
+nibbi's reply. (Since 2026-09-29 nothing at all does: CONTROL-PANEL.md §12.2 emptied it.)
 
 | action | sent by | value | calls | while nibbi answers | demo |
 |---|---|---|---|---|---|
@@ -715,9 +715,9 @@ nibbi's reply.
 | catchUpCopy | bar catch-up row, page catch-up / its yes | `{ copyId, expectedHead, stopPlay }` | `api.command('copy.catchUp', { id: copyId, expectedHead, stopPlay }, p)`; refresh | yes | refused |
 | retireCopy | page retire-yes | `{ copyId, expectedHead }` | `api.command('copy.retire', { id: copyId, expectedHead }, p)`; refresh | yes | refused |
 | playCopy | bar play-copy, page preview, a waiting ticket | `{ copyId, action }` | start: `copy.play { id }` → poll `GET /api/preview?id=copy:<p>:<id>` every 500ms ≤ 60s → `openUrl(url)`; stop: `copy.stop { id }` → poll until not running; open: `openUrl(play.url)`; then refresh (main's play too) | yes | refused (not `open`) |
-| startImprovement | bar / page forms | `{ text, copyId? }` | `run.dispatch { issue, title, copyId? }` (`copyId` only when set) | refused `busy` | refused |
+| startImprovement | bar / page forms | `{ text, copyId? }` | `run.dispatch { issue, title, copyId? }` (`copyId` only when set) | yes (refused `busy` until CONTROL-PANEL.md §12.2) | refused |
 | queueImprovement | bar / page forms | `{ text, copyId? }` | projectCommand `issue.create { title, description, copyId? }` | yes | refused |
-| buildIssue | ticket | `{ issueId, copyId? }` | projectCommand `issue.build { id, copyId? }` | refused `busy` | refused |
+| buildIssue | ticket | `{ issueId, copyId? }` | projectCommand `issue.build { id, copyId? }` | yes (refused `busy` until CONTROL-PANEL.md §12.2) | refused |
 
 ---
 
@@ -876,7 +876,8 @@ adds the fixtures and checks (§6.3-§6.4), and runs typecheck · `npm test` · 
 - **Play main at main's head** (a detached worktree), instead of the owner's checkout (D14).
 - **A copy of a copy** (D2), and choosing the base in the form.
 - **Disk**: show each copy's size; clean the local run worktrees nothing needs (still never cleaned, data.md §1).
-- **Review inside a copy** (D5's flip), and whether automation may target a copy (D15).
+- **Review inside a copy** (D5's flip). Whether automation may target a copy (D15): yes, decided
+  2026-09-29 (CONTROL-PANEL.md §12.1).
 - Whether "both of them" pinned open (ROUND5 decided 1) should also mean every copy starts unfolded —
   phase 2 unfolds them all by default (§4.3); folding is remembered.
 

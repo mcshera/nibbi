@@ -17,7 +17,7 @@ Staged, unverified or failed Builds. Work another client merged that Nibbi never
 ## What you see
 
 - `GET /api/progress` and the live snapshot carry `{today, week, streak, lastDeliveryAt, recent, available}`. `week` covers the seven calendar days ending today. `streak` is the number of consecutive local days, ending today or yesterday, with at least one delivery.
-- The sidebar shows one quiet line: "2 merged today · 5 this week · 3-day streak", or "Nothing merged yet today", or "Progress not available" when the backend has not reported.
+- The sidebar shows one quiet line: "2 merged today · 5 this week · 3-day streak", or "nothing merged yet today", or "progress not available" when the backend has not reported — lowercase, as every state line in the bar is (docs/CONTROL-PANEL.md §12.3).
 - Events: `progress.updated {day, delta, summary}` after every recorded delivery, `milestone.completed {project, milestoneId, name, total, runId}` once per milestone, `progress.record_failed {message}` if recording itself failed (the merge is never undone by a recording failure).
 - The morning brief and the weekly review receive `PROGRESS FACTS` appended to their prompts, labelled as data rather than a target. The heartbeat and consolidation schedules do not.
 

@@ -22,7 +22,7 @@
  *
  *  The Log renderer and the evidence tabs are moved here from project-workspace.js (logList and the
  *  painting half of buildEvidence), not copied: the lobby they belonged to goes in phase 1. */
-import { WORDS, GROUPS, PAGE_LIMITS, WAITS_FOR_REPLY, REFUSED_IN_DEMO, MAIN } from './control-panel-contract.js';
+import { WORDS, GROUPS, PAGE_LIMITS, REFUSED_IN_DEMO, MAIN } from './control-panel-contract.js';
 import { createGithubPanel } from './github-ui.js';
 import { describeToolEvent, inputLine, eventToLogEntry } from './transcript.js';
 
@@ -196,11 +196,10 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
 
   const pid = () => M?.project?.id ?? P?.project ?? '';
   const call = (name, value, project = pid()) => Promise.resolve().then(() => onAction?.(name, project, value));
-  /** Why a key can't go now, in words: the model's first; the app's busy and demo rules as a backstop. */
+  /** Why a key can't go now, in words: the model's first; the app's demo rule as a backstop. Nothing waits for nibbi's reply (§12.2). */
   function blockedWords(action, payload) {
     const opens = PLAYS.includes(action) && payload?.action === 'open';
     if (M?.demo && REFUSED_IN_DEMO.includes(action) && !opens) return demoWords(action);
-    if (busy && WAITS_FOR_REPLY.includes(action)) return WORDS.busy;
     return '';
   }
   const actionBlocked = a => a.blocked || blockedWords(a.action, a.payload);
@@ -1131,7 +1130,9 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
       box.append(list);
       return box;
     });
-    const hint = copy ? fill(WORDS.copy.formHint, { name: b.name }) : WORDS.form.hint;
+    // with automation picking this list up (b.autoInto), up next doesn't wait for you, and the hint says so
+    const into = String(b.autoInto || '');
+    const hint = copy ? fill(into ? WORDS.copy.formHintAuto : WORDS.copy.formHint, { name: b.name }) : into ? fill(WORDS.form.hintAuto, { into }) : WORDS.form.hint;
     reconcile(s, [s._head, form, form && keep('add-hint', hint, () => node('p', 'cp-add-hint', hint)), list]);
     return s;
   }

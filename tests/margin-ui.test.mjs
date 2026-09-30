@@ -48,14 +48,14 @@ const held = (locator, rest, {prop = 'backgroundColor', want = null} = {}) => lo
 const probeColor = (page, locator, value) => locator.evaluate((el, value) => { const probe = document.createElement('i'); probe.style.color = value; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }, value);
 
 test('progress line reports verified merges without proposing a next goal', () => {
-  assert.equal(progressLine(undefined), 'Progress not available');
-  assert.equal(progressLine(null), 'Progress not available');
-  assert.equal(progressLine({available: false}), 'Progress not available');
-  assert.equal(progressLine({available: false, today: {deliveries: 4}, week: {deliveries: 9}, streak: 2}), 'Progress not available', 'unavailable wins over stale numbers');
-  assert.equal(progressLine({available: true}), 'Progress not available', 'no counts is not zero progress');
-  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}), 'Nothing merged yet today');
-  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 3}, streak: 0}), 'Nothing merged yet today · 3 this week');
-  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 1}, streak: 1}), 'Nothing merged yet today · 1 this week · 1-day streak');
+  assert.equal(progressLine(undefined), 'progress not available');
+  assert.equal(progressLine(null), 'progress not available');
+  assert.equal(progressLine({available: false}), 'progress not available');
+  assert.equal(progressLine({available: false, today: {deliveries: 4}, week: {deliveries: 9}, streak: 2}), 'progress not available', 'unavailable wins over stale numbers');
+  assert.equal(progressLine({available: true}), 'progress not available', 'no counts is not zero progress');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}), 'nothing merged yet today');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 3}, streak: 0}), 'nothing merged yet today · 3 this week');
+  assert.equal(progressLine({available: true, today: {deliveries: 0}, week: {deliveries: 1}, streak: 1}), 'nothing merged yet today · 1 this week · 1-day streak');
   assert.equal(progressLine({available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}), '2 merged today · 5 this week · 3-day streak');
   assert.equal(progressLine({available: true, today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}), '1 merged today · 1 this week · 1-day streak');
   assert.equal(progressLine({today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}), '1 merged today · 1 this week · 1-day streak', 'available defaults to true when counts exist');
@@ -99,18 +99,18 @@ test('the bar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await progress.count(), 1, 'one companion progress line in the projects rail');
     assert.equal(await progress.getAttribute('role'), 'status');
     assert.ok(await progress.evaluate(el => el.classList.contains('margin-muted')), 'quiet muted style');
-    assert.equal(await progress.innerText(), 'Progress not available', 'no progress in the model reads as unavailable, not zero');
+    assert.equal(await progress.innerText(), 'progress not available', 'no progress in the model reads as unavailable, not zero');
     assert.ok(await progress.evaluate(el => el.closest('.margin-foot') === document.querySelector('.margin-body').lastElementChild), 'the quiet line is the foot, the last thing in the scroll under the cards');
     for (const [value, said] of [
-      [{available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}, 'Nothing merged yet today'],
-      [{available: true, today: {deliveries: 0}, week: {deliveries: 4}, streak: 0}, 'Nothing merged yet today · 4 this week'],
+      [{available: true, today: {deliveries: 0}, week: {deliveries: 0}, streak: 0}, 'nothing merged yet today'],
+      [{available: true, today: {deliveries: 0}, week: {deliveries: 4}, streak: 0}, 'nothing merged yet today · 4 this week'],
       [{available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}, '2 merged today · 5 this week · 3-day streak'],
       [{available: true, today: {deliveries: 1}, week: {deliveries: 1}, streak: 1}, '1 merged today · 1 this week · 1-day streak'],
-      [{available: false}, 'Progress not available'], [undefined, 'Progress not available'],
+      [{available: false}, 'progress not available'], [undefined, 'progress not available'],
     ]) {
       await page.evaluate(value => { if (value === null) delete model.progress; else model.progress = value; ui.update(model); }, value ?? null);
       assert.equal(await progress.innerText(), said);
-      assert.equal(await progress.textContent(), said, 'textContent is exactly progressLine(), which three suites pin');
+      assert.equal(await progress.textContent(), said, 'textContent is exactly progressLine(), which three suites pin, lowercase (D13 closed)');
     }
     await page.evaluate(() => {model.progress = {available: true, today: {deliveries: 2}, week: {deliveries: 5}, streak: 3}; ui.update(model);});
     assert.deepEqual(await progress.locator('.cp-seg').allTextContents(), ['2 merged today', ' · 5 this week', ' · 3-day streak'], 'each fact is its own piece, so one that does not fit drops whole');
@@ -240,7 +240,8 @@ test('the bar preserves live authority, drafts, focus, and responsive controls',
     assert.equal(await card.count(), 1);
     assert.match(await card.textContent(), /\$14\.2 spent · Cap \$40/, 'what it spends and may spend, and nothing about plans');
     assert.doesNotMatch(await card.textContent(), /complete|pending|in flight/, 'the plan meter and the old counts are gone');
-    assert.match(await card.locator('.margin-roadmap').innerText(), /^automation picks its next step from plans\/.+\.md$/, 'automation still reads the roadmap, and the card says so once');
+    assert.equal(await card.locator('.margin-auto-line').innerText(), 'automation picks up up next · builds into main', 'automation works up next, and the card says so once');
+    assert.equal(await card.locator('.margin-into-field').isVisible(), false, 'with no copy there is nothing to choose between');
     for (const gone of ['Plan', 'Play', 'Fix…', 'Review']) assert.equal(await card.getByRole('button', {name: gone, exact: true}).count(), 0, `no ${gone} pill`);
     for (const kept of ['Repository & GitHub', 'Providers']) assert.equal(await card.getByRole('button', {name: kept, exact: true}).count(), 1, `${kept} stays`);
     const cap = card.locator('input[type="number"]');
@@ -646,32 +647,37 @@ test('+ improvement starts it now or keeps it up next, and says in words when it
     await page.evaluate(() => release());
     await form.waitFor({state: 'hidden'});
     await page.evaluate(() => { window.hold = false; calls.length = 0; });
-    // nibbi answering: start now waits, in words; up next still goes; the conversations + waits too
-    await page.evaluate(busy => { model.busy = true; model.projects[0].builds = [mainOf({blocked: {start: busy, queue: '', play: ''}})]; ui.update(model); }, WORDS.busy);
+    // nibbi answering: start now still goes — a run is a background agent in its own worktree, not the chat's turn (D8, reversed
+    // 2026-09-29: docs/CONTROL-PANEL.md §12.2) — and keeps its double-press guard; up next goes; only the conversations + waits
+    await page.evaluate(() => { model.busy = true; model.projects[0].builds = [mainOf()]; ui.update(model); window.hold = true; });
     await add.click();
-    assert.equal(await start.isDisabled(), true);
-    assert.equal(await start.getAttribute('title'), WORDS.busy);
-    assert.equal(await note.innerText(), WORDS.busy, 'the form says why start now waits');
+    assert.equal(await start.isDisabled(), false, 'start now goes while nibbi answers');
+    assert.equal(await note.isVisible(), false, 'and nothing says it waits for the reply');
     await field.fill('the join button is bigger');
     await field.press('Enter');
-    assert.equal(await page.evaluate(() => calls.length), 0, 'Enter sends nothing while nibbi answers');
-    assert.equal(await note.innerText(), WORDS.busy);
-    assert.equal(await queue.isDisabled(), false);
-    await queue.click();
-    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'queueImprovement', id: 'alpha', value: {text: 'the join button is bigger'}}, 'up next works while nibbi answers');
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'startImprovement', id: 'alpha', value: {text: 'the join button is bigger'}}, 'Enter starts it while nibbi answers');
+    assert.equal(await start.getAttribute('aria-busy'), 'true', 'the key holds while it sends');
+    await page.evaluate(() => { calls.length = 0; ui.update(model); });
+    await field.press('Enter');
+    assert.equal(await page.evaluate(() => calls.length), 0, 'a second Enter while it sends sends nothing, answering or not');
+    await page.evaluate(() => { window.hold = false; release(); });
     await form.waitFor({state: 'hidden'});
     await add.click();
-    assert.equal(await note.innerText(), WORDS.busy, 'opened again while nibbi answers, it says so at once');
+    await field.fill('a second thought');
+    await queue.click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'queueImprovement', id: 'alpha', value: {text: 'a second thought'}}, 'up next works while nibbi answers');
+    await form.waitFor({state: 'hidden'});
     const convo = page.locator('.cp-group[data-cp-group="conversations"]');
     assert.equal(await convo.locator('.cp-badge').innerText(), WORDS.answering);
     assert.equal(await convo.locator('.cp-badge').evaluate(el => el.getAnimations().map(a => a.animationName).join()), 'cp-bar-pulse', 'answering pulses, in opacity only');
-    assert.equal(await convo.locator('.project-thread-new').isDisabled(), true);
+    assert.equal(await convo.locator('.project-thread-new').isDisabled(), true, 'a new conversation still waits: one turn runs at a time');
     assert.equal(await convo.locator('.project-thread-new').getAttribute('title'), 'not while nibbi is answering');
-    // the reply landed: start now goes again, and the note stops saying it waits
-    await page.evaluate(() => { model.busy = false; model.projects[0].builds = [mainOf()]; ui.update(model); });
+    // the reply landed: the conversations + comes back; the form never changed
+    await page.evaluate(() => { model.busy = false; ui.update(model); });
+    assert.equal(await convo.locator('.project-thread-new').isDisabled(), false);
+    await add.click();
     assert.equal(await start.isDisabled(), false);
-    assert.equal(await form.isVisible(), true);
-    assert.equal(await note.isVisible(), false, 'the waiting words go when the wait does');
+    assert.equal(await note.isVisible(), false);
     // demo: both keys and ▶ say why they cannot, and main says it under its row
     await page.evaluate(w => { model.projects[0].builds = [mainOf({blocked: {start: w.demoStart, queue: w.demoChange, play: w.demoPlay}})]; ui.update(model); }, WORDS);
     assert.equal(await start.getAttribute('title'), WORDS.demoStart);
@@ -1263,6 +1269,57 @@ test('+ New build: the suggested name selected, name problems in words, Enter ma
       else assert.equal((await page.evaluate(() => calls.at(-1))).action, 'newCopy', JSON.stringify(typed));
       if (!expected) { await put(page, copiesModel()); if (!await buildForm.isVisible()) await plus.click(); }
     }
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('the project card: automation picks up up next, into main or the copy you choose, and says its last word', {timeout: 60000}, async () => {
+  const browser = await chromium.launch({channel: process.env.CI ? undefined : 'chrome'});
+  try {
+    const page = await browser.newPage({viewport: {width: 1180, height: 820}});
+    const errors = await harness(page);
+    await put(page, copiesModel());
+    const settled = () => page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished.catch(() => {}))));
+    await page.locator('.margin-switch-trigger').click(); await settled();
+    await page.locator('.project-group .project-options').first().click(); await settled();
+    const card = page.locator('.margin-card:not([hidden])'), line = card.locator('.margin-auto-line'), into = card.locator('.margin-into');
+    const keys = () => into.locator('button').evaluateAll(els => els.map(el => [el.textContent, el.getAttribute('aria-pressed')]));
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into main');
+    assert.equal(await card.locator('.margin-into-field').isVisible(), true, 'a project with copies chooses where automation builds');
+    assert.equal(await into.getAttribute('aria-label'), WORDS.auto.intoGroup);
+    assert.equal(await card.locator('.margin-into-field .margin-field-label').innerText(), WORDS.auto.into);
+    for (const words of [await into.getAttribute('aria-label'), await card.locator('.margin-into-field .margin-field-label').innerText()]) assert.doesNotMatch(words, /[A-Z]/, `the card speaks lowercase: "${words}"`);
+    assert.deepEqual(await keys(), [['main', 'true'], ['dev', 'false'], ['dev1', 'false']], 'main, then the copies; main until you choose');
+    assert.equal(await into.locator('button', {hasText: 'dev1'}).getAttribute('title'), 'automation builds what’s up next into dev1');
+    await into.getByRole('button', {name: 'dev', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'autoTarget', id: 'alpha', value: 'copy-11111111-1111-1111-1111-111111111111'});
+    await page.evaluate(() => { model.projects[0].autoTarget = 'copy-22222222-2222-2222-2222-222222222222'; ui.update(model); });
+    assert.deepEqual(await keys(), [['main', 'false'], ['dev', 'false'], ['dev1', 'true']], 'the model says where it builds; the card shows it');
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into dev1');
+    // the chosen copy is seated like any pressed key: ink is for ship alone, even as the last key of its segment
+    const bg = locator => locator.evaluate(el => getComputedStyle(el).backgroundColor);
+    await settled();   // the key's colour moves on --t1
+    assert.equal(await bg(into.locator('[aria-pressed="true"]')), await bg(card.locator('.margin-mode[data-mode="stage"]')));
+    await into.getByRole('button', {name: 'main', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => calls.at(-1)), {action: 'autoTarget', id: 'alpha', value: 'main'});
+    // a /goal keeps the roadmap; automation's last word is under it, whole in its title
+    await page.evaluate(() => { model.projects[0].goalActive = true; model.projects[0].autoNote = 'dev was retired, so automation builds into main now'; ui.update(model); });
+    assert.equal(await line.innerText(), 'automation works toward your goal, from plans/alpha.md');
+    assert.equal(await card.locator('.margin-into-field').isVisible(), false, 'the goal builds on main: builds into is not offered while it is set');
+    assert.equal(await card.locator('.margin-auto-note').innerText(), 'dev was retired, so automation builds into main now');
+    assert.equal(await card.locator('.margin-auto-note').getAttribute('title'), 'dev was retired, so automation builds into main now');
+    await page.evaluate(() => { model.projects[0].goalActive = false; model.projects[0].autoNote = ''; model.busy = true; ui.update(model); });
+    assert.equal(await card.locator('.margin-auto-note').isVisible(), false);
+    assert.equal(await card.locator('.margin-into-field').isVisible(), true, 'the goal done, the choice is back');
+    assert.deepEqual(await into.locator('button').evaluateAll(els => els.map(el => el.disabled)), [true, true, true], 'while nibbi answers, like the other settings');
+    // a copy that couldn't be made is not offered, and chosen, the card says main (the daemon falls back to it)
+    await page.evaluate(() => { model.busy = false; model.projects[0].autoTarget = 'copy-11111111-1111-1111-1111-111111111111'; model.projects[0].builds = model.projects[0].builds.map(b => b.name === 'dev' ? {...b, status: 'broken'} : b); ui.update(model); });
+    assert.deepEqual(await keys(), [['main', 'true'], ['dev1', 'false']], 'dev couldn’t be made: it is not a choice');
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into main');
+    // the copies go: nothing to choose, and the choice falls to main
+    await page.evaluate(() => { model.projects[0].autoTarget = null; model.projects[0].builds = model.projects[0].builds.slice(0, 1); ui.update(model); });
+    assert.equal(await card.locator('.margin-into-field').isVisible(), false);
+    assert.equal(await line.innerText(), 'automation picks up up next · builds into main');
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

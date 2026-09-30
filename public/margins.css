@@ -70,8 +70,11 @@
 .margin-mode:hover:not(:disabled):not([aria-pressed="true"]) { color: var(--margin-ink); }
 .margin-mode:active:not(:disabled) { background: var(--veil-press); }
 .margin-mode[aria-pressed="true"] { background: var(--paper-raised); color: var(--margin-ink); box-shadow: var(--e-seated); }
-.margin-mode:last-child[aria-pressed="true"] { background: var(--margin-ink); color: var(--ink-inverse); }
-.margin-card .margin-roadmap { margin: 0 0 10px; }
+.margin-mode[data-mode="ship"][aria-pressed="true"] { background: var(--margin-ink); color: var(--ink-inverse); }
+.margin-card .margin-auto-line { margin: 0 0 10px; }
+/* where stage and ship build: main or a copy — a name that doesn't fit ends in an ellipsis, and its title holds it whole */
+.margin-into-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.margin-card .margin-auto-note { margin: 2px 0 10px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .margin-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
 .margin-pill { min-height: 32px; padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--margin-line); background: var(--bed); color: var(--ink-2, #383633); font-size: var(--type-meta); }
 .margin-pill:hover:not(:disabled) { background: var(--bed-hover); border-color: var(--veil-strong); }

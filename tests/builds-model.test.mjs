@@ -8,7 +8,7 @@ import {
   buildMain, ticketOf, improvementIdForRun, mergeRuns, conversationsFor, previewText, splitImprovementText, parseDiffstat,
   buildsCard, buildOf, nextCopyName, copyNameProblem, normalizeCopyName,
 } from '../public/lib/builds-model.js';
-import { RUN_STATES, STATE_WORDS, STATE_TONES, GROUPS, WORDS, BADGE, PAGE_LIMITS, COPY_STATES } from '../public/lib/control-panel-contract.js';
+import { RUN_STATES, STATE_WORDS, STATE_TONES, GROUPS, WORDS, BADGE, PAGE_LIMITS, COPY_STATES, WAITS_FOR_REPLY } from '../public/lib/control-panel-contract.js';
 
 const NOW = Date.parse('2026-09-28T12:00:00.000Z');
 const ago = minutes => new Date(NOW - minutes * 60_000).toISOString();
@@ -431,13 +431,15 @@ test('every state has at most one ink key, and the states the spec stars have ex
 
 /* ------------------------------------------------------------------------------------------ §5.2 blocked words */
 
-test('while nibbi answers, only the three keys that start a run wait, in words (D8)', () => {
+test('while nibbi answers, no key waits — not even the three that start a run (D8, reversed 2026-09-29: §12.2)', () => {
+  assert.deepEqual([...WAITS_FOR_REPLY], [], 'nothing waits for the reply');
+  assert.equal('busy' in WORDS, false, 'and no words say it does');
   const issues = { status: 'ready', revision: REV, items: [item('i', 'rows drift')] };
   const m = buildMain(input({ busy: true, issues }));
-  assert.equal(m.blocked.start, WORDS.busy); assert.equal(m.blocked.queue, ''); assert.equal(m.blocked.play, '');
-  assert.equal(action(ticketOf(input({ busy: true, issues }), 'issue:i'), 'build-now').blocked, WORDS.busy);
+  assert.equal(m.blocked.start, ''); assert.equal(m.blocked.queue, ''); assert.equal(m.blocked.play, '');
+  assert.equal(action(ticketOf(input({ busy: true, issues }), 'issue:i'), 'build-now').blocked, '');
   assert.equal(action(ticketOf(input({ busy: true, issues }), 'issue:i'), 'edit').blocked, '');
-  assert.equal(action(ticketOf(input({ busy: true, runs: [run('f', { status: 'failed' })] }), 'run:f'), 'retry').blocked, WORDS.busy);
+  assert.equal(action(ticketOf(input({ busy: true, runs: [run('f', { status: 'failed' })] }), 'run:f'), 'retry').blocked, '');
   const staged = run('s', { status: 'staged', verification: { status: 'passed' } });
   const t = ticketOf(withRead(staged, ALL_REVIEW, { busy: true }), 'run:s');
   for (const k of ['play-run', 'merge', 'discard']) assert.equal(action(t, k).blocked, '', k);
@@ -887,7 +889,7 @@ test('every blocked word a copy says, in the spec’s order (§4.2)', () => {
   const gh = { read2: { disabled: 'github', mode: 'github' } };
   // start
   assert.equal(b({ demo: true, busy: true }).start, WORDS.demoStart);
-  assert.equal(b({ busy: true }).start, WORDS.busy);
+  assert.equal(b({ busy: true }).start, '', 'start now goes while nibbi answers (§12.2)');
   assert.equal(b(gh).start, 'copies are local for now — garden ships through GitHub pull requests');
   assert.equal(b({}, { status: 'creating' }).start, 'dev is busy — it’s still being made');
   assert.equal(b({}, { status: 'shipping' }).start, 'dev is busy — it’s shipping');
@@ -1139,4 +1141,54 @@ test('phase 2 is pure too: frozen input, no clock of its own, the same answer tw
     assert.deepEqual(ticketOf(frozen, 'run:m'), ticketOf(frozen, 'run:m'));
     buildOf(frozen, 'dev1'); ticketOf(frozen, 'run:b'); ticketOf(frozen, 'run:x');
   } finally { Date.now = real; }
+});
+
+/* ================================================================================== automation picks up up next */
+// The owner, 2026-09-29: stage and ship build what is up next, into main or the copy chosen on the card (docs/CONTROL-PANEL.md §12).
+
+test('automation: a suggested one says so, and waits for you; up next says automation builds it while stage or ship works the list', () => {
+  const suggestedOne = { status: 'ready', revision: REV, items: [item('i', 'rows drift', { suggested: true })] };
+  assert.equal(only(buildMain(input({ issues: suggestedOne }))).context, WORDS.suggested, 'nibbi suggested, until something happens to it');
+  assert.equal(only(buildMain(input({ issues: { ...suggestedOne, items: [item('i', 'rows drift', { suggested: true, boardStatus: 'in-progress' })] } }))).context, 'you marked it in progress');
+  const waits = 'it waits here until you start it — nothing builds it on its own', picks = 'automation builds it into main when there’s room — or build it now';
+  // nibbi's suggestion is yours to build or mark done: stage and ship don't build it (auto-queue.ts), and its ticket doesn't say they will
+  for (const mode of ['stage', 'ship']) assert.equal(ticketOf(input({ issues: suggestedOne, auto: { mode } }), 'issue:i').statusLine, waits, mode);
+  const issues = { status: 'ready', revision: REV, items: [item('i', 'rows drift')] };
+  // off, suggest, a /goal (the roadmap is what it works then), or no read of it yet: nothing builds it on its own
+  for (const auto of [undefined, null, { mode: 'off' }, { mode: 'suggest' }, { mode: 'stage', goal: true }, { mode: 'ship', goal: true }]) {
+    assert.equal(buildMain(input({ issues, auto })).autoInto, '', JSON.stringify(auto));
+    assert.equal(ticketOf(input({ issues, auto }), 'issue:i').statusLine, waits, JSON.stringify(auto));
+  }
+  for (const mode of ['stage', 'ship']) {
+    assert.equal(buildMain(input({ issues, auto: { mode } })).autoInto, 'main');
+    assert.equal(ticketOf(input({ issues, auto: { mode } }), 'issue:i').statusLine, picks);
+  }
+  // a try you discarded since automation was turned on waits for you; one from before, automation picks up again
+  const r = run('r', { status: 'discarded', issueIds: ['i'], startedAt: ago(5) });
+  assert.equal(ticketOf(input({ runs: [r], issues, auto: { mode: 'stage', onAt: ago(10) } }), 'issue:i').statusLine, waits);
+  assert.equal(ticketOf(input({ runs: [r], issues, auto: { mode: 'stage', onAt: ago(1) } }), 'issue:i').statusLine, picks);
+  assert.equal(ticketOf(input({ runs: [r], issues, auto: { mode: 'stage', onAt: ago(1) } }), 'issue:i').improvement.context, 'its last try was discarded');
+});
+
+test('automation’s words on the card are lowercase sentence case, its field label and segment name too (LANGUAGE §11)', () => {
+  for (const words of Object.values(WORDS.auto)) assert.equal(words, words.toLowerCase(), `lowercase: ${words}`);
+  assert.deepEqual([WORDS.auto.into, WORDS.auto.intoGroup], ['builds into', 'automation builds into']);
+});
+
+test('automation into a copy: main’s list and the copy’s go into it; another copy’s list waits; a retired target is main', () => {
+  const two = read2([copyView(DEV, 'dev'), copyView(DEV1, 'dev1')]);
+  const issues = { status: 'ready', revision: REV, items: [item('m', 'on main'), item('d1', 'on dev1', { copyId: DEV1 })] };
+  const intos = auto => buildsCard(input2({ copies: two, issues, auto })).builds.map(b => [b.name, b.autoInto]);
+  assert.deepEqual(intos({ mode: 'stage', copyId: DEV }), [['main', 'dev'], ['dev', 'dev'], ['dev1', '']]);
+  assert.deepEqual(intos({ mode: 'ship', copyId: null }), [['main', 'main'], ['dev', ''], ['dev1', '']]);
+  assert.deepEqual(intos({ mode: 'ship', copyId: OLD }), [['main', 'main'], ['dev', ''], ['dev1', '']], 'a target no longer live is main');
+  // a target that couldn't be made is main too: it never becomes ready, and the daemon falls back to main (settleAutoTarget)
+  const broken = read2([copyView(DEV, 'dev', { status: 'broken', error: 'the backend stopped while it was being made' }), copyView(DEV1, 'dev1')]);
+  assert.deepEqual(buildsCard(input2({ copies: broken, issues, auto: { mode: 'stage', copyId: DEV } })).builds.map(b => [b.name, b.autoInto]), [['main', 'main'], ['dev', ''], ['dev1', '']]);
+  assert.equal(ticketOf(input2({ copies: broken, issues, auto: { mode: 'stage', copyId: DEV } }), 'issue:m').statusLine, 'automation builds it into main when there’s room — or build it now');
+  assert.deepEqual(intos({ mode: 'suggest', copyId: DEV }), [['main', ''], ['dev', ''], ['dev1', '']]);
+  const status = (id, auto) => ticketOf(input2({ copies: two, issues, auto }), id).statusLine;
+  assert.equal(status('issue:m', { mode: 'stage', copyId: DEV }), 'automation builds it into dev when there’s room — or build it now');
+  assert.equal(status('issue:d1', { mode: 'stage', copyId: DEV }), 'it waits here until you start it — nothing builds it on its own', 'dev1’s own list is dev1’s');
+  assert.equal(status('issue:d1', { mode: 'stage', copyId: DEV1 }), 'automation builds it into dev1 when there’s room — or build it now');
 });

@@ -83,12 +83,13 @@ const fillIn = (template, values) => String(template).replace(/\{(\w+)\}/g, (all
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const count = value => finite(value) ? Math.max(0, Math.floor(value)) : null;
 const money = value => finite(value) ? `$${Math.max(0, value).toLocaleString(undefined, {maximumFractionDigits: 2})}` : '—';
-/** Companion progress line. Reports what merged; never proposes what to do next. Sentence case, as three suites pin it (D13). */
+/** Companion progress line. Reports what merged; never proposes what to do next. Lowercase, as every state line in the bar is
+    (LANGUAGE §11; D13 closed 2026-09-29, docs/CONTROL-PANEL.md §12.3). */
 export function progressLine(progress) {
   const today = progress && progress.available !== false ? count(progress.today?.deliveries) : null;
-  if (today === null) return 'Progress not available';
+  if (today === null) return 'progress not available';
   const week = count(progress.week?.deliveries) ?? 0, streak = count(progress.streak) ?? 0;
-  const parts = [today === 0 ? 'Nothing merged yet today' : `${today} merged today`];
+  const parts = [today === 0 ? 'nothing merged yet today' : `${today} merged today`];
   if (week > 0) parts.push(`${week} this week`);
   if (streak > 0) parts.push(`${streak}-day streak`);
   return parts.join(' · ');
@@ -466,17 +467,23 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
         if (mode === 'ship') { card.confirm.hidden = false; confirmShip.focus(); }
         else { card.confirm.hidden = true; void dispatch('autoMode', id, mode, card.error); }
       }), 'autoMode', id, () => !!model.busy);
+      el.dataset.mode = mode;
       segment.append(el); modeButtons[mode] = el;
     }
-    // Plans left the bar; the modes still read the roadmap file (scheduler.ts), so the card says so once.
-    const roadmap = node('p', 'margin-muted margin-roadmap');
+    // What automation works (the owner's decision, 2026-09-29): up next, into main or a copy — or, while a /goal is set, the roadmap.
+    const autoLine = node('p', 'margin-muted margin-auto-line');
+    // Where stage and ship build: main, or one of the project's copies. Drawn only when there is a copy to choose.
+    const intoField = node('div', 'margin-into-field'); intoField.hidden = true;
+    const into = node('div', 'margin-segment margin-into'); into.setAttribute('role', 'group'); into.setAttribute('aria-label', WORDS.auto.intoGroup);
+    intoField.append(node('p', 'margin-field-label', WORDS.auto.into), into);
+    const autoNote = node('p', 'margin-muted margin-auto-note'); autoNote.hidden = true;
     const confirm = node('div', 'margin-confirm'); confirm.hidden = true;
     confirm.append(node('p', '', 'Ship can automatically merge changes. Enable it for this project?'));
     const confirmShip = bind(button('Enable ship', 'margin-pill margin-primary', () => {
       void dispatch('autoMode', id, 'ship', card.error).then(ok => { if (ok) confirm.hidden = true; });
     }), 'autoMode', id, () => !!model.busy);
     confirm.append(confirmShip, button('Cancel', 'margin-pill', () => {confirm.hidden = true; modeButtons.ship.focus();})); card.confirm = confirm;
-    card.body.append(segmentLabel, segment, roadmap, confirm);
+    card.body.append(segmentLabel, segment, autoLine, intoField, autoNote, confirm);
     const capForm = node('form', 'margin-cap'); const capLabel = node('label', '', 'Spend cap ($)');
     const cap = node('input'); cap.type = 'number'; cap.min = '0'; cap.step = '0.01'; cap.inputMode = 'decimal';
     cap.id = `margin-cap-${++serial}`; capLabel.htmlFor = cap.id;
@@ -499,7 +506,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       projectActions.append(el);
     }
     card.body.append(projectActions);
-    Object.assign(entry, {branch, goal, stats, roadmap, modeButtons, cap});
+    Object.assign(entry, {branch, goal, stats, autoLine, intoField, into, intoButtons: new Map(), intoKey: '', autoNote, modeButtons, cap});
   }
   function select(entry) {
     closeMenu(false); close();
@@ -1149,9 +1156,11 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
         copyId = build !== MAIN && b.copyId ? String(b.copyId) : null;
         const name = text(b.name ?? b.id, build);
         field.placeholder = build === MAIN ? WORDS.form.placeholder : fillIn(WORDS.copy.formPlaceholder, {name});
-        setText(hint, build === MAIN ? WORDS.form.hint : fillIn(WORDS.copy.formHint, {name}));
+        // with automation picking this list up (b.autoInto), up next doesn't wait for you, and the hint says so
+        const into = String(b.autoInto || '');
+        setText(hint, build === MAIN ? (into ? fillIn(WORDS.form.hintAuto, {into}) : WORDS.form.hint) : fillIn(into ? WORDS.copy.formHintAuto : WORDS.copy.formHint, {name}));
         start.disabled = !!next.start; start.title = next.start || 'build it right away (↵)';
-        queue.disabled = !!next.queue; queue.title = next.queue || 'keep it up next until you start it';
+        queue.disabled = !!next.queue; queue.title = next.queue || (into ? `keep it up next — automation builds it into ${into}` : 'keep it up next until you start it');
         if (!el.hidden && (note.hidden || note.dataset.kind === 'blocked') && (was.start !== next.start || note.hidden)) say(next.start, next.start ? 'blocked' : '');
       },
     };
@@ -1352,12 +1361,35 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     setText(entry.card.heading, text(data.name, 'Untitled project'));
     setText(entry.branch, `Working branch · ${text(data.branch, 'not available')}`);
     setText(entry.goal, text(data.goal, 'No goal set'));
-    setText(entry.roadmap, `automation picks its next step from plans/${text(data.name ?? data.id, 'this project')}.md`);
+    paintAutomation(entry, data);
     const spendLabel = finite(data.spend) ? `${money(data.spend)} spent` : 'Spend not available';
     const capLabel = !finite(data.spendCap) ? 'Cap not available' : data.spendCap <= 0 ? 'No cap' : `Cap ${money(data.spendCap)}`;
     setText(entry.stats, `${spendLabel} · ${capLabel}`);
     for (const [key, el] of Object.entries(entry.modeButtons)) el.setAttribute('aria-pressed', String(key === mode));
     if (!entry.dirty && document.activeElement !== entry.cap) entry.cap.value = finite(data.spendCap) ? String(Math.max(0, data.spendCap)) : '';
+  }
+  /** The Automation part of the card: what it works, where it builds (a segment of main and the copies), and its last word. */
+  function paintAutomation(entry, data) {
+    // a copy that couldn't be made is not offered: it never becomes ready, and the daemon refuses it (autoBroken)
+    const copies = (Array.isArray(data.builds) ? data.builds : []).filter(b => b && b.kind === 'copy' && b.copyId && b.status !== 'broken');
+    const choices = [{name: MAIN, copyId: null}, ...copies.map(b => ({name: text(b.name ?? b.id, 'a copy'), copyId: String(b.copyId)}))];
+    const chosen = choices.find(c => c.copyId !== null && c.copyId === data.autoTarget) || choices[0];
+    setText(entry.autoLine, data.goalActive ? fillIn(WORDS.auto.goalLine, {project: text(data.id ?? data.name, 'this project')}) : fillIn(WORDS.auto.line, {name: chosen.name}));
+    const key = JSON.stringify(choices.map(c => [c.name, c.copyId]));
+    if (entry.intoKey !== key) {
+      for (const b of bindings) if (entry.into.contains(b.el)) bindings.delete(b);
+      entry.intoButtons.clear(); entry.intoKey = key;
+      entry.into.replaceChildren(...choices.map(c => {
+        const el = bind(button(c.name, 'margin-mode margin-into-key', () => { void dispatch('autoTarget', entry.id, c.copyId ?? MAIN, entry.card.error); }), 'autoTarget', entry.id, () => !!model.busy);
+        el.title = fillIn(WORDS.auto.intoTitle, {name: c.name}); entry.intoButtons.set(c.copyId ?? MAIN, el); return el;
+      }));
+      refreshDisabled();
+    }
+    // while a /goal is set its lead builds on main from the roadmap, so there is no choice to show; it is kept for after
+    entry.intoField.hidden = choices.length < 2 || !!data.goalActive;
+    for (const [id, el] of entry.intoButtons) el.setAttribute('aria-pressed', String(id === (chosen.copyId ?? MAIN)));
+    const note = typeof data.autoNote === 'string' ? data.autoNote.trim() : '';
+    entry.autoNote.hidden = !note; setText(entry.autoNote, note); entry.autoNote.title = note;
   }
   function update(next = {}) {
     if (destroyed) return;

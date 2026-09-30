@@ -577,7 +577,7 @@ test('each ticket key sends its payload; asking twice sends only on yes; forms s
   } finally { await h.context.close(); await browser.close(); }
 });
 
-test('blocked keys dispatch nothing and say why; busy holds only the keys that start a run', async () => {
+test('blocked keys dispatch nothing and say why; nibbi answering holds none of them', async () => {
   const browser = await launch();
   const h = await harness(browser, DESKTOP);
   const sent = async () => (await h.calls()).filter(c => c.name !== 'buildEvidence');
@@ -591,30 +591,39 @@ test('blocked keys dispatch nothing and say why; busy holds only the keys that s
     assert.equal(await h.page.locator('.cp-confirm').isVisible(), false);
     assert.deepEqual(await sent(), [], 'a blocked key sends nothing, nor asks');
 
+    // nibbi answering: try again still goes — a run is a background agent in its own worktree (D8, reversed 2026-09-29:
+    // docs/CONTROL-PANEL.md §12.2) — and a second press while the first is out sends nothing
     await h.open('failed'); await h.settle(); await h.clear();
     await h.page.evaluate(() => pages.setBusy(true));
-    assert.equal(await h.page.locator('[data-cp-key="retry"]').isDisabled(), true, 'try again waits for nibbi’s reply');
-    assert.equal(await h.page.locator('[data-cp-key="retry"]').getAttribute('title'), WORDS.busy);
+    const retry = h.page.locator('[data-cp-key="retry"]');
+    assert.equal(await retry.isDisabled(), false, 'try again goes while nibbi answers');
+    assert.equal(await retry.getAttribute('title') || '', '', 'and nothing says it waits');
     assert.equal(await h.page.locator('[data-cp-key="ask"]').isDisabled(), false, 'asking about it does not wait');
-    await h.page.locator('[data-cp-key="retry"]').dispatchEvent('click');
-    assert.deepEqual(await sent(), []);
-    await h.page.evaluate(() => pages.setBusy(false));
-    assert.equal(await h.page.locator('[data-cp-key="retry"]').isDisabled(), false);
+    await h.page.evaluate(() => { window.hold = { name: 'retryRun' }; });
+    await retry.click();
+    assert.deepEqual((await sent()).map(({ name, value }) => ({ name, value })), [{ name: 'retryRun', value: { runId: 'r-fail' } }]);
+    assert.equal(await retry.getAttribute('aria-busy'), 'true', 'the key holds while it is out');
+    await retry.dispatchEvent('click');
+    assert.equal((await sent()).length, 1, 'a second press while it is out sends nothing');
+    await h.page.evaluate(() => { window.hold.release(); window.hold = null; pages.setBusy(false); });
     await h.open('ready', { busy: true }); await h.settle();
     for (const key of ['play-run', 'merge', 'discard']) assert.equal(await h.page.locator(`[data-cp-key="${key}"]`).isDisabled(), false, `${key} works while nibbi answers`);
     await h.open('failed', { demo: true }); await h.settle();
     assert.equal(await h.page.locator('[data-cp-key="retry"]').getAttribute('title'), WORDS.demoStart, 'demo refuses in words');
 
-    // the build page: busy holds start now, in words, and up next still goes
+    // the build page, nibbi answering: start now goes, and so does up next
     await h.open('build', { busy: true }); await h.settle(); await h.clear();
     assert.equal(await h.page.locator('[data-cp-key="play"]').isDisabled(), false, 'play main works while nibbi answers');
     await h.page.locator('[data-cp-key="add"]').click();
     await h.page.keyboard.type('a scarecrow that waves');
-    assert.equal(await h.page.locator('[data-cp-key="add-start"]').isDisabled(), true);
-    assert.equal(await h.page.locator('[data-cp-key="add-start"]').getAttribute('title'), WORDS.busy);
+    assert.equal(await h.page.locator('[data-cp-key="add-start"]').isDisabled(), false, 'start now goes while nibbi answers');
     await h.page.keyboard.press('Enter');
-    assert.equal(await h.page.locator('.cp-add .cp-page-note').innerText(), WORDS.busy, 'Enter says why it waits');
-    assert.deepEqual(await sent(), []);
+    await h.page.waitForFunction(() => window.calls.some(c => c.name === 'startImprovement'));
+    assert.deepEqual((await sent()).map(({ name, value }) => ({ name, value })), [{ name: 'startImprovement', value: { text: 'a scarecrow that waves' } }], 'Enter starts it');
+    await h.page.locator('.cp-add').waitFor({ state: 'detached' });
+    await h.clear();
+    await h.page.locator('[data-cp-key="add"]').click();
+    await h.page.keyboard.type('a scarecrow that waves');
     await h.page.locator('[data-cp-key="add-queue"]').click();
     await h.page.waitForFunction(() => window.calls.some(c => c.name === 'queueImprovement'));
     assert.deepEqual((await sent()).map(({ name, value }) => ({ name, value })), [{ name: 'queueImprovement', value: { text: 'a scarecrow that waves' } }]);

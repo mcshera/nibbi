@@ -65,12 +65,12 @@ real data, with exactly one build — `main` — holding its improvements. No pe
 | D5 | Chat is the default. A build row → its build page; an improvement row → its ticket page; ×, Escape, or a conversation row → chat. `S.projectView = { project, page: 'build'\|'ticket'\|'repository', id }` | ROUND5 decided 5-6 |
 | D6 | Pages render inside the existing frame `#project-workspace`, so the composer, the character and the fixers behave on a page exactly as they did on a section | project-composer.css:2-5, app.js:166-199 |
 | D7 | `+ improvement` is one inline form with two submits: **start now** (ink, ↵) → `run.dispatch`; **up next** (seated) → `issue.create`. It never closes the view and never types into the composer | ROUND3 decided 4; code.md §2 |
-| D8 | Anything that starts an agent run (start now, build it now, try again) waits for nibbi's reply, in words; nothing else does (up next, stop, merge, discard, play, opening pages all work while nibbi answers) | ROUND3 decided 4; app.js:2087 keeps daemon commands free |
+| D8 | ~~Anything that starts an agent run (start now, build it now, try again) waits for nibbi's reply, in words; nothing else does~~ **Reversed 2026-09-29 (§12.2): nothing waits for the reply** — before that, nothing else did either (up next, stop, merge, discard, play, opening pages all work while nibbi answers) | ROUND3 decided 4; app.js:2087 keeps daemon commands free |
 | D9 | The builds card has **no** header `+` in phase 1 (`+ New build`, a copy, waits for phase 2); `+ improvement` lives inside main. Main has **no** caret: its body is always open | plan "Phase 1"; ROUND5 decided 1 with one build |
 | D10 | The Scope tab strip, the section summaries and pills, Plans, the Issues kanban and the Builds lobby leave the UI. The data paths stay (daemon unchanged; `/plan`, `/goal`, `/review` chat commands unchanged). Repository & GitHub stays, from the project settings card | ROUND3 decided 1, 6; plan "Remove" |
 | D11 | The lobby's review flow moves onto the ticket: play it, approve & merge (asks twice), discard (asks twice), verify, guide, stop, try again; its evidence (log, changes, checks, GitHub) moves into the ticket's try cards. The lobby's queue keys (j/k/a/x/p) and "Next build" go; `/review` in chat keeps them | the orchestrator; app.js:1401-1445 |
 | D12 | A conversation's second line is the last thing said in it: one small daemon addition (`lastText`, §4.6) | the Cards design (bar-cards.mjs:37-38) |
-| D13 | `#sidebar-progress` keeps `textContent === progressLine(progress)` exactly (sentence case as today): three suites pin it. Lowercasing it is a later one-line change | tests/narration-wiring.test.mjs:76,107,109; tests/margin-ui.test.mjs:16-33 |
+| D13 | `#sidebar-progress` keeps `textContent === progressLine(progress)` exactly ~~(sentence case as today): three suites pin it. Lowercasing it is a later one-line change~~ — **closed 2026-09-29 (§12.3): lowercase**, and the suites pin that | tests/narration-wiring.test.mjs:76,107,109; tests/margin-ui.test.mjs:16-33 |
 | D14 | "remove it" on an up-next issue becomes **mark it done** (`issue.complete`): the daemon has no issue delete (project-workspace.ts:15). A queued run's is **cancel it** (`run.stop`) | never invent a command |
 | D15 | Page keys are lowercase (`try again`, `approve & merge`), unlike the lab's capitalised ink keys | LANGUAGE §11, audit P14 |
 
@@ -196,7 +196,7 @@ is open; Escape closes it (§6.4).
 | moment | the bar says |
 |---|---|
 | projects loading / unreachable / none | as today inside `.margin-body` (`emptyLine`, `.margin-empty-retry`, `.margin-empty-new` "new project"); cards 2–3 hidden |
-| nibbi answering | conversations badge "answering" (pulses); its `+` disabled; start now disabled with `WORDS.busy`; everything else live |
+| nibbi answering | conversations badge "answering" (pulses); its `+` disabled; everything else live, start now included (D8 reversed, §12.2) |
 | demo | start now / up next disabled with `WORDS.demoStart` / `WORDS.demoChange`; ▶ with `WORDS.demoPlay` |
 | issues.md unreadable | no up-next issue rows; `WORDS.noList` as a `.cp-why` line in main's body; queued runs still listed |
 | nothing to improve | `WORDS.emptyImprovements` and the `+ improvement` row |
@@ -213,7 +213,9 @@ Focus survives `update()`: rows are keyed and reused while their signature is un
 Unchanged except: the plan progress label, meter and the "pending" stat go (margin-ui.js:323-327,
 689-698); the pills **Plan · Play · Fix… · Review** go (margin-ui.js:361); **Repository & GitHub** and
 **Providers** stay, labels unchanged. Under the Automation segment, one quiet line (ROUND3 decided 8):
-`automation picks its next step from plans/<name>.md`. The stats line becomes `<spend> spent · <cap>`.
+`automation picks up up next · builds into <build>` — until §12.1 it read `automation picks its next
+step from plans/<name>.md` — then, when the project has a copy, the **builds into** segment, and
+automation's last note. The stats line becomes `<spend> spent · <cap>`.
 
 #### 2.1.5 Premium baseline (every bar control)
 
@@ -545,16 +547,16 @@ The bar and the pages call `onAction(name, projectId, value)`. The integrator wr
 | backToChat | a page's ×; the bar's Escape while a page is open | — | `closeProjectView(true)` (app.js:2062-2066) | yes | yes |
 | thread | a conversation row | thread id | existing (app.js:2020-2023); `openThread` leaves any page (app.js:735) | refused for another thread: `busyNotice()` "nibbi is answering in “…” — switch when it’s done" | yes |
 | newThread | conversations `+` | — | existing (app.js:2024-2027) | refused: `busyNotice()` | yes |
-| startImprovement | the bar's form; the build page's form | `{ text }` | `handleProjectAction('buildCommand', project, { command: 'run.dispatch', args: { issue: text, title: first line ≤ 80 } })` → `api.command('run.dispatch', …)` (app.js:2105-2110; command-service.ts:32-36) | **refused: `WORDS.busy`** | refused: `WORDS.demoStart` |
+| startImprovement | the bar's form; the build page's form | `{ text }` | `handleProjectAction('buildCommand', project, { command: 'run.dispatch', args: { issue: text, title: first line ≤ 80 } })` → `api.command('run.dispatch', …)` (app.js:2105-2110; command-service.ts:32-36) | yes (§12.2; it said `WORDS.busy` before) | refused: `WORDS.demoStart` |
 | queueImprovement | the same forms | `{ text }` | `splitImprovementText(text)` → `handleProjectAction('projectCommand', project, { action: 'issue.create', title, description, expectedRevision: issues.revision })` (project-workspace.ts:157-160); on `REVISION_CONFLICT` re-read issues and retry once | yes | refused: `WORDS.demoChange` |
 | playMain | main's ▶; the build page | `{ action: 'start'\|'stop'\|'open' }` | `playProject(project, action)`: the body of `playFlow` (app.js:1506-1534) without its chat turn — `POST /api/play` then poll `GET /api/play?project=` every 1200ms for ≤ 60s, `openUrl(url)`; then refresh `S.playable` / `S.cp` play for the project. `open` → `openUrl(play.url)` | yes | refused: `WORDS.demoPlay` |
-| buildIssue | an up-next issue ticket: build it now | `{ issueId }` | `projectCommand` `issue.build` `{ id, expectedRevision }` (project-workspace.ts:185-196; duplicate-safe :190) | **refused: `WORDS.busy`** | refused |
+| buildIssue | an up-next issue ticket: build it now | `{ issueId }` | `projectCommand` `issue.build` `{ id, expectedRevision }` (project-workspace.ts:185-196; duplicate-safe :190) | yes (§12.2; it said `WORDS.busy` before) | refused |
 | editImprovement | issue ticket: edit the words → save the words | `{ issueId, title, description }` | `projectCommand` `issue.edit` (project-workspace.ts:161, 107-128); a conflict keeps the words: "the list changed — your words are still here; save again" | yes | refused |
 | completeImprovement | issue ticket: mark it done | `{ issueId }` | `projectCommand` `issue.complete`; conflict → re-read, retry once | yes | refused |
 | reopenImprovement | done ticket: reopen it | `{ issueId }` | `projectCommand` `issue.reopen`; conflict → re-read, retry once | yes | refused |
 | stopRun | building / needs you: stop (confirm); queued: cancel it | `{ runId }` | `buildCommand` `run.stop` (fixer.ts:276-282) | yes | refused |
 | steerRun | guide it → send it | `{ runId, text }` | `buildCommand` `run.steer` `{ text }` (fixer.ts:283) | yes | refused |
-| retryRun | failed / interrupted / stopped / discarded: try again | `{ runId }` (the latest try) | `buildCommand` `run.retry` (fixer.ts:292-302) | **refused: `WORDS.busy`** | refused |
+| retryRun | failed / interrupted / stopped / discarded: try again | `{ runId }` (the latest try) | `buildCommand` `run.retry` (fixer.ts:292-302) | yes (§12.2; it said `WORDS.busy` before) | refused |
 | verifyRun | ready / failed: verify it | `{ runId }` | `buildCommand` `run.verify` (fixer.ts:362-381) | yes | refused |
 | mergeRun | ready (local): approve & merge → confirm merge | `{ runId }` | `buildCommand` `run.merge` (fixer.ts:382, integrate :327-360); success notice "merged into main." | yes | refused |
 | discardRun | ready / GitHub states: discard → confirm discard | `{ runId }` | `buildCommand` `run.discard` (fixer.ts:290) | yes | refused |
@@ -572,7 +574,7 @@ Gone from the bar: `projectSection`, `fix`, `plan`, `play`, `review` (margin-ui.
 
 | key | blocked when | words |
 |---|---|---|
-| start now, build it now, try again | `busy` | `WORDS.busy` |
+| ~~start now, build it now, try again~~ | ~~`busy`~~ | ~~`WORDS.busy`~~ — gone with D8 (§12.2) |
 | any `REFUSED_IN_DEMO` action | `demo` | `WORDS.demoStart` (starts) · `WORDS.demoPlay` (play) · `WORDS.demoChange` (the rest) |
 | up next, edit, mark it done, reopen | the issues read is not `ready` | `WORDS.noList` |
 | approve & merge | `allowedActions` null | `WORDS.reading` |
@@ -755,7 +757,7 @@ payload). Nothing else in the daemon changes.
 | tests/margin-ui.test.mjs | sections, tabs, foot | the BAR builder's (§7c) |
 | tests/project-workspace-ui.test.mjs:65-184, 257-283 | issues editing, milestones, GitHub filters and key hint | delete |
 | tests/project-workspace-ui.test.mjs:185-255, 285-497 | lobby evidence, play, live focus | delete here; the PAGES test carries them (§7b). Keep a small frame test: repository opens, × and Escape call `onClose`, the page host hides the repository content, a notice without a kind is ink |
-| tests/narration-wiring.test.mjs:76, 107, 109 | `#sidebar-progress` textContent | must pass unchanged (D13) |
+| tests/narration-wiring.test.mjs:76, 107, 109 | `#sidebar-progress` textContent | must pass unchanged (D13; lowercase since §12.3) |
 | daemon/test/threads.test.ts:102 | payload `deepEqual` | + `lastText` |
 | tools/verify.mjs:100-109 | builds tab → section → × / Escape | `[data-bar-build="main"]` → the build page → `.project-close`; again → Escape from `.project-workspace-body` |
 | tools/surfaces-verify.mjs:26 | waits for `.margin-tab[data-margin-tab="builds"]` | waits for `[data-bar-build="main"]` |
@@ -809,7 +811,7 @@ paper-garden. `PASS`/`FAIL` lines like its neighbours; exit code 1 on any failur
 6. **a staged ticket asks twice, then merges** — `fixture.fixer.waitForFixer(<run from 4>)` → its ticket → **approve & merge** → `.cp-confirm` visible, the run still `staged`, no `/api/commands` POST for `run.merge` yet → **confirm merge** → the run `merged`; its bar row `data-state="in"`; the page word "in".
 7. **plans are unreachable** — no `[data-project-section]`, `.margin-tab`, `[data-margin-tab]` or "plan" pill anywhere; the project settings card has no Plan/Fix…/Review/Play pills.
 8. **× and Escape return to chat** — on a page, `.project-close` → frame hidden, `body` not `.project-view`, focus `#ask`, home current; again, Escape from inside `.project-workspace-body` → the same.
-9. **busy refuses starting, in words** — `fixture.holdChat()`, send a message, open `+ improvement`: **start now** disabled and pressing Enter shows `WORDS.busy`; **up next** still works; release.
+9. **while nibbi answers, start now still starts** (was *busy refuses starting, in words*, until §12.2) — `fixture.holdChat()`, send a message, open `+ improvement`: **start now** is live and Enter starts a run while nibbi is still answering; a new conversation still waits; release.
 10. **44px at 390 touch** — open the drawer: every visible button in `#workspace-sidebar` ≥ 44 tall (icon keys also ≥ 44 wide); a row that opens a page closes the drawer first; on a ticket every visible `.cp-page button` ≥ 44; no horizontal overflow.
 11. **press states** — for a conversation row, main's row, an improvement row, `+ improvement`, ▶, the conversations `+`, `#status`, `.sidebar-collapse` and a page key: the `:active` background (pointer down, no up) differs from rest, and `transition-property` names `background-color` at 120ms; none is `all`.
 12. **live and reduced** — a building row's word pulses (`cp-bar-pulse` running); with `reducedMotion: 'reduce'` no animation runs in the bar or the page.
@@ -828,7 +830,8 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
    drains the roadmap (scheduler.ts:75-90), and queued runs drain within ten seconds (`drainQueues`,
    fixer.ts:187-200), so the queued half is nearly always empty and an up-next item never becomes
    building on its own. The words say so ("it waits here until you start it"; the form's hint), and the
-   one path from up next to building is **build it now** (`issue.build`).
+   one path from up next to building is **build it now** (`issue.build`). **Decided 2026-09-29: stage
+   and ship drain it (§12.1).**
 2. **"A run started from free text is its own ticket" breaks on Try again.** `run.retry` makes a new
    run and marks the old superseded (fixer.ts:292-302); the ticket is the `replacesBuildId` chain (D2).
 3. **"Play main" plays the owner's checkout, not main**, on whatever branch it is on, dirty or not
@@ -851,7 +854,7 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
    done (D14).
 9. **Starting work while nibbi answers**: the decided list (ROUND3 decided 4) refuses it, production's
    rule allows every daemon command (app.js:2087). The spec takes the decided list for the three
-   run-starting keys only (D8) — the owner may want that reversed.
+   run-starting keys only (D8) — the owner may want that reversed. **He did, 2026-09-29 (§12.2).**
 10. **Word changes ripple**: "needs input" (describeProjectSection, notifications, attention-verify) →
     "needs you"; the "open build" chip → "open it"; notification and chip targets move from the lobby to
     tickets (app.js:894, 900, 1251). Not in the plan.
@@ -861,8 +864,8 @@ fold row, the ask-twice strip. §15: record the Cards bar and the Console pages.
     :123, :129) and two tests go vacuous (tests/margin-ui.test.mjs:259-263, 334-349) — data.md §6 said
     so; the plan's commit table did not.
 13. **Open, for the owner**: whether "both of them" meant the two groups (read here, ROUND5 decided 1);
-    whether up-next items should be drained by automation (scheduler option (b), code.md §3); lowercase
-    for the progress line (D13).
+    whether up-next items should be drained by automation (scheduler option (b), code.md §3) — **yes,
+    §12.1**; lowercase for the progress line (D13) — **yes, §12.3**.
 
 ---
 
@@ -902,3 +905,103 @@ What phase 2 changed here:
 The decisions phase 2 took (D1–D16, BUILDS-AS-COPIES.md §1) are defaults for the owner to override;
 where the integration departed from that spec is its §10.
 
+---
+
+## 12. The three open questions, decided (2026-09-29)
+
+The owner, verbatim: *"go with all three recommendations"* (the plan's "The three open questions: plan",
+`~/.claude/plans/control-panel-bar.md`). Branch `ui/automation-and-words`, draft PR #26 on #25; one
+commit each, in this order.
+
+### 12.1 Automation works up next (§9.1, §9.13)
+
+Phase 1 took Plans out of the UI, so the modes were draining a list nobody could see, and nothing moved
+an up-next improvement on its own. Now the modes work the Improvements list:
+
+| mode | before | now |
+|---|---|---|
+| suggest | one free-text note, ≤ 300 characters, from a roadmap read | the lead is asked for up to three improvements; each goes into main's up next marked **nibbi suggested** (`WORDS.suggested`, the row's line two and the ticket), for the owner to build or mark done. It builds nothing and has no dispatch tool. It asks again only once none of its last ones is still up next and the list has changed; what the owner marked done is not suggested again |
+| stage | the lead dispatched roadmap tasks, up to capacity | the top of up next, in issues.md order, through `issue.build` (its duplicate guard, its copy rules), while the project has room: `maxConcurrent` less its running **and queued** tries. No model chooses. nibbi's suggestions are not built: they wait for the owner's build it now |
+| ship | stage, plus auto-merge into main | the same, into the build chosen on the card. Into main: today's auto-merge on main. Into a copy: its tries land in the copy on their own (D5), and ship **merges nothing into main** — Ship to main stays the owner's confirm |
+
+- **Builds into.** `AutoCfg.copyId` (unset: main), set with `auto.set { copyId }` (`null`: main) from
+  the card's **builds into** segment — main and the live copies, drawn only when there is a copy. The
+  daemon refuses a copy that isn't this project's and live, one that couldn't be made (`broken`, which
+  only retire leaves: `COPY_WORDS.autoBroken`), and any copy in a GitHub-mode project. A retired copy,
+  or one that breaks while chosen (its install fails, or a restart finds it still being made), falls
+  back to main with a note, and ship steps down to stage: ship into a copy never merged main, and
+  falling back must not start to (`settleAutoTarget`, run by retire and by every pass). Before, a broken
+  target was accepted and waited on forever in silence, while every up-next ticket said automation
+  would build it into that copy (review F3); the card doesn't offer a broken copy, and the model reads
+  a broken target as main.
+- **Which improvements** (`daemon/src/auto-queue.ts`): those the bar shows up next — no try yet, the
+  latest try stopped or discarded, or tried on a copy retired before it shipped — in main's list or the
+  target copy's; one put up next on another copy is that copy's. Not one tried since automation was
+  turned on (`onAt`), so a try the owner stopped or discarded isn't started again by itself. Not one
+  nibbi suggested: the decision has suggestions "built or marked done by the owner", so stage and ship
+  leave them for build it now, and their tickets keep `it waits here until you start it` (review F1). File order,
+  not the bar's in-progress-first order: the kanban that marked items in progress left in phase 1.
+- **The guards are the old ones**: a failed, interrupted or stopped run since `onAt` turns it off; the
+  spend cap (and a provider cost it can't read, under a cap) turns it off; GitHub mode pauses ship. A
+  refused `issue.build` turns it off with its words (`AUTO_WORDS.buildFailed`). A copy that is being
+  made, shipping or catching up is waited for.
+- **A set /goal keeps the roadmap**, as before: stage or ship with an unfinished goal run the lead's
+  roadmap turn (dispatch allowed), and "Roadmap complete" ends the goal and turns it off. suggest always
+  suggests improvements. The goal's lead builds on main, so ship with a goal merges main's staged runs
+  as it did, whatever copy **builds into** names (review F2: with a copy chosen, the goal's runs stayed
+  staged and the goal never finished); the choice is kept for after the goal, and the card doesn't draw
+  **builds into** while a goal is set.
+- **Words.** The card: `automation picks up up next · builds into main` (`WORDS.auto.line`), or
+  `automation works toward your goal, from plans/<project>.md` while a goal is set, and automation's last
+  note under it (`AutoCfg.note`, two lines, whole in its title). An up-next ticket says `automation builds
+  it into main when there’s room — or build it now` while automation would pick it up (`WORDS.upNextAuto`
+  from `BuildVM.autoInto`), and the + improvement hint says up next is picked up (`WORDS.form.hintAuto`,
+  `WORDS.copy.formHintAuto`). The ship segment's ink is `[data-mode="ship"]` now, not `:last-child`, so
+  the last copy in builds into is seated like any pressed key.
+- **Checked.** `daemon/test/automation.test.ts` (temp state, real git, 15 tests): stage builds the top
+  item and no second past capacity, then the next, and not a discarded one again; the spend cap stops it
+  first; suggest adds three marked nibbi suggested, cleaned and none a repeat, builds nothing, and waits
+  for the owner; stage and ship build none of nibbi's suggestions; ship into dev lands in dev, never
+  ships main nor merges a staged main try, and a retired dev falls back to main in stage; ship into main
+  keeps today's merge; a goal keeps the roadmap, and in ship merges its main runs with a copy chosen; a
+  broken copy is refused and, broken while chosen, falls back to main in stage. Each guard above is
+  pinned on its own, so removing any one fails its test (review F4): another copy's up next is built
+  neither into the chosen copy nor into main; a queued try counts against capacity; a target being made,
+  shipping or catching up is waited for with automation left on; a GitHub-mode project refuses a copy
+  target; a try on a copy retired before it shipped is picked up into main.
+  `tools/control-panel-verify.mjs` check 22: stage chosen on the card, one pass, the top two up-next rows
+  turn into building and the third waits, its ticket saying automation builds it.
+
+### 12.2 The keys that start a run don't wait for nibbi's reply (D8, reversed; §9.9)
+
+**start now**, **build it now** and **try again** were refused while nibbi answered (`WAITS_FOR_REPLY`,
+after ROUND3 decided 4), though the app's own rule since round 2's C4 is that a daemon command never
+contends with the chat turn. A run is a background agent in its own worktree, not the chat's session;
+the ask was a panel you operate, and waiting made it feel locked whenever nibbi talked; and the guards
+that matter are the daemon's — one live try per improvement (`issue.build`, `queueFix`), capacity, the
+spend cap. So:
+
+- `WAITS_FOR_REPLY` is empty (it stays in the contract, saying so), and `WORDS.busy` — *nibbi’s answering
+  — this can start once the reply lands* — is gone, with the three places that used it: the model's
+  `blocked.start` and `gate()` (builds-model.js), the pages' backstop (project-pages.js) and the app's
+  refusal (app.js `handleControlPanelAction`).
+- Each key keeps its double-press guard and its pending state: a key that is out holds `aria-busy` and
+  a second press sends nothing, answering or not.
+- What still waits while nibbi answers is what shares the turn: a new conversation, switching to
+  another one or project, and the card's settings (their own `newProject, autoMode, spendCap,
+  autoTarget` list).
+- Re-pointed: tests/builds-model.test.mjs (no key waits; `WAITS_FOR_REPLY` is empty, `WORDS.busy` gone),
+  tests/margin-ui.test.mjs (start now starts while answering and still refuses a second Enter),
+  tests/project-pages-ui.test.mjs (*nibbi answering holds none of them*: try again sends once and holds;
+  the build page's start now starts), tools/control-panel-verify.mjs check 9, and
+  tools/project-workflow-verify.mjs's busy check.
+
+### 12.3 The progress line is lowercase (D13, closed)
+
+`Nothing merged yet today` / `Progress not available` were the only capitalised state lines in the Cards
+bar; everything around them is lowercase (`1 ready to review`, `what ships`, `copy of main`), and
+LANGUAGE §11 says labels are lowercase sentence case. D13 kept them only so three suites would stay
+green. `progressLine()` (margin-ui.js) now returns `nothing merged yet today` / `progress not available`
+(the counted forms, `2 merged today · 5 this week · 3-day streak`, were lowercase already), and
+`#sidebar-progress` still has exactly its text. Re-pointed: tests/margin-ui.test.mjs (the progress-line
+test and the bar's foot) and tests/narration-wiring.test.mjs:175; no browser tool pins the string.

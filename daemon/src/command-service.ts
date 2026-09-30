@@ -71,7 +71,7 @@ export async function executeCommand(input: unknown, notify: (message: string) =
         case 'mcp.tokenRevoke': data = await revokeMcpToken(text(a.name)); message = 'Token revoked; its connections are closed'; break;
         case 'web.check': data = await webStatus(command.projectId ?? (typeof a.project === 'string' ? a.project : undefined)); break;
         case 'auto.set': {
-          const patch = z.object({ mode: z.enum(['off', 'suggest', 'stage', 'ship']).optional(), on: z.boolean().optional(), autoMerge: z.boolean().optional(), maxConcurrent: z.number().int().min(1).max(4).optional(), spendCap: z.number().nonnegative().optional(), focus: z.string().optional(), model: z.string().optional() }).parse(a);
+          const patch = z.object({ mode: z.enum(['off', 'suggest', 'stage', 'ship']).optional(), on: z.boolean().optional(), autoMerge: z.boolean().optional(), maxConcurrent: z.number().int().min(1).max(4).optional(), spendCap: z.number().nonnegative().optional(), focus: z.string().optional(), model: z.string().optional(), copyId: copyId.nullable().optional() }).parse(a);
           data = setAuto(projectId(command.projectId ?? a.project), patch); break;
         }
         case 'goal.set': data = setGoal(projectId(command.projectId ?? a.project), z.object({ text: z.string().optional(), focus: z.string().optional(), mode: z.enum(['stage', 'ship']).optional(), stop: z.boolean().optional() }).parse(a)); break;

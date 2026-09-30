@@ -15,7 +15,7 @@ import { HttpError } from './http.js';
 import { connectionFor } from './github-repositories.js';
 import { completeTask } from './roadmap.js';
 import { completeLinkedIssues } from './project-issues.js';
-import { buildIsActive, hasCheck, landOnCopy, listFixers, noteDelivery, saveFixer, type Fixer } from './fixer.js';
+import { buildIsActive, hasCheck, landOnCopy, listFixers, noteDelivery, saveFixer, settleAutoTarget, type Fixer } from './fixer.js';
 import { previewCommand, previewStatus, startPreview, stopAndWait, ownedPreviews } from './previews.js';
 import { changedPaths, discardPendingMerges, firstLine, ignoredPaths, refreshInstall, statusEntries, verifiedFastForward, type MergeFailure } from './verified-merge.js';
 import {
@@ -338,6 +338,7 @@ export async function retireCopy(project: string, id: string, expectedHead: stri
     }
     const retired = patchCopy(id, record => { record.status = 'retired'; record.retiredAt = now(); record.retiredHead = record.headSha; record.intent = null; });
     pruneTombstones(project);
+    settleAutoTarget(project);   // automation that built into it builds into main now, and says so
     return { copy: retiredView(retired) };
   });
 }
