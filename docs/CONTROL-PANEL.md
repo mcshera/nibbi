@@ -214,7 +214,7 @@ Unchanged except: the plan progress label, meter and the "pending" stat go (marg
 689-698); the pills **Plan · Play · Fix… · Review** go (margin-ui.js:361); **Repository & GitHub** and
 **Providers** stay, labels unchanged. Under the Automation segment, one quiet line (ROUND3 decided 8):
 `automation picks up up next · builds into <build>` — until §12.1 it read `automation picks its next
-step from plans/<name>.md` — then, when the project has a copy, the **Builds into** segment, and
+step from plans/<name>.md` — then, when the project has a copy, the **builds into** segment, and
 automation's last note. The stats line becomes `<spend> spent · <cap>`.
 
 #### 2.1.5 Premium baseline (every bar control)
@@ -925,7 +925,7 @@ an up-next improvement on its own. Now the modes work the Improvements list:
 | ship | stage, plus auto-merge into main | the same, into the build chosen on the card. Into main: today's auto-merge on main. Into a copy: its tries land in the copy on their own (D5), and ship **merges nothing into main** — Ship to main stays the owner's confirm |
 
 - **Builds into.** `AutoCfg.copyId` (unset: main), set with `auto.set { copyId }` (`null`: main) from
-  the card's **Builds into** segment — main and the live copies, drawn only when there is a copy. The
+  the card's **builds into** segment — main and the live copies, drawn only when there is a copy. The
   daemon refuses a copy that isn't this project's and live, one that couldn't be made (`broken`, which
   only retire leaves: `COPY_WORDS.autoBroken`), and any copy in a GitHub-mode project. A retired copy,
   or one that breaks while chosen (its install fails, or a restart finds it still being made), falls
@@ -948,16 +948,16 @@ an up-next improvement on its own. Now the modes work the Improvements list:
 - **A set /goal keeps the roadmap**, as before: stage or ship with an unfinished goal run the lead's
   roadmap turn (dispatch allowed), and "Roadmap complete" ends the goal and turns it off. suggest always
   suggests improvements. The goal's lead builds on main, so ship with a goal merges main's staged runs
-  as it did, whatever copy **Builds into** names (review F2: with a copy chosen, the goal's runs stayed
+  as it did, whatever copy **builds into** names (review F2: with a copy chosen, the goal's runs stayed
   staged and the goal never finished); the choice is kept for after the goal, and the card doesn't draw
-  **Builds into** while a goal is set.
+  **builds into** while a goal is set.
 - **Words.** The card: `automation picks up up next · builds into main` (`WORDS.auto.line`), or
   `automation works toward your goal, from plans/<project>.md` while a goal is set, and automation's last
   note under it (`AutoCfg.note`, two lines, whole in its title). An up-next ticket says `automation builds
   it into main when there’s room — or build it now` while automation would pick it up (`WORDS.upNextAuto`
   from `BuildVM.autoInto`), and the + improvement hint says up next is picked up (`WORDS.form.hintAuto`,
   `WORDS.copy.formHintAuto`). The ship segment's ink is `[data-mode="ship"]` now, not `:last-child`, so
-  the last copy in Builds into is seated like any pressed key.
+  the last copy in builds into is seated like any pressed key.
 - **Checked.** `daemon/test/automation.test.ts` (temp state, real git, 15 tests): stage builds the top
   item and no second past capacity, then the next, and not a discarded one again; the spend cap stops it
   first; suggest adds three marked nibbi suggested, cleaned and none a repeat, builds nothing, and waits

@@ -1288,6 +1288,7 @@ test('the project card: automation picks up up next, into main or the copy you c
     assert.equal(await card.locator('.margin-into-field').isVisible(), true, 'a project with copies chooses where automation builds');
     assert.equal(await into.getAttribute('aria-label'), WORDS.auto.intoGroup);
     assert.equal(await card.locator('.margin-into-field .margin-field-label').innerText(), WORDS.auto.into);
+    for (const words of [await into.getAttribute('aria-label'), await card.locator('.margin-into-field .margin-field-label').innerText()]) assert.doesNotMatch(words, /[A-Z]/, `the card speaks lowercase: "${words}"`);
     assert.deepEqual(await keys(), [['main', 'true'], ['dev', 'false'], ['dev1', 'false']], 'main, then the copies; main until you choose');
     assert.equal(await into.locator('button', {hasText: 'dev1'}).getAttribute('title'), 'automation builds what’s up next into dev1');
     await into.getByRole('button', {name: 'dev', exact: true}).click();

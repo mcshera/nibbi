@@ -276,8 +276,8 @@ export const WORDS = Object.freeze({
   gone: 'this improvement is gone',
   editWaits: 'a try is running on it, so the words can’t change right now — what you typed stays here; save once it stops',
   emptyImprovements: 'nothing to improve yet — or ask nibbi what it would change',
-  suggested: 'nibbi suggested',
-  upNextAuto: 'automation builds it into {name} when there’s room — or build it now',   // an up-next ticket's status line while automation picks it up             // an up-next improvement suggest mode put in the list: its line two until something happens to it
+  suggested: 'nibbi suggested',                             // an up-next improvement suggest mode put in the list: its line two until something happens to it
+  upNextAuto: 'automation builds it into {name} when there’s room — or build it now',   // an up-next ticket's status line while automation picks it up
   homeLine: 'the first conversation',
   answering: 'answering',
   foldFailed: '{n} failed',
@@ -416,8 +416,8 @@ export const WORDS = Object.freeze({
   auto: Object.freeze({
     line: 'automation picks up up next · builds into {name}',
     goalLine: 'automation works toward your goal, from plans/{project}.md',   // while a /goal is set, the roadmap is still what it works
-    into: 'Builds into',                                   // the field label, as its neighbour "Automation"
-    intoGroup: 'Automation builds into',                   // the segment's accessible name
+    into: 'builds into',                                   // the field label (lowercase sentence case, LANGUAGE §11)
+    intoGroup: 'automation builds into',                   // the segment's accessible name
     intoTitle: 'automation builds what’s up next into {name}',
     intoToast: 'automation builds into {name} on {project}',
   }),

@@ -1170,6 +1170,11 @@ test('automation: a suggested one says so, and waits for you; up next says autom
   assert.equal(ticketOf(input({ runs: [r], issues, auto: { mode: 'stage', onAt: ago(1) } }), 'issue:i').improvement.context, 'its last try was discarded');
 });
 
+test('automation’s words on the card are lowercase sentence case, its field label and segment name too (LANGUAGE §11)', () => {
+  for (const words of Object.values(WORDS.auto)) assert.equal(words, words.toLowerCase(), `lowercase: ${words}`);
+  assert.deepEqual([WORDS.auto.into, WORDS.auto.intoGroup], ['builds into', 'automation builds into']);
+});
+
 test('automation into a copy: main’s list and the copy’s go into it; another copy’s list waits; a retired target is main', () => {
   const two = read2([copyView(DEV, 'dev'), copyView(DEV1, 'dev1')]);
   const issues = { status: 'ready', revision: REV, items: [item('m', 'on main'), item('d1', 'on dev1', { copyId: DEV1 })] };

@@ -28,15 +28,16 @@ next marked *nibbi suggested*, for you to build or mark done; it builds nothing,
 once you've answered the last ones. stage and ship don't build them either: a suggestion waits for your
 build it now.
 
-**It builds into the copy you choose.** With a copy, the card has a **Builds into** segment: main, dev,
+**It builds into the copy you choose.** With a copy, the card has a **builds into** segment: main, dev,
 dev1… Into a copy, a try lands there on its own and ship merges nothing into main — Ship to main stays
-your confirm. Retire that copy, or if it couldn't be made, and automation builds into main again, in
+your confirm. If that copy is retired, or couldn't be made, automation builds into main again, in
 stage, and says so; a copy that couldn't be made is not offered.
 
 **A set /goal keeps the roadmap**, exactly as before: its lead builds on main and ship merges it,
-whichever copy up next builds into, and the card hides **Builds into** until the goal is done. The card says which it is working (`automation
-picks up up next · builds into dev`), with its last note under it; an up-next ticket says automation
-will build it, and a try you stopped or discarded isn't started again by itself.
+whichever copy up next builds into, and the card hides **builds into** until the goal is done. The
+card says which it is working (`automation picks up up next · builds into dev`), with its last note
+under it; an up-next ticket says automation will build it, and a try you stopped or discarded isn't
+started again by itself.
 
 **Checked.** `daemon/test/automation.test.ts` drives each mode in temp repos (15 tests: capacity and
 a queued try, the spend cap, suggest and its suggestions left for you, ship into dev and into main, a
