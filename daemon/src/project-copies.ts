@@ -17,7 +17,7 @@ import { completeTask } from './roadmap.js';
 import { completeLinkedIssues } from './project-issues.js';
 import { buildIsActive, hasCheck, landOnCopy, listFixers, noteDelivery, saveFixer, type Fixer } from './fixer.js';
 import { previewCommand, previewStatus, startPreview, stopAndWait, ownedPreviews } from './previews.js';
-import { changedPaths, firstLine, refreshInstall, statusEntries, verifiedFastForward, type MergeFailure } from './verified-merge.js';
+import { changedPaths, discardPendingMerges, firstLine, refreshInstall, statusEntries, verifiedFastForward, type MergeFailure } from './verified-merge.js';
 import {
   COPY_RULES, COPY_WORDS, CopyRefusal, allCopies, copyBranch, copyById, copyPath, copyPreviewId, fill, liveCopies, notReadyWords,
   patchCopy, pruneTombstones, refuse, removeCopyRecord, requireLiveCopy, retiredCopies, saveCopy,
@@ -375,6 +375,8 @@ async function deleteBranch(cfg: GameCfg, copy: CopyRecord): Promise<void> {
 
 /** main.ts, after reconcileFixers(): finish or drop what a crash interrupted, then let waiting landings land. */
 export async function reconcileCopies(): Promise<void> {
+  // A throwaway merge worktree a crash left behind: nothing below needs it.
+  await discardPendingMerges().catch(error => runtime().emit({ type: 'copy.reconcile_failed', payload: { message: (error as Error).message } }));
   const projects = new Set<string>();
   for (const copy of allCopies()) {
     if (copy.status === 'retired') continue;

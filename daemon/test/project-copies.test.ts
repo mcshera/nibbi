@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const directory = mkdtempSync(join(tmpdir(), 'nibbi-copies-'));
 process.env.NODE_ENV = 'test';
@@ -585,6 +587,37 @@ test('a recovered ship completes once', async () => {
   assert.equal(run(runId).shipped?.sha, head); assert.equal(projectSection('recover-ship', 'issues').items[0].done, true); assert.equal(deliveries(runId), 1);
   await fixer.reconcileFixers(); await copies.reconcileCopies();
   assert.equal(copyOf(copy.id).ships.length, 1); assert.equal(deliveries(runId), 1);
+});
+
+test('a crash in the middle of a ship, a catch-up or a landing leaves no merge worktree behind', async () => {
+  // Its own backend, in processes of its own: `start` hangs three checks in their merge worktrees and is SIGKILLed there; `boot` starts again.
+  const root = mkdtempSync(join(tmpdir(), 'nibbi-copy-crash-'));
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: 'test', NIBBI_STATE_DIR: join(root, 'state'), NIBBI_VAULT_DIR: join(root, 'vault'), NIBBI_WORK_DIR: join(root, 'work'), NIBBI_PROJECTS_DIR: join(root, 'projects') };
+  delete env.NODE_TEST_CONTEXT; mkdirSync(env.NIBBI_VAULT_DIR!, { recursive: true });
+  const helper = fileURLToPath(new URL('./helpers/copy-crash.ts', import.meta.url)), cwd = fileURLToPath(new URL('..', import.meta.url));
+  const spawned: Array<ReturnType<typeof spawn>> = [];
+  const child = (...args: string[]) => { const proc = spawn(process.execPath, ['--import', 'tsx', helper, ...args], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] }); spawned.push(proc); let out = ''; proc.stdout.on('data', chunk => { out += chunk; }); proc.stderr.on('data', chunk => { out += chunk; }); return { proc, out: () => out, exited: new Promise<number | null>(resolve => proc.once('exit', code => resolve(code))) }; };
+  const line = (out: string, key: string) => JSON.parse(out.split('\n').find(text => text.startsWith('{"' + key + '"')) ?? (() => { throw new Error(out); })());
+  try {
+    const start = child('start');
+    const work = env.NIBBI_WORK_DIR!, hung = (): number => existsSync(work) ? readdirSync(work).filter(name => name.startsWith('merge-') && existsSync(join(work, name, 'hung.flag'))).length : 0;
+    await until(() => hung() === 3 || start.proc.exitCode !== null, 'three checks hanging in their merge worktrees', 90_000);
+    assert.equal(start.proc.exitCode, null, start.out());
+    start.proc.kill('SIGKILL'); await start.exited;
+    const started = line(start.out(), 'started') as { repos: Record<string, string>; before: Record<string, { main: string; head: string }>; run: string };
+    for (const repo of Object.values(started.repos)) { rmSync(join(repo, 'hang.flag')); assert.equal((await git(repo, 'worktree', 'list', '--porcelain')).split('/merge-').length - 1, 1, 'the crash left one'); }
+    const boot = child('boot', started.run); assert.equal(await boot.exited, 0, boot.out());
+    const report = line(boot.out(), 'boot') as { run: string; projects: Record<string, { status: string; intent: unknown; head: string; branch: string; main: string; mergeWorktrees: string[] }>; mergeDirs: string[]; pending: number };
+    // Recovery: every copy ready with no intent; main and each copy where they were; the interrupted landing landed again.
+    for (const [name, state] of Object.entries(report.projects)) {
+      assert.deepEqual([state.status, state.intent, state.mergeWorktrees], ['ready', null, []], name);
+      assert.equal(state.main, started.before[name].main, name + ': main');
+      if (name !== 'crash-land') assert.deepEqual([state.head, state.branch], [started.before[name].head, started.before[name].head], name + ': the copy');
+    }
+    assert.equal(report.run, 'merged'); assert.notEqual(report.projects['crash-land'].head, started.before['crash-land'].head);
+    // And nothing of the three throwaways is left: not in git's lists, not on disk, not in the store.
+    assert.deepEqual(report.mergeDirs, []); assert.equal(report.pending, 0);
+  } finally { for (const proc of spawned) if (proc.exitCode === null) proc.kill('SIGKILL'); rmSync(root, { recursive: true, force: true }); }
 });
 
 test('a recovered landing moves the copy’s head', async () => {

@@ -11,6 +11,7 @@ import { execute, git, ProcessFailure } from './processes.js';
 import { sandboxCommand } from './sandbox.js';
 import { mergeTarget, type GameCfg } from './projects.js';
 import { canonicalPath, within } from './paths.js';
+import { runtime } from './store.js';
 
 export interface MergeDestination {
   /** The checkout that has `branch` checked out: cfg.repo for main, the copy's worktree for a copy. */
@@ -32,6 +33,12 @@ export interface MergeHooks {
   /** The intent is recorded before the destination moves, so crash recovery can finish or drop it. */
   onIntent?: (intent: MergeIntent) => void | Promise<void>;
 }
+/** A copy destination's throwaway, written down before it exists (bucket pending-merges, id = its folder's name): a crash
+    between `worktree add` and its removal would otherwise leave it on disk and in git's list for good. */
+interface PendingMerge { id: string; repo: string; integration: string; at: string }
+const PENDING = 'pending-merges';
+/** This process's own throwaways, still in use: boot's sweep never touches one. */
+const inUse = new Set<string>();
 export type MergeFailure = { ok: false; reason: 'conflict' | 'checkfail' | 'changed' | 'waiting'; detail: string; conflicts: string[] };
 export type MergeResult = { ok: true; candidate: string; targetSha: string; integration: string } | MergeFailure;
 
@@ -62,7 +69,7 @@ const isMergeWorktree = (path: string): boolean => /^merge-[0-9a-f-]{36}$/.test(
 export async function verifiedFastForward(cfg: GameCfg, dest: MergeDestination, source: string, hooks: MergeHooks = {}): Promise<MergeResult> {
   let integration = '';
   const fail = async (reason: MergeFailure['reason'], detail: string, conflicts: string[] = []): Promise<MergeFailure> => {
-    if (integration && !dest.retainOnFailure) await discard(cfg, integration);
+    if (integration && !dest.retainOnFailure) await discard(cfg.repo, integration);
     return { ok: false, reason, detail, conflicts };
   };
   try {
@@ -75,6 +82,7 @@ export async function verifiedFastForward(cfg: GameCfg, dest: MergeDestination, 
     // 3. A throwaway worktree at that head.
     mkdirSync(config.workDir, { recursive: true });
     integration = join(config.workDir, 'merge-' + randomUUID());
+    if (!dest.retainOnFailure) { inUse.add(integration); runtime().put<PendingMerge>(PENDING, basename(integration), { id: basename(integration), repo: cfg.repo, integration, at: new Date().toISOString() }); }
     await git(cfg.repo, 'worktree', 'add', '--detach', integration, targetSha);
     // 4. The merge, off to the side.
     try { await git(integration, 'merge', '--no-edit', ...(dest.expectCandidate ? ['--ff-only'] : []), source); }
@@ -100,16 +108,26 @@ export async function verifiedFastForward(cfg: GameCfg, dest: MergeDestination, 
     await git(dest.checkout, 'merge', '--ff-only', candidate);
     // 10. The throwaway goes. Main keeps today's gentle removal; a copy's may hold an install, so it goes whole.
     if (dest.retainOnFailure) await git(cfg.repo, 'worktree', 'remove', integration).catch(() => undefined);
-    else await discard(cfg, integration);
+    else await discard(cfg.repo, integration);
     return { ok: true, candidate, targetSha, integration };
   } catch (error) { return fail('changed', (error as Error).message); }
 }
 
-/** Removes a merge-<uuid> worktree this module made — the only place anything is removed with force. */
-async function discard(cfg: GameCfg, integration: string): Promise<void> {
-  if (!isMergeWorktree(integration) || !existsSync(integration)) return;
-  if (canonicalPath(integration) === canonicalPath(cfg.repo)) return;
-  await git(cfg.repo, 'worktree', 'remove', '--force', integration).catch(() => undefined);
+/** Removes a merge-<uuid> worktree this module made — the only place anything is removed with force — and, once it is gone
+    from disk, what was written down about it. A folder already gone but still in git's list goes from the list too. */
+async function discard(repo: string, integration: string): Promise<void> {
+  if (!isMergeWorktree(integration) || canonicalPath(integration) === canonicalPath(repo)) return;
+  await git(repo, 'worktree', 'remove', '--force', integration).catch(() => undefined);
+  if (!existsSync(integration)) { runtime().remove(PENDING, basename(integration)); inUse.delete(integration); }
+}
+/** Boot (reconcileCopies, before anything lands): a copy's throwaway written down and never removed — the backend stopped in the
+    middle of a landing, a ship or a catch-up — goes now. Recovery reads refs and intents, never a throwaway. */
+export async function discardPendingMerges(): Promise<void> {
+  for (const pending of runtime().list<PendingMerge>(PENDING)) {
+    if (inUse.has(pending.integration)) continue;
+    if (!isMergeWorktree(pending.integration)) { runtime().remove(PENDING, pending.id); continue; }
+    await discard(pending.repo, pending.integration);
+  }
 }
 
 const LOCKFILES = new Set(['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml']);
