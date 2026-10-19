@@ -17,8 +17,11 @@ import { setWebAccess, promptSearchKey, webStatus, normalizeDomains } from './we
 import { upsertMcpServer, removeMcpServer, setMcpServerEnabled, setMcpServerProjects, checkMcpServer, promptMcpSecret } from './mcp-clients.js';
 import { executePlan, cancelPlan } from './plan-proposals.js';
 import { createMcpToken, revokeMcpToken } from './mcp-server.js';
+import { createCopy, shipCopy, catchUpCopy, retireCopy, playCopy, stopCopy } from './project-copies.js';
 const text = (value: unknown): string => z.string().min(1).max(100_000).parse(value);
 const projectId = (value: unknown): string => z.string().regex(/^[a-z0-9][a-z0-9-]*$/).parse(value);
+const copyId = z.string().regex(/^copy-[0-9a-f-]{36}$/);
+const sha = z.string().regex(/^[0-9a-f]{40,64}$/);
 export async function executeCommand(input: unknown, notify: (message: string) => Promise<void> = async () => undefined): Promise<CommandResult> {
   const parsed = CommandRequestSchema.safeParse(input); if (!parsed.success) return failure('invalid_request', parsed.error.message);
   const command = parsed.data; const store = runtime();
@@ -30,7 +33,7 @@ export async function executeCommand(input: unknown, notify: (message: string) =
     try {
       switch (command.name) {
         case 'run.dispatch': case 'run.queue': {
-          const opts = z.object({ provider: z.enum(['claude', 'codex']).optional(), model: z.string().optional(), title: z.string().optional(), context: z.string().optional(), task: z.string().optional(), taskId: z.string().optional(), group: z.string().optional(), issueIds: z.array(z.string().regex(/^[a-zA-Z0-9_-]+$/)).max(100).optional() }).parse(a);
+          const opts = z.object({ provider: z.enum(['claude', 'codex']).optional(), model: z.string().optional(), title: z.string().optional(), context: z.string().optional(), task: z.string().optional(), taskId: z.string().optional(), group: z.string().optional(), issueIds: z.array(z.string().regex(/^[a-zA-Z0-9_-]+$/)).max(100).optional(), copyId: copyId.optional() }).parse(a);
           const project = projectId(command.projectId ?? a.project), issue = text(a.issue);
           data = command.name === 'run.dispatch' ? spawnFixer(project, issue, notify, opts) : queueFix(project, issue, opts); break;
         }
@@ -81,9 +84,18 @@ export async function executeCommand(input: unknown, notify: (message: string) =
         case 'skills.draft': data = skillCatalog().draft(text(a.name), text(a.description), text(a.body), z.array(z.string()).parse(a.evidence)); break;
         case 'preview.start': message = previewStart(text(a.id)); break;
         case 'preview.stop': message = previewStop(text(a.id)); break;
-        case 'play.start': data = playStart(projectId(command.projectId ?? a.project)); if ((data as { error?: string }).error) throw new Error((data as { error: string }).error); break;
+        case 'play.start': data = await playStart(projectId(command.projectId ?? a.project)); if ((data as { error?: string }).error) throw new Error((data as { error: string }).error); break;
         case 'play.stop': message = playStop(projectId(command.projectId ?? a.project)); break;
-        default: data = await executeGithubCommand(command.name, projectId(command.projectId ?? a.project), a, notify); break;
+        // Builds as copies (docs/BUILDS-AS-COPIES.md §2.5): handled here, never by the build.* GitHub router below.
+        case 'copy.create': data = await createCopy(projectId(command.projectId ?? a.project), z.string().max(200).parse(a.name ?? '')); break;
+        case 'copy.ship': { const i = z.object({ id: copyId, expectedHead: sha }).parse(a); data = await shipCopy(projectId(command.projectId ?? a.project), i.id, i.expectedHead); break; }
+        case 'copy.catchUp': { const i = z.object({ id: copyId, expectedHead: sha, stopPlay: z.boolean().optional() }).parse(a); data = await catchUpCopy(projectId(command.projectId ?? a.project), i.id, i.expectedHead, i.stopPlay === true); break; }
+        case 'copy.retire': { const i = z.object({ id: copyId, expectedHead: sha }).parse(a); data = await retireCopy(projectId(command.projectId ?? a.project), i.id, i.expectedHead); break; }
+        case 'copy.play': data = await playCopy(projectId(command.projectId ?? a.project), copyId.parse(a.id)); break;
+        case 'copy.stop': message = await stopCopy(projectId(command.projectId ?? a.project), copyId.parse(a.id)); break;
+        default:
+          if (command.name.startsWith('copy.')) throw new Error('Unknown build command');
+          data = await executeGithubCommand(command.name, projectId(command.projectId ?? a.project), a, notify); break;
       }
       const result = success(data ?? { text: message }, message);
       // The idempotency log is at rest; a freshly minted MCP token is shown once and never stored in plaintext, so a replay gets the record without the secret.

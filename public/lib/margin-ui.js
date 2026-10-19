@@ -1,15 +1,18 @@
 import { emptyLine } from './empty.js';
-import { ATTENTION_TONES, BAR_LIMITS, GROUPS, MAIN, WORDS } from './control-panel-contract.js';
+import { ATTENTION_TONES, BAR_LIMITS, COPY, GROUPS, MAIN, WORDS } from './control-panel-contract.js';
 /** The bar: three identical cards — the project, the conversations, the builds — and a quiet foot
     (docs/CONTROL-PANEL.md §2.1; the lab's round six Cards, design/sidebar-lab/options/bar-cards-shell.*).
 
       nibbi ……………………… [⚙] [⊟]       the head: the logo on the icon column's edge, Settings left of collapse
       ╭ battalion   1 failed  ⌄ ╮       card 1: the project; its list opens under it
       ╭ conversations         + ╮       card 2: every conversation, two lines, the open one lifted while chat is the room
-      ╭ builds       1 failed   ╮       card 3: main, and on its trunk the improvements that land in it
+      ╭ builds       1 failed + ╮       card 3: main, then its copies (docs/BUILDS-AS-COPIES.md §4.3); + makes a copy
       │ ⎈ main          live  ▶ │         a row opens its page (the build page, a ticket); ▶ plays your checkout
       │ │ ∘ an improvement …    │         what shows: BAR_LIMITS; many failed fold to one row; the open ticket always shows
       │ │ + improvement         │         one inline form: start now (run.dispatch) · up next (issue.create)
+      │ ⑂ dev   ready to play ⌃ │         a copy: its row opens its page, its caret folds what is inside it
+      │ │ ∘ an improvement …    │         the same rows, on the copy's own trunk; + improvement lands them in the copy
+      │ │ [▶ play] [ship to main]│        play it (one plays at a time), or open its page on the ship confirm
         2 merged today · 5 this week     the foot: the scroll's last item, holding the bottom edge once the cards run past it
 
     Authority stays with the caller. update(model) takes a BarModel (control-panel-contract.js): {projects: BarProjectVM[],
@@ -30,6 +33,10 @@ const glyphs = {
   // an improvement on the trunk: presence and rhythm, never its state (the words say that)
   node: ['M14.75 12a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0Z'],
   play: ['M8 5.5v13l10.5-6.5L8 5.5Z'],
+  // a copy: the branch off main's trunk (the lab's Tree glyph); its stem carries on down past what is inside it
+  branch: ['M6 3v12.5', 'M20.5 6a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z', 'M8.5 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z', 'M18 8.5a9.5 9.5 0 0 1-9.5 9.5'],
+  // catch up: main's newest pulled down into the copy
+  pull: ['M12 4v11', 'm7.5 10.5 4.5 4.5 4.5-4.5', 'M6 20h12'],
 };
 const text = (value, fallback = '—') => value == null || value === '' ? fallback : String(value);
 const PROJECTS_UNREACHABLE = 'couldn’t reach the projects list';
@@ -40,7 +47,30 @@ const SAY = Object.freeze({
   failed: 'that didn’t go through — try again',
   playTitle: 'play main — it runs your checkout',
   stopTitle: 'main is playing — press to stop it',
+  // phase 2: a copy's row, its caret, its keys (the page carries the rest)
+  copyStop: '{name} is playing — press to stop it',
+  shipOpen: 'ship {name} to main — its page asks first',
+  fold: 'fold {name}',
+  unfold: 'show what is in {name}',
+  catchTitle: 'bring main’s newest into {name} — nibbi checks it first; if that fails, {name} stays as it is',
+  catchAsk: 'bring main’s newest into {name} — it’s playing, so its page asks first',
+  addCopy: 'something to try on {name} — start it now, or keep it up next',
+  play: 'play',
 });
+/** + New build's name rule, as the model's copyNameProblem says it (builds-model.js; the bar imports only the
+    contract, so the rule is said twice and tests/margin-ui.test.mjs holds the two to the same words). */
+const COPY_NAME = new RegExp(COPY.namePattern);
+const normalName = value => String(value ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+function nameProblem(name, taken = []) {
+  const list = (Array.isArray(taken) ? taken : []).map(normalName), value = normalName(name);
+  if (!value) return WORDS.copy.nameEmpty;
+  if (value.length > COPY.nameMax) return WORDS.copy.nameLong;
+  if (!COPY_NAME.test(value)) return WORDS.copy.nameShape;
+  if (COPY.reserved.includes(value)) return fillIn(WORDS.copy.nameReserved, {name: value});
+  if (list.includes(value)) return fillIn(WORDS.copy.nameTaken, {name: value});
+  if (list.length >= COPY.limit) return WORDS.copy.tooMany;
+  return '';
+}
 const relative = (at, now) => {
   if (!Number.isFinite(at)) return '';
   const seconds = Math.max(0, (now - at) / 1000);
@@ -349,13 +379,21 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   mainEl.append(mainWrap, mainWhy, mainBody);
   builds.rows.append(mainEl);
   const form = makeForm();
-  const addKey = button('', 'cp-row cp-add', () => (form.isOpen ? form.close(true) : form.open()));
-  addKey.dataset.cpRole = 'new-improvement'; addKey.setAttribute('aria-expanded', 'false'); addKey.setAttribute('aria-controls', form.el.id);
+  const addKey = button('', 'cp-row cp-add', () => (form.isOpenFor(MAIN) ? form.close(true) : form.open(MAIN)));
+  addKey.dataset.cpRole = 'new-improvement'; addKey.dataset.build = MAIN; addKey.setAttribute('aria-expanded', 'false'); addKey.setAttribute('aria-controls', form.el.id);
   addKey.append(glyphSpan('plus'), node('span', 'cp-primary', WORDS.keys.improvement));
   addKey.setAttribute('aria-label', `New improvement on ${MAIN}`);
   addKey.title = 'something main should do better — start it now, or keep it up next';
   const listLine = node('p', 'cp-why cp-empty cp-list-line');
   const emptyImprovements = node('p', 'cp-why cp-empty', WORDS.emptyImprovements);
+  // + New build: a quiet key on the builds header's trailing column (as the conversations +), and its form under
+  // the header. Drawn only when the model says what it may do (BarProjectVM.newCopy); never disabled — touch has
+  // no title, so pressing it opens the form, which says why when no copy can be made now.
+  const buildForm = makeBuildForm();
+  const newBuildKey = button('', 'project-build-new cp-icon-key cp-trail', () => (buildForm.isOpen ? buildForm.close(true) : buildForm.open()));
+  newBuildKey.dataset.cpRole = 'new-build'; newBuildKey.append(icon('plus'));
+  newBuildKey.setAttribute('aria-label', WORDS.copy.newLabel); newBuildKey.setAttribute('aria-expanded', 'false'); newBuildKey.setAttribute('aria-controls', buildForm.el.id);
+  builds.el.insertBefore(buildForm.el, builds.rows);
 
   const settings = makeCard('Settings', 'right');
   const metadata = node('dl', 'margin-metadata');
@@ -513,7 +551,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   const nowMs = () => finite(model.now) ? model.now : Date.now();
   /** The page open in the main area, when it belongs to the project on screen; null is the chat. */
   const pageHere = () => { const v = model.view, id = shownProject(); return v && id != null && String(v.project) === String(id) && v.page ? v : null; };
-  const currentBuild = () => activeEntry()?.data?.builds?.[0] || EMPTY_MAIN;
+  const currentBuild = () => { const data = activeEntry()?.data; return data ? mainOf(data) : EMPTY_MAIN; };
 
   function renderMenu() {
     const q = query.trim().toLowerCase();
@@ -711,11 +749,21 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
   }
   const clock = setInterval(() => { for (const el of body.querySelectorAll('.project-thread[data-last-at], .cp-improvement[data-when-at]')) paintWhen(el); }, 60000);
 
-  // ---- card 3: builds. Phase 1 is main, holding its improvements on its trunk ------------------------
-  const folds = new Set();   // `${project}:${group}` shown whole this session
+  // ---- card 3: builds. main, holding its improvements on its trunk, then its copies on their own ---------
+  const folds = new Set();   // `${scope}:${group}` shown whole this session; `${project}:copy:${copyId}` a copy folded away
+  const holding = new Set();   // `${copyId}:play` · `${copyId}:catch` — a copy's key while what it sent is out
+  const EMPTY_WORDS = {text: '', tone: 'quiet'};
+  const isCopyVM = b => !!b && b.id != null && String(b.id) !== MAIN && (b.kind === 'copy' || b.kind === undefined);
+  const copyFoldKey = (pid, b) => `${pid}:copy:${b.copyId || b.id}`;
+  const mainOf = data => (Array.isArray(data.builds) ? data.builds : []).find(b => b && (b.kind === 'main' || String(b.id) === MAIN)) || data.builds?.[0] || EMPTY_MAIN;
+  const copiesOf = data => (Array.isArray(data.builds) ? data.builds : []).filter(b => isCopyVM(b) && b !== mainOf(data));
+  /** The copy whose page, or one of whose tickets, the main area shows. */
+  const viewIn = (view, b) => !!view && ((view.page === 'build' && String(view.id) === String(b.id))
+    || (view.page === 'ticket' && [...(b.improvements || []), ...(b.settled || [])].some(i => i && i.id === view.id)));
+  let unfoldedFor = '';
   function renderBuilds(data) {
-    const b = data.builds?.[0] || EMPTY_MAIN;
-    const words = b.badge || {text: '', tone: 'quiet'};
+    const b = mainOf(data), copies = copiesOf(data);
+    const words = data.buildsBadge || b.badge || EMPTY_WORDS;
     setBadge(builds, words.text, words.tone);
     const view = pageHere();
     const here = view?.page === 'build' && String(view.id ?? MAIN) === MAIN;
@@ -731,18 +779,34 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     setAttr(mainRow, 'aria-current', here ? 'page' : null);
     mainWrap.classList.toggle('is-current', here);
     playKey.disabled = !!blocked;
-    playKey.title = blocked || (playing ? SAY.stopTitle : SAY.playTitle);
+    // one plays at a time: main's ▶ says which copy it would stop
+    playKey.title = blocked || (playing ? SAY.stopTitle : play.stops ? fillIn(WORDS.copy.oneAtATime, {other: play.stops}) : SAY.playTitle);
     playKey.setAttribute('aria-label', `${playing ? 'Stop' : 'Play'} ${text(b.name, MAIN)}`);
     setAttr(playKey, 'aria-pressed', playing ? 'true' : null);
     setAttr(playKey, 'aria-busy', play.starting ? 'true' : null);
     setText(mainWhy, blocked); mainWhy.hidden = !blocked;
-    patch(mainBody, bodyRows(data, b, view));
-    form.paint(b);
+    const pid = data.id;
+    // a page or ticket of a copy that just opened unfolds it (its fold is remembered again after that)
+    const viewKey = view ? `${view.project}:${view.page}:${view.id}` : '';
+    if (viewKey !== unfoldedFor) { unfoldedFor = viewKey; for (const c of copies) if (viewIn(view, c)) folds.delete(copyFoldKey(pid, c)); }
+    // the one improvement form belongs to one build: back to main when its copy folds away or goes
+    const owner = form.build, ownerCopy = owner === MAIN ? null : copies.find(c => String(c.id) === owner);
+    if (owner !== MAIN && (!ownerCopy || folds.has(copyFoldKey(pid, ownerCopy)))) form.retarget(MAIN);
+    patch(mainBody, bodyRows(pid, b, view, {scope: String(pid), bodyId: mainBody.id, isMain: true}));
+    patch(builds.rows, [mainEl, ...copies.map(c => copyNode(pid, c, view))]);
+    form.paint(form.build === MAIN ? b : copies.find(c => String(c.id) === form.build) || b);
+    // + New build, when the model says what it may do; the key leaves the header (not hidden) when it doesn't,
+    // so the badge still ends on the right-hand edge
+    const newCopy = data.newCopy && typeof data.newCopy === 'object' ? data.newCopy : null;
+    if (newCopy) { if (newBuildKey.parentNode !== builds.head) builds.head.append(newBuildKey); }
+    else { buildForm.close(false); newBuildKey.remove(); }
+    newBuildKey.title = newCopy?.blocked || WORDS.copy.newTitle;
+    buildForm.paint(newCopy);
   }
-  /** What shows inside main, from the VM's ordered rows and BAR_LIMITS. The row whose ticket is open always
+  /** What shows inside a build, from the VM's ordered rows and BAR_LIMITS. The row whose ticket is open always
       shows — inside a fold, or, for a settled one, at the end — so exactly one row is marked. */
-  function bodyRows(data, b, view) {
-    const now = nowMs(), pid = data.id;
+  function bodyRows(pid, b, view, scope) {
+    const now = nowMs();
     const current = view?.page === 'ticket' ? view.id : null;
     const all = Array.isArray(b.improvements) ? b.improvements.filter(i => i && i.id != null) : [];
     const by = {waiting: [], building: [], up_next: [], in: [], failed: []};
@@ -751,52 +815,55 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     const rowOf = imp => improvementRow(pid, imp, current);
     out.push(...by.waiting.map(rowOf), ...by.building.map(rowOf));
     // up next: three, then a fold row; open, all of them and "show fewer"
-    foldable(pid, 'up_next', by.up_next, BAR_LIMITS.upNextShown, current, out);
+    foldable(pid, scope, 'up_next', by.up_next, BAR_LIMITS.upNextShown, current, out);
     // in: only what landed in the last day, and at most three — the build page keeps the rest
     const recent = by.in.filter(i => i.when?.at && now - Date.parse(i.when.at) <= BAR_LIMITS.inWindowMs).slice(0, BAR_LIMITS.inShown);
     out.push(...by.in.filter(i => recent.includes(i) || i.id === current).map(rowOf));
     // failed and interrupted: every one when there are few, else one fold row and none until it is opened
-    foldable(pid, 'failed', by.failed, by.failed.length > BAR_LIMITS.failedFoldAbove ? 0 : Infinity, current, out);
+    foldable(pid, scope, 'failed', by.failed, by.failed.length > BAR_LIMITS.failedFoldAbove ? 0 : Infinity, current, out);
     if (current && !all.some(i => i.id === current)) {
       const settled = (Array.isArray(b.settled) ? b.settled : []).find(i => i && i.id === current);
       if (settled) out.push(rowOf(settled));
     }
     const listState = b.list || 'ready';
     const unreadable = listState === 'unavailable';
-    setText(listLine, unreadable ? WORDS.noList : '');
-    out.push(unreadable ? listLine : null);
-    out.push(!unreadable && listState === 'ready' && !out.some(n => n && n.matches?.('.cp-row')) ? emptyImprovements : null);
-    out.push(form.el, addKey);
+    const [listEl, emptyEl] = scope.isMain ? [listLine, emptyImprovements] : [scope.listLine, scope.empty];
+    setText(listEl, unreadable ? WORDS.noList : '');
+    out.push(unreadable ? listEl : null);
+    out.push(!unreadable && listState === 'ready' && !out.some(n => n && n.matches?.('.cp-row')) ? emptyEl : null);
+    const build = scope.isMain ? MAIN : String(b.id);
+    out.push(form.build === build ? form.el : null, scope.isMain ? addKey : scope.add);
     return out;
   }
-  function foldable(pid, groupId, items, limit, current, out) {
+  function foldable(pid, scope, groupId, items, limit, current, out) {
     if (!items.length) return;
-    const key = `${pid}:${groupId}`, whole = folds.has(key);
+    const key = `${scope.scope}:${groupId}`, whole = folds.has(key);
     if (items.length <= limit) { out.push(...items.map(imp => improvementRow(pid, imp, current))); return; }
-    if (whole) { out.push(...items.map(imp => improvementRow(pid, imp, current)), foldRow(pid, groupId, [], true)); return; }
+    if (whole) { out.push(...items.map(imp => improvementRow(pid, imp, current)), foldRow(scope, groupId, [], true)); return; }
     const shown = new Set(items.slice(0, limit).map(i => i.id));
     if (current && items.some(i => i.id === current)) shown.add(current);
     const hidden = items.filter(i => !shown.has(i.id));
     let placed = false;
     for (const imp of items) {
-      if (!placed && !shown.has(imp.id)) { out.push(foldRow(pid, groupId, hidden, false)); placed = true; }
+      if (!placed && !shown.has(imp.id)) { out.push(foldRow(scope, groupId, hidden, false)); placed = true; }
       if (shown.has(imp.id)) out.push(improvementRow(pid, imp, current));
     }
   }
-  function foldRow(pid, groupId, hidden, whole) {
-    const entry = keyed(`f:${pid}:${groupId}`, () => {
+  function foldRow(scope, groupId, hidden, whole) {
+    const entry = keyed(`f:${scope.scope}:${groupId}`, () => {
       const el = button('', 'cp-row cp-fold', () => {
-        const k = `${entry.project}:${groupId}`;
+        const k = `${entry.scope}:${groupId}`;
         if (folds.has(k)) folds.delete(k); else folds.add(k);
         rerender();
         entry.el.focus({preventScroll: true});
       });
-      el.dataset.cpFold = groupId; el.setAttribute('aria-controls', mainBody.id);
+      el.dataset.cpFold = groupId;
       const primary = node('span', 'cp-primary'), word = node('span', 'cp-word');
       el.append(glyphSpan('caret'), primary, word);
       return {el, primary, word};
     });
-    entry.project = pid;
+    entry.scope = scope.scope;
+    entry.el.setAttribute('aria-controls', scope.bodyId);
     let said, tone = 'quiet', extra = '';
     if (whole) said = WORDS.showFewer;
     else if (groupId === 'up_next') said = fillIn(WORDS.foldUpNext, {n: hidden.length});
@@ -848,7 +915,144 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     return entry.el;
   }
 
+  // ---- a copy: its row and caret, and when unfolded what is inside it, on its own trunk ----------------------
+  /** Two stable faces in one cell, so a key that says play, then playing, never changes width. */
+  function stack(faces) {
+    const s = node('span', 'cp-stack');
+    for (const face of faces) { const f = node('span', 'cp-stack-face', face); f.dataset.face = face; s.append(f); }
+    return s;
+  }
+  const showFace = (s, face) => { for (const f of s.children) setAttr(f, 'data-on', f.dataset.face === face ? '' : null); };
+  function copyNode(pid, b, view) {
+    const entry = keyed(`c:${pid}:${b.copyId || b.id}`, () => {
+      const el = node('div', 'cp-build cp-copy');
+      const wrap = node('div', 'cp-rowwrap cp-copyrow');
+      const row = button('', 'cp-row cp-two cp-copy-row', () => { const e = entry; navigate(() => void dispatch('openBuild', e.project, e.name)); });
+      const label = node('span', 'cp-primary'), word = node('span', 'cp-word'), note = node('span', 'cp-note cp-facts'), count = node('span', 'cp-word cp-count');
+      row.append(glyphSpan('branch'), lines([label, word], [note, count]));
+      const caret = button('', 'cp-icon-key cp-trail cp-disclose', () => {
+        const e = entry, k = copyFoldKey(e.project, e.vm);
+        if (folds.has(k)) folds.delete(k); else folds.add(k);
+        rerender();
+        e.caret.focus({preventScroll: true});
+      });
+      caret.dataset.cpRole = 'build-disclosure'; caret.append(icon('caret'));
+      wrap.append(row, caret);
+      const inside = node('div', 'cp-build-body'); inside.id = `cp-build-body-${++serial}`; inside.setAttribute('role', 'group');
+      caret.setAttribute('aria-controls', inside.id);
+      // catch up: main moved on. Straight to the daemon, or — while the copy plays — its page, which asks first
+      const catchRow = button('', 'cp-row cp-two cp-catch', () => {
+        const e = entry, c = e.vm.catchUp || {};
+        if (c.confirm) { navigate(() => void dispatch('openBuild', e.project, e.name)); return; }
+        void hold(`${e.vm.copyId}:catch`, 'catchUpCopy', e.project, c.payload);
+      });
+      catchRow.dataset.cpRole = 'catch-up';
+      const catchNote = node('span', 'cp-note');
+      catchRow.append(glyphSpan('pull'), lines([node('span', 'cp-primary', WORDS.copy.catchUpRow)], [catchNote]));
+      const add = button('', 'cp-row cp-add', () => { const e = entry; if (form.isOpenFor(e.name)) form.close(true); else form.open(e.name); });
+      add.dataset.cpRole = 'new-improvement'; add.setAttribute('aria-expanded', 'false'); add.setAttribute('aria-controls', form.el.id);
+      add.append(glyphSpan('plus'), node('span', 'cp-primary', WORDS.keys.improvement));
+      const keys = node('div', 'cp-build-keys');
+      const playFace = stack([SAY.play, WORDS.copy.playing]);
+      const play = button('', 'cp-key cp-play cp-play-copy', () => {
+        const e = entry, playing = !!e.vm.play?.running;
+        void hold(`${e.vm.copyId}:play`, 'playCopy', e.project, {copyId: e.vm.copyId, action: playing ? 'stop' : 'start'});
+      });
+      play.dataset.cpRole = 'play-copy'; play.append(icon('play'), playFace);
+      // the bar never ships: this opens the copy's page on its confirm
+      const ship = button('', 'cp-key cp-ship', () => { const e = entry; navigate(() => void dispatch('openShip', e.project, e.name)); });
+      ship.dataset.cpRole = 'ship-copy'; ship.append(node('span', '', WORDS.copy.shipKey));
+      keys.append(play, ship);
+      const why = node('div', 'cp-why cp-keys-why');
+      const empty = node('p', 'cp-why cp-empty', WORDS.copy.emptyImprovements);
+      const list = node('p', 'cp-why cp-empty cp-list-line');
+      el.append(wrap);
+      return {el, wrap, row, label, word, note, count, caret, inside, catchRow, catchNote, add, keys, play, playFace, ship, why, empty, list};
+    });
+    const nameText = text(b.name ?? b.id, 'a copy');
+    Object.assign(entry, {project: pid, name: String(b.id), vm: b});
+    const {el, row, caret, inside} = entry;
+    el.dataset.build = String(b.id); setAttr(el, 'data-copy-id', b.copyId || null);
+    // the row: branch glyph · name and its headline · line two: what it is (copy of main · N ahead) and its counts
+    const count = text(b.count, '');
+    if (changed(entry, [nameText, b.word, b.tone, !!b.live, b.note, count])) {
+      row.dataset.barBuild = String(b.id);
+      setText(entry.label, nameText);
+      setText(entry.word, text(b.word, '')); entry.word.dataset.tone = b.tone || 'quiet'; entry.word.classList.toggle('cp-live', !!b.live);
+      // line two's note is facts ("copy of main · 2 ahead"): one that doesn't fit drops whole, as the foot's do
+      entry.note.replaceChildren(...text(b.note, WORDS.copy.line).split(' · ').map((fact, i) => { const seg = node('span', 'cp-seg'); if (i) seg.append(node('span', 'cp-sep', ' · ')); seg.append(fact); return seg; }));
+      entry.note.title = text(b.note, WORDS.copy.line);
+      setText(entry.count, count); entry.count.hidden = !count;
+      const said = [text(b.note, WORDS.copy.line), count].filter(Boolean).join(' · ');
+      row.title = `${nameText} — ${text(b.word, '')}: ${said}. open its page`;
+      row.setAttribute('aria-label', `${nameText}, ${text(b.word, '')} — ${said}. Open its page`);
+    }
+    const here = view?.page === 'build' && String(view.id) === String(b.id);
+    setAttr(row, 'aria-current', here ? 'page' : null);
+    entry.wrap.classList.toggle('is-current', here);
+    const open = !folds.has(copyFoldKey(pid, b));
+    el.classList.toggle('is-open', open);
+    caret.setAttribute('aria-expanded', String(open));
+    caret.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} what is in ${nameText}`);
+    caret.title = fillIn(open ? SAY.fold : SAY.unfold, {name: nameText});
+    if (!open) { patch(el, [entry.wrap]); return el; }
+    setAttr(inside, 'data-bar-build-body', String(b.id)); inside.setAttribute('aria-label', `inside ${nameText}`);
+    // catch up, when main moved on: its last failure's words on line two until the next try, or why it can't
+    const catchUp = b.catchUp || {}, behind = Number(b.behind) > 0;
+    if (behind) {
+      const r = entry.catchRow, blocked = String(catchUp.blocked || '');
+      const failed = catchUp.last && catchUp.last.ok === false ? String(catchUp.last.words || '') : '';
+      const noteSaid = blocked || failed || fillIn(WORDS.copy.catchUpNote, {n: b.behind});
+      r.dataset.build = String(b.id);
+      setText(entry.catchNote, noteSaid); entry.catchNote.title = noteSaid;
+      r.disabled = !!blocked;
+      setAttr(r, 'aria-busy', holding.has(`${b.copyId}:catch`) ? 'true' : null);
+      r.title = blocked || fillIn(catchUp.confirm ? SAY.catchAsk : SAY.catchTitle, {name: nameText});
+      r.setAttribute('aria-label', `Catch ${nameText} up with main — ${noteSaid}`);
+    }
+    const add = entry.add;
+    add.dataset.build = String(b.id);
+    add.setAttribute('aria-label', `New improvement on ${nameText}`);
+    add.title = fillIn(SAY.addCopy, {name: nameText});
+    add.setAttribute('aria-expanded', String(form.isOpenFor(String(b.id))));
+    // the keys: play it (one plays at a time), and ship to main (its page asks)
+    const play = b.play || {}, playing = !!play.running, playBlocked = String((b.blocked && b.blocked.play) || play.blocked || '');
+    const pk = entry.play;
+    pk.dataset.build = String(b.id); showFace(entry.playFace, playing ? WORDS.copy.playing : SAY.play);
+    pk.disabled = !!playBlocked;
+    pk.title = playBlocked || (playing ? fillIn(SAY.copyStop, {name: nameText}) : play.stops ? fillIn(WORDS.copy.oneAtATime, {other: play.stops}) : fillIn(WORDS.copy.play, {name: nameText}));
+    pk.setAttribute('aria-label', `${playing ? 'Stop' : 'Play'} ${nameText}`);
+    setAttr(pk, 'aria-pressed', playing ? 'true' : null);
+    setAttr(pk, 'aria-busy', play.starting || holding.has(`${b.copyId}:play`) ? 'true' : null);
+    const ship = b.ship || {}, shipWhy = String(ship.why || (b.blocked && b.blocked.ship) || '');
+    const sk = entry.ship;
+    sk.dataset.build = String(b.id);
+    sk.disabled = !!shipWhy;
+    sk.title = shipWhy || fillIn(SAY.shipOpen, {name: nameText});
+    sk.setAttribute('aria-label', `Ship ${nameText} to main`);
+    // why they can't, once: what's wrong with the copy says it all; else play's and ship's words, unless the
+    // headline already says it (making, shipping … "nothing to ship yet", "main moved on")
+    const transient = ['making', 'retiring', 'shipping', 'catching_up'].includes(b.state);
+    const saidByHeadline = (b.state === 'nothing' && ship.ready === false && /^nothing to ship yet/.test(shipWhy)) || (b.state === 'behind' && behind && shipWhy.startsWith('main moved on'));
+    const whys = transient ? [] : b.healthWords ? [String(b.healthWords)] : [...new Set([playBlocked, saidByHeadline ? '' : shipWhy].filter(Boolean))];
+    const whySig = JSON.stringify(whys);
+    if (entry.whySig !== whySig) { entry.whySig = whySig; entry.why.replaceChildren(...whys.map(w => node('p', '', w))); }
+    patch(inside, [behind ? entry.catchRow : null, ...bodyRows(pid, b, view, {scope: `${pid}:${b.copyId || b.id}`, bodyId: inside.id, isMain: false, add, empty: entry.empty, listLine: entry.list}),
+      entry.keys, whys.length ? entry.why : null]);
+    patch(el, [entry.wrap, inside]);
+    return el;
+  }
+  /** Send a copy's action and hold its key (aria-busy) while it is out; the bar draws again when it lands. */
+  async function hold(tag, action, id, value) {
+    if (holding.has(tag)) return;
+    holding.add(tag); rerender();
+    try { await dispatch(action, id, value); }
+    finally { holding.delete(tag); if (!destroyed) rerender(); }
+  }
+
   // ---- the one inline form: + improvement → start now (run.dispatch) or up next (issue.create) ---------
+  // It belongs to one build at a time (main, or a copy: then its words carry the copy's id); drafts are kept per
+  // project and build.
   function makeForm() {
     const el = node('form', 'cp-form cp-improvement-form'); el.dataset.cpRole = 'improvement-form';
     el.hidden = true; el.noValidate = true; el.setAttribute('autocomplete', 'off'); el.id = `cp-form-${++serial}`;
@@ -873,8 +1077,11 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     ask.title = 'talk it through with nibbi first — your words go to the conversation';
     el.append(top, field, note, keys, hint, ask);
     const drafts = new Map();
-    let owner = null, sending = null, blocked = {start: '', queue: ''};
+    let owner = null, build = MAIN, copyId = null, sending = null, blocked = {start: '', queue: ''};
+    const draftKey = (project, name) => JSON.stringify([project, name]);
     const say = (message, kind = '') => { setText(note, message || ''); note.hidden = !message; if (kind) note.dataset.kind = kind; else delete note.dataset.kind; };
+    /** The + improvement row of the build this form belongs to. */
+    const trigger = () => build === MAIN ? addKey : builds.rows.querySelector(`[data-cp-role="new-improvement"][data-build="${CSS.escape(build)}"]`);
     field.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void submit('start'); }
     });
@@ -886,24 +1093,33 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       if (words) { say(words, 'blocked'); return; }
       const value = field.value.trim();
       if (!value) { say(SAY.empty); field.focus({preventScroll: true}); return; }
-      const project = owner, key = {start, queue, ask}[kind];
+      const project = owner, name = build, key = {start, queue, ask}[kind];
+      // a copy's improvement lands in that copy: its words carry the copy's id (the talk route carries only words)
+      const payload = kind !== 'ask' && copyId ? {text: value, copyId} : {text: value};
       sending = kind; key.setAttribute('aria-busy', 'true');
-      const result = await send({start: 'startImprovement', queue: 'queueImprovement', ask: 'askNibbi'}[kind], project, {text: value});
+      const result = await send({start: 'startImprovement', queue: 'queueImprovement', ask: 'askNibbi'}[kind], project, payload);
       sending = null; key.removeAttribute('aria-busy');
       if (destroyed) return;
       if (!result.ok) { say(result.error, result.kind === 'notice' ? 'notice' : 'error'); return; }
-      drafts.delete(project);
-      if (owner === project) { field.value = ''; say(''); }
+      drafts.delete(draftKey(project, name));
+      if (owner === project && build === name) { field.value = ''; say(''); }
       api.close(false);
       // the words went to nibbi (the app moves focus to the composer); a build stays here, on its key
-      if (kind !== 'ask' && owner === project && addKey.isConnected) addKey.focus({preventScroll: true});
+      const back = trigger();
+      if (kind !== 'ask' && owner === project && back?.isConnected) back.focus({preventScroll: true});
     }
+    const keep = () => { if (owner != null) { const k = draftKey(owner, build); if (field.value) drafts.set(k, field.value); else drafts.delete(k); } };
     const api = {
       el, field, note, start, queue, ask,
       get isOpen() { return !el.hidden; },
-      open() {
+      get build() { return build; },
+      isOpenFor(name) { return !el.hidden && build === name; },
+      /** Open it for a build (its + improvement): the form moves there, with that build's draft. */
+      open(name = MAIN) {
         if (shownProject() == null) return;
-        el.hidden = false; addKey.setAttribute('aria-expanded', 'true');
+        buildForm.close(false);
+        if (name !== build) { api.close(false); api.retarget(name); rerender(); }
+        el.hidden = false; trigger()?.setAttribute('aria-expanded', 'true');
         say(blocked.start, blocked.start ? 'blocked' : '');
         field.focus({preventScroll: true});
         scheduleReveal(el);
@@ -911,26 +1127,123 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       close(restore = false) {
         if (el.hidden) return false;
         el.hidden = true; say('');
-        addKey.setAttribute('aria-expanded', 'false');
-        if (restore && addKey.isConnected) addKey.focus({preventScroll: true});
+        const t = trigger(); t?.setAttribute('aria-expanded', 'false');
+        if (restore && t?.isConnected) t.focus({preventScroll: true});
         return true;
+      },
+      /** The form now belongs to another build of the same project: its words stay with theirs. */
+      retarget(name) {
+        if (name === build) return;
+        keep(); api.close(false);
+        build = name; copyId = null; field.value = drafts.get(draftKey(owner, name)) || '';
       },
       /** The project on screen moved: this form belongs to main of the one you are in. Its words stay with theirs. */
       own(project) {
         if (project === owner) return;
-        if (owner != null) { if (field.value) drafts.set(owner, field.value); else drafts.delete(owner); }
-        api.close(false);
-        owner = project; field.value = drafts.get(project) || '';
+        keep(); api.close(false);
+        owner = project; build = MAIN; copyId = null; field.value = drafts.get(draftKey(project, MAIN)) || '';
       },
       paint(b) {
         const next = {start: b.blocked?.start || '', queue: b.blocked?.queue || ''};
         const was = blocked; blocked = next;
+        copyId = build !== MAIN && b.copyId ? String(b.copyId) : null;
+        const name = text(b.name ?? b.id, build);
+        field.placeholder = build === MAIN ? WORDS.form.placeholder : fillIn(WORDS.copy.formPlaceholder, {name});
+        setText(hint, build === MAIN ? WORDS.form.hint : fillIn(WORDS.copy.formHint, {name}));
         start.disabled = !!next.start; start.title = next.start || 'build it right away (↵)';
         queue.disabled = !!next.queue; queue.title = next.queue || 'keep it up next until you start it';
         if (!el.hidden && (note.hidden || note.dataset.kind === 'blocked') && (was.start !== next.start || note.hidden)) say(next.start, next.start ? 'blocked' : '');
       },
     };
     return api;
+  }
+
+  // ---- + New build: a name, a copy of main. Enter or make it → newCopy {name} ---------------------------------
+  function makeBuildForm() {
+    const el = node('form', 'cp-form cp-build-form'); el.dataset.cpRole = 'build-form';
+    el.hidden = true; el.noValidate = true; el.setAttribute('autocomplete', 'off'); el.id = `cp-build-form-${++serial}`;
+    const top = node('div', 'cp-form-top');
+    const field = node('input', 'cp-form-field cp-name'); field.id = `cp-name-${++serial}`;
+    field.type = 'text'; field.maxLength = COPY.nameMax; field.spellcheck = false; field.autocomplete = 'off';
+    field.setAttribute('autocapitalize', 'off'); field.setAttribute('autocorrect', 'off'); field.dataset.cpRole = 'build-name';
+    const label = node('label', 'cp-form-label', WORDS.copy.formLabel); label.htmlFor = field.id;
+    const x = button('×', 'cp-icon-key cp-form-x', () => api.close(true));
+    x.setAttribute('aria-label', 'Close the form'); x.title = WORDS.form.close;
+    top.append(label, x);
+    const sub = node('p', 'cp-form-sub', WORDS.copy.formSub); sub.id = `cp-sub-${++serial}`;
+    field.setAttribute('aria-describedby', sub.id);
+    const note = node('p', 'cp-form-note'); note.setAttribute('role', 'status'); note.hidden = true;
+    const keys = node('div', 'cp-form-keys');
+    const make = node('button', 'cp-primary-key'); make.type = 'submit'; make.dataset.cpRole = 'make-build';
+    const cap = node('kbd', 'cp-cap', '↵'); cap.setAttribute('aria-hidden', 'true');
+    make.append(node('span', '', WORDS.copy.make), cap); make.setAttribute('aria-keyshortcuts', 'Enter');
+    keys.append(make);
+    el.append(top, field, sub, note, keys);
+    let vm = null, sending = false, owner = null;
+    const say = (message, kind = '') => { setText(note, message || ''); note.hidden = !message; if (kind) note.dataset.kind = kind; else delete note.dataset.kind; };
+    const cant = () => String(vm?.blocked || '');
+    field.addEventListener('input', () => { if (note.dataset.kind !== 'blocked') say(''); });
+    el.addEventListener('submit', event => { event.preventDefault(); void submit(); });
+    async function submit() {
+      if (sending || destroyed) return;
+      if (cant()) { say(cant(), 'blocked'); return; }
+      const name = normalName(field.value), problem = nameProblem(name, vm?.taken || []);
+      // the words say what's wrong before anything is sent; focus stays in the field
+      if (problem) { say(problem); field.focus({preventScroll: true}); return; }
+      const project = owner;
+      sending = true; make.setAttribute('aria-busy', 'true');
+      const result = await send('newCopy', project, {name});
+      sending = false; make.removeAttribute('aria-busy');
+      if (destroyed) return;
+      // a refusal keeps the name and says the daemon's words
+      if (!result.ok) { say(result.error, result.kind === 'notice' ? 'notice' : 'error'); return; }
+      field.value = ''; say('');
+      api.close(false);
+      if (owner === project) { pendingFocus = {project, name, until: Date.now() + 15000}; focusPending(true); }
+    }
+    const api = {
+      el, field, note, make,
+      get isOpen() { return !el.hidden; },
+      open() {
+        if (shownProject() == null) return;
+        form.close(false);
+        el.hidden = false; newBuildKey.setAttribute('aria-expanded', 'true');
+        api.paint(vm, true);
+        // the suggested name, selected, so typing replaces it; in the can't state the note says why and × has focus
+        if (cant()) { field.value = ''; x.focus({preventScroll: true}); }
+        else { field.value = String(vm?.suggested || ''); field.focus({preventScroll: true}); field.select(); }
+        scheduleReveal(el);
+      },
+      close(restore = false) {
+        if (el.hidden) return false;
+        el.hidden = true; say('');
+        newBuildKey.setAttribute('aria-expanded', 'false');
+        if (restore && newBuildKey.isConnected) newBuildKey.focus({preventScroll: true});
+        return true;
+      },
+      own(project) { if (project === owner) return; api.close(false); owner = project; field.value = ''; },
+      paint(next, opening = false) {
+        const was = cant(); vm = next && typeof next === 'object' ? next : null;
+        const now = cant();
+        field.disabled = !!now; make.disabled = !!now; make.title = now || 'make the copy (↵)';
+        if (el.hidden) return;
+        if (now && (opening || now !== was || note.dataset.kind === 'blocked' || note.hidden)) say(now, 'blocked');
+        else if (!now && note.dataset.kind === 'blocked') say('');
+      },
+    };
+    return api;
+  }
+  /** After + New build: focus goes to the new copy's row once it is drawn, else it waits on + (and moves only
+      while nothing else took it). */
+  let pendingFocus = null;
+  function focusPending(first = false) {
+    const want = pendingFocus; if (!want) return;
+    if (Date.now() > want.until || String(shownProject()) !== String(want.project)) { pendingFocus = null; return; }
+    const row = builds.rows.querySelector(`.cp-copy-row[data-bar-build="${CSS.escape(want.name)}"]`);
+    const free = first || document.activeElement === newBuildKey || !document.activeElement || document.activeElement === document.body;
+    if (row && free) { pendingFocus = null; row.focus({preventScroll: true}); scheduleReveal(row.closest('.cp-rowwrap') || row); return; }
+    if (row) { pendingFocus = null; return; }
+    if (first && newBuildKey.isConnected) newBuildKey.focus({preventScroll: true});
   }
 
   // ---- moving, revealing, shading ---------------------------------------------------------------
@@ -973,7 +1286,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
 
   function renderBody() {
     const entry = activeEntry();
-    form.own(entry?.id ?? null);
+    form.own(entry?.id ?? null); buildForm.own(entry?.id ?? null);
     used = new Set();
     if (!entry) {
       convo.el.hidden = true; builds.el.hidden = true; none.hidden = false;
@@ -996,6 +1309,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     const el = document.activeElement;
     if (!el || !sidebar.contains(el)) return () => {};
     const key = keyOf.get(el) || keyOf.get(el.closest('.cp-rowwrap')) || '';
+    const inBuild = builds.el.contains(el) ? el.closest('.cp-build')?.dataset.build ?? null : null;
     const sel = el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' ? [el.selectionStart, el.selectionEnd] : null;
     return () => {
       if (document.activeElement === el) return;
@@ -1006,7 +1320,9 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
         return;
       }
       if (document.activeElement && document.activeElement !== document.body) return;   // something else took it on purpose
-      const next = key.startsWith('t:') ? convo.rows.querySelector('[data-thread-id="home"]') : key.startsWith('i:') || key.startsWith('f:') ? mainRow : null;
+      // an improvement, a fold or a copy's control that went away: to its build's row, while it is still there; else main
+      const own = inBuild != null && inBuild !== MAIN ? builds.rows.querySelector(`.cp-copy-row[data-bar-build="${CSS.escape(inBuild)}"]`) : null;
+      const next = key.startsWith('t:') ? convo.rows.querySelector('[data-thread-id="home"]') : inBuild != null || key.startsWith('i:') || key.startsWith('f:') ? own || mainRow : null;
       next?.focus({preventScroll: true});
     };
   }
@@ -1099,6 +1415,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     refreshDisabled();
     notifyVisibility();
     held();
+    focusPending();
     scheduleShade();
   }
   const outside = event => {
@@ -1106,18 +1423,31 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
     if (!opened || opened.el.contains(event.target) || cardTrigger?.contains(event.target)) return;
     close();
   };
-  /** Inside the builds card the arrows walk its rows, and ArrowLeft from inside main goes to main. Never a
-      printable key: type-to-talk owns those. */
+  /** Inside the builds card the arrows walk the rows of every build; ArrowLeft from inside a build goes to its
+      row; on a copy's row ArrowLeft folds it and ArrowRight unfolds it (then steps inside). Never a printable
+      key: type-to-talk owns those. */
   function treeKeys(event) {
     const t = event.target;
     if (!(t instanceof HTMLElement) || !builds.el.contains(t) || !t.matches('button.cp-row')) return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowLeft'].includes(event.key)) return;
-    const rows = [...builds.el.querySelectorAll('button.cp-row')].filter(el => el.getClientRects().length && !el.disabled);
-    const i = rows.indexOf(t);
-    const next = event.key === 'ArrowDown' ? rows[i + 1] : event.key === 'ArrowUp' ? rows[i - 1] : event.key === 'Home' ? rows[0]
-      : event.key === 'End' ? rows.at(-1) : t.closest('.cp-build-body') ? mainRow : null;
-    if (!next && event.key === 'ArrowLeft') return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    const visible = el => el.getClientRects().length && !el.disabled;
+    const rows = [...builds.el.querySelectorAll('button.cp-row')].filter(visible);
+    const i = rows.indexOf(t), owner = t.closest('.cp-build');
+    const copyRow = t.matches('.cp-copy-row'), caret = copyRow ? owner?.querySelector('[data-cp-role="build-disclosure"]') : null;
+    const isOpen = caret?.getAttribute('aria-expanded') === 'true';
+    const flip = () => { event.preventDefault(); caret.click(); t.focus({preventScroll: true}); };
+    let next = null;
+    if (event.key === 'ArrowRight') {
+      if (!copyRow || !caret) return;
+      if (!isOpen) { flip(); return; }
+      next = [...owner.querySelectorAll('.cp-build-body button.cp-row')].find(visible) || null;
+      if (!next) return;
+    } else if (event.key === 'ArrowLeft') {
+      if (copyRow) { if (caret && isOpen) flip(); return; }
+      next = t.closest('.cp-build-body') ? owner?.querySelector('[data-bar-build]') || mainRow : null;
+      if (!next) return;
+    } else next = event.key === 'ArrowDown' ? rows[i + 1] : event.key === 'ArrowUp' ? rows[i - 1] : event.key === 'Home' ? rows[0] : rows.at(-1);
     event.preventDefault();
     if (next) { next.focus({preventScroll: true}); reveal(next.closest('.cp-rowwrap') || next); shade(); }
   }
@@ -1130,6 +1460,7 @@ export function installMarginUI({ onAction, onVisibility } = {}) {
       if (menuOpen) { stop(); closeMenu(true); return; }
       // 3 the bar's open form, only while you are in the bar
       if (inside && form.isOpen) { stop(); form.close(true); return; }
+      if (inside && buildForm.isOpen) { stop(); buildForm.close(true); return; }
       if (!sidebarOpen || document.querySelector('dialog[open]')) return;
       // 5 as a drawer it is modal, so Escape puts it away from anywhere
       if (narrow.matches) { stop(); setSidebar(false, true); return; }

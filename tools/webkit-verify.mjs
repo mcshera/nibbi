@@ -101,6 +101,38 @@ async function size(width, height) {
   return { tag, renderer };
 }
 
+/** A copy on a phone (docs/BUILDS-AS-COPIES.md §6.5): made on the same backend once main's checks are done,
+    with one improvement landed in it. Its row, caret, play and ship are 44; its page does not scroll sideways. */
+async function copies() {
+  const tag = '390x844 copy';
+  mark(`${tag} made`);
+  const kit = await fixture.enableCopies();
+  const landed = await kit.improve(kit.dev.id, 'Say hello on the title screen');
+  assert.equal(landed.status, 'merged', `${tag}: the improvement landed in dev`);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const page = await context.newPage(); page.setDefaultTimeout(15_000);
+  page.on('pageerror', error => errors.push(`${tag}: ${error.message}`));
+  await page.goto(fixture.base + '/?demo=1&nosw=1');
+  await page.waitForFunction(() => window.nibbiApp && window.nibbi);
+  await page.locator('#sidebar-toggle').click(); await settle(page);
+  mark(`${tag} bar`);
+  await page.locator('#workspace-sidebar [data-bar-build="dev"]').waitFor();
+  await page.locator('#workspace-sidebar [data-cp-role="ship-copy"][data-build="dev"]').scrollIntoViewIfNeeded(); await settle(page);
+  const keys = await page.evaluate(() => [...document.querySelectorAll('#workspace-sidebar .cp-build[data-build="dev"] button')].filter(n => n.getClientRects().length)
+    .map(n => ({ role: n.dataset.cpRole || n.dataset.barBuild || n.dataset.barImprovement || n.className, h: Math.round(n.getBoundingClientRect().height) })));
+  for (const role of ['dev', 'build-disclosure', 'play-copy', 'ship-copy']) assert.ok(keys.some(k => k.role === role), `${tag}: ${role} is drawn`);
+  assert.deepEqual(keys.filter(k => k.h < 44), [], `${tag}: dev's row and keys are 44`);
+  await page.screenshot({ path: out + 'copy-bar-390x844.png' });
+  mark(`${tag} page`);
+  await page.locator('#workspace-sidebar [data-bar-build="dev"]').click();
+  await page.locator('#project-workspace .cp-page[data-cp-page="build"][data-cp-id="dev"]').waitFor();
+  await settle(page);
+  assert.equal(await page.locator('#project-workspace .cp-copyline').innerText(), 'copy of main · 1 ahead · 0 behind', `${tag}: its page says what it is`);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${tag}: no horizontal page overflow on the copy's page`);
+  await page.screenshot({ path: out + 'copy-page-390x844.png' });
+  await bounded(context.close(), 15_000, 'context close');
+}
+
 try {
   browser = await webkit.launch();
   const seen = [];
@@ -108,7 +140,9 @@ try {
     try { seen.push(await bounded(size(width, height), 180_000, `webkit ${width}x${height}`)); console.log('PASS', `webkit ${width}x${height}`); }
     catch (error) { failed++; console.error('FAIL', `webkit ${width}x${height}`, '\n', error.stack || error.message); }
   }
+  try { await bounded(copies(), 180_000, 'webkit copies'); console.log('PASS', 'webkit a copy at 390x844'); }
+  catch (error) { failed++; console.error('FAIL', 'webkit a copy at 390x844', '\n', error.stack || error.message); }
   if (errors.length) { failed++; console.error('FAIL no page errors in WebKit', errors); }
-  if (!failed) console.log(`WebKit checks passed (${browser.version()}): the bar, a streamed reply, main's build page and a ticket at 1180x820 and 390x844. Renderer: ${seen.map(s => s.tag + ' ' + s.renderer).join('; ')}.`);
+  if (!failed) console.log(`WebKit checks passed (${browser.version()}): the bar, a streamed reply, main's build page and a ticket at 1180x820 and 390x844, and a copy's row, keys and page at 390x844. Renderer: ${seen.map(s => s.tag + ' ' + s.renderer).join('; ')}.`);
 } finally { await bounded(browser?.close() ?? Promise.resolve(), 20_000, 'browser close').catch(error => { failed++; console.error('FAIL', error.message); }); await fixture.close(); }
 process.exitCode = failed ? 1 : 0;

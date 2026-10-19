@@ -11,9 +11,9 @@ import { installMarginUI } from './lib/margin-ui.js';
 import { emptyLine } from './lib/empty.js';
 import { installProjectWorkspace } from './lib/project-workspace.js';
 import { installProjectPages } from './lib/project-pages.js';
-import { buildMain, ticketOf, improvementIdForRun, mergeRuns, conversationsFor, splitImprovementText } from './lib/builds-model.js';
-import { MAIN, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS } from './lib/control-panel-contract.js';
-import { projectCommand, loadProjectSection, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
+import { buildsCard, ticketOf, improvementIdForRun, mergeRuns, conversationsFor, splitImprovementText } from './lib/builds-model.js';
+import { MAIN, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS, COPY, COPY_COMMANDS } from './lib/control-panel-contract.js';
+import { projectCommand, loadProjectSection, loadProjectCopies, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { marginMetadata } from './lib/margin-metadata.js';
 import { localReplyMetadata, localReplyLabel, updateLocalReply, settleLocalReply, rateLimitNotice } from './lib/local-fallback.js';
 import { installPocketInteractions } from './lib/pocket-interactions.js';
@@ -85,7 +85,7 @@ const S = {
 };
 if (S.voiceOn) body.classList.add('voice-on');
 let visibleProjectIds = [];
-const mainMemo = new Map();   // project → main's BuildVM and what it was made from (mainFor)
+const cardMemo = new Map();   // project → its builds card (main and its copies) and what it was made from (cardFor)
 let pagesBusy = null;          // what project-pages.js was last told about busy
 const margins = installMarginUI({ onAction: handleMarginAction, onVisibility: ids => { visibleProjectIds = ids; watchProjectSummaries(); } });
 // The frame in the main area: Repository & GitHub draws into its own head and body, the control panel's
@@ -1306,7 +1306,8 @@ function connectEvents() {
     onReady: () => { evReady = true; if (evReplay.length) postAwayBubble(evReplay); evReplay = []; refreshStatus(); scheduleProjectRefresh(); },
     onOffline: () => { evReady = false; setLink('offline'); },
     onEvent: (event) => {
-      if (/^(run\.updated|vault\.updated|roadmap\.|project\.|goal\.|github\.|build\.)/.test(event.type)) scheduleProjectRefresh(event.projectId || event.payload?.run?.game || event.payload?.project);
+      if (event.type === 'copy.updated') acceptCopy(event.projectId || event.payload?.copy?.project, event.payload?.copy, event.payload?.removed === true);   // said at once; the read that follows fills in what git says
+      if (/^(run\.updated|vault\.updated|roadmap\.|project\.|goal\.|github\.|build\.|copy\.)/.test(event.type)) scheduleProjectRefresh(event.projectId || event.payload?.run?.game || event.payload?.project || event.payload?.copy?.project);
       if (event.runId) projectPages.noteRunEvent(event);   // an open Log follows its try live, on screen or not
       if (event.type === 'run.updated') {
         const run = event.payload.run; if (!run) return; if (run.status === 'done') run.status = 'staged';
@@ -1932,7 +1933,7 @@ function projectRow(name) { return (S.projects || []).find(p => p.name === name 
 function runsOf(project) { return (S.fixers || []).filter(f => (f.game || f.project) === project); }
 function cpEntry(project) {
   let e = S.cp.get(project);
-  if (!e) { e = { builds: null, issues: null, play: null, list: 'loading', gen: 0, running: null, again: false }; S.cp.set(project, e); }
+  if (!e) { e = { builds: null, issues: null, play: null, copies: null, copyMark: 0, list: 'loading', gen: 0, running: null, again: false }; S.cp.set(project, e); }
   return e;
 }
 const readPlay = project => api.get('/api/play?project=' + encodeURIComponent(project));
@@ -1948,9 +1949,27 @@ function acceptSection(project, section) {
   const e = cpEntry(project); e.issues = section; e.list = 'ready'; e.gen++; if (e.running) e.again = true;
   syncMargins();
 }
-/** One project's builds and issues sections and its play status, read together. Coalesced: asked for
-    while a read is out, it reads once more after it. A failed read keeps the last good data, and the
-    list says 'unavailable', so up-next issues are not drawn from a list that may be stale. */
+/** A copy the daemon just described (a copy.updated record, or a command's CopyView / RetiredCopy): merged
+    by id into the last copies read, so the bar and the page say it at once. A record keeps the view's
+    ahead, behind, health and play until the next read; a retired or rolled-back one leaves the live list. */
+function acceptCopy(project, copy, removed = false) {
+  if (!copy || typeof copy !== 'object' || typeof copy.id !== 'string' || (copy.project && copy.project !== project)) return;
+  const e = S.cp.get(project); if (!e?.copies) return;   // never read: the first read brings it
+  e.copyMark++;
+  const list = Array.isArray(e.copies.copies) ? e.copies.copies : [], retired = Array.isArray(e.copies.retired) ? e.copies.retired : [];
+  const gone = removed || copy.status === 'retired' || !!copy.retiredAt;
+  const copies = gone ? list.filter(c => c.id !== copy.id)
+    : list.some(c => c.id === copy.id) ? list.map(c => c.id === copy.id ? { ...c, ...copy } : c)
+    : [...list, { ahead: 0, behind: 0, health: 'ok', dirtyFiles: [], play: { running: false, starting: false, url: null, playable: false, kind: 'none', error: null }, ...copy }];
+  const tomb = gone && !removed ? [{ id: copy.id, name: copy.name, branch: copy.branch, retiredAt: copy.retiredAt || new Date().toISOString(), retiredHead: copy.retiredHead ?? null, ships: copy.ships || [] }] : [];
+  const moved = !gone && list.some(c => c.id === copy.id && typeof copy.headSha === 'string' && c.headSha !== copy.headSha);
+  e.copies = { ...e.copies, copies, retired: [...tomb, ...retired.filter(r => r.id !== copy.id)] };
+  syncMargins();
+  if (moved) void refreshControlPanel(project);   // its head moved (a landing, a catch-up): ahead and behind are git's to say, now
+}
+/** One project's builds and issues sections, its play status and its copies, read together. Coalesced:
+    asked for while a read is out, it reads once more after it. A failed read keeps the last good data, and
+    the list says 'unavailable', so up-next issues are not drawn from a list that may be stale. */
 function refreshControlPanel(project) {
   if (!projectRow(project)) return Promise.resolve();
   const e = cpEntry(project);
@@ -1958,12 +1977,14 @@ function refreshControlPanel(project) {
   e.running = (async () => {
     try {
       do {
-        e.again = false; const gen = ++e.gen;
-        const [builds, issues, play] = await Promise.allSettled([loadProjectSection({ project, section: 'builds' }), loadProjectSection({ project, section: 'issues' }), readPlay(project)]);
+        e.again = false; const gen = ++e.gen, mark = e.copyMark;
+        const [builds, issues, play, copies] = await Promise.allSettled([loadProjectSection({ project, section: 'builds' }), loadProjectSection({ project, section: 'issues' }), readPlay(project), loadProjectCopies({ project })]);
         if (gen !== e.gen) continue;   // a command's own section landed meanwhile; read again behind it
         if (builds.status === 'fulfilled') e.builds = builds.value.runs;
         if (issues.status === 'fulfilled') { e.issues = issues.value; e.list = 'ready'; } else e.list = 'unavailable';
         if (play.status === 'fulfilled') notePlay(project, play.value);
+        // a copy.updated that landed while this read was out is newer than it: read once more behind it
+        if (copies.status === 'fulfilled') { if (mark === e.copyMark) e.copies = copies.value; else e.again = true; }
         syncMargins();
       } while (e.again);
     } finally { e.running = null; }
@@ -1974,17 +1995,18 @@ function refreshControlPanel(project) {
 function cpInput(p, now = Date.now()) {
   const e = S.cp.get(p.name);
   return { project: p, runs: runsOf(p.name), sectionRuns: e?.builds ?? null, issues: e?.issues ?? null, list: e?.list ?? 'loading', play: e?.play ?? null,
-    maxConcurrent: S.auto?.[p.name]?.maxConcurrent ?? 2, busy: S.busy, demo: S.demo, now };
+    copies: e?.copies ?? null, maxConcurrent: S.auto?.[p.name]?.maxConcurrent ?? 2, busy: S.busy, demo: S.demo, now };
 }
-/* main is made again only when something it is made from changed (or a minute passed): syncMargins runs
-   on every busy flip, thread event and status read, for every project in the switcher (mainMemo, at the top). */
-function mainFor(p, now = Date.now()) {
+/* The builds card (main, then its copies) is made again only when something it is made from changed (or a
+   minute passed): syncMargins runs on every busy flip, thread event and status read, for every project in
+   the switcher (cardMemo, at the top). */
+function cardFor(p, now = Date.now()) {
   const e = S.cp.get(p.name);
-  const key = [S.fixers, e?.builds, e?.issues, e?.list, e?.play, S.auto?.[p.name], p, S.busy, S.demo, Math.floor(now / 60000)];
-  const memo = mainMemo.get(p.name);
-  if (memo && memo.key.every((value, i) => value === key[i])) return memo.vm;
-  const vm = buildMain(cpInput(p, now)); mainMemo.set(p.name, { key, vm });
-  return vm;
+  const key = [S.fixers, e?.builds, e?.issues, e?.list, e?.play, e?.copies, S.auto?.[p.name], p, S.busy, S.demo, Math.floor(now / 60000)];
+  const memo = cardMemo.get(p.name);
+  if (memo && memo.key.every((value, i) => value === key[i])) return memo.card;
+  const card = buildsCard(cpInput(p, now)); cardMemo.set(p.name, { key, card });
+  return card;
 }
 /** The open conversation's second line: the last thing said in it that this window holds, before the
     daemon's copy. Only the conversation itself counts: nibbi's news (a fixer finishing, a brief) is
@@ -1997,29 +2019,37 @@ function liveConversationText() {
   }
   return null;
 }
-/** The page on screen as project-pages.js draws it (PagesModel), or null in the chat and on Repository & GitHub. */
-function pagesModel(mains, now = Date.now()) {
+/** The page on screen as project-pages.js draws it (PagesModel), or null in the chat and on Repository & GitHub.
+    A copy's page before its project's copies were first read is null too: it is drawn once they land, never
+    as "gone" before anyone looked. A copy no longer live is build: null, the gone page. */
+function pagesModel(cards, now = Date.now()) {
   const v = S.projectView; if (!v || v.page === 'repository') return null;
   const p = projectRow(v.project); if (!p) return null;
-  const build = mains?.get(p.name) || mainFor(p, now);
-  return { page: v, project: { id: p.name, name: p.name, branch: p.branch || '' }, build, ticket: v.page === 'ticket' ? ticketOf(cpInput(p, now), v.id) : null, busy: S.busy, demo: S.demo, now };
+  const card = cards?.get(p.name) || cardFor(p, now), find = name => card.builds.find(b => b.id === name) ?? null;
+  const ticket = v.page === 'ticket' ? ticketOf(cpInput(p, now), v.id) : null;
+  if (v.page === 'build' && v.id !== MAIN && !S.cp.get(p.name)?.copies) return null;
+  const build = v.page === 'build' ? find(v.id || MAIN) : find(ticket?.build || MAIN) || card.builds[0];
+  return { page: v, project: { id: p.name, name: p.name, branch: p.branch || '' }, build, builds: card.builds, ticket, busy: S.busy, demo: S.demo, now };
 }
-function syncPage(mains, now) { const model = pagesModel(mains, now); if (model) projectPages.update(model); }
+function syncPage(cards, now) {
+  const model = pagesModel(cards, now); if (!model) return;
+  if (projectPages.snapshot()) projectPages.update(model); else projectPages.open(model, { focus: false });   // a copy's page waited for its first read
+}
 setInterval(() => { if (S.projectView && S.projectView.page !== 'repository') syncPage(); }, 60000);   // "4m in", "landed 2h ago"
 function syncMargins() {
   const active = activeProject(), status = S.status, now = Date.now();
   const selected = (S.projects || []).find(p => p.name === active);
   if (projectRow(active) && !S.cp.has(active)) void refreshControlPanel(active);   // the first read of the project you are in
-  const mains = new Map();
+  const cards = new Map();
   const projects = (S.projects || []).filter(p => p.kind !== 'brain').map(p => {
-    const a = (S.auto || {})[p.name], goal = (S.goals || {})[p.name], main = mainFor(p, now), open = S.thread.project === p.name;
-    mains.set(p.name, main);
+    const a = (S.auto || {})[p.name], goal = (S.goals || {})[p.name], card = cardFor(p, now), open = S.thread.project === p.name;
+    cards.set(p.name, card);
     return { id: p.name, name: p.name, active: p.name === active, branch: p.branch || '',
       goal: [goal?.focus, goal?.text].filter(Boolean).join(' · '), mode: a ? autoOf(p.name).mode : 'unknown',
       spend: liveNumber(a?.spend), spendCap: a ? (liveNumber(a.spendCap) ?? 0) : null,
-      attention: main.attention,
+      attention: card.attention,
       conversations: conversationsFor(S.threadsByProject.get(p.name) || [], { activeId: open ? S.thread.id : null, liveText: open ? liveConversationText() : null, project: p.name }),
-      builds: [main] };
+      builds: card.builds, buildsBadge: card.badge, newCopy: card.newCopy };
   });
   const metadata = marginMetadata({ status, project: selected, busy: S.busy, link: S.link, demo: S.demo, sessionCost: S.sessionCost, sessionTurns: S.sessionTurns });
   projectWorkspace.setBusy(S.busy);
@@ -2034,7 +2064,7 @@ function syncMargins() {
     demo: S.demo, calm: calmMotion, systemReduced: systemReducedMotion(),
     glass: glassOn, glassAvailable,
   } });
-  syncPage(mains, now);
+  syncPage(cards, now);
 }
 function renderProject() {
   if (S.projectView && Array.isArray(S.projects) && !S.projects.some(p => p.name === S.projectView.project)) closeProjectView(false);
@@ -2062,7 +2092,7 @@ const liveKey = () => S.liveThreadKey || activeThreadKey();   // a local command
 function busyNotice() { const [project, id] = liveKey().split('\u0000'); return notice(NAME + ' is answering in “' + threadTitle(project, id) + '” — switch when it’s done'); }
 const notice = (message) => Object.assign(new Error(message), { kind: 'notice' });   // the bar shows it in ink: waiting is not a failure
 // What the bar sends that the control panel answers (BAR_ACTIONS, plus its form's "ask nibbi instead").
-const PANEL_FROM_BAR = new Set(['openBuild', 'openImprovement', 'backToChat', 'startImprovement', 'queueImprovement', 'playMain', 'askNibbi']);
+const PANEL_FROM_BAR = new Set(['openBuild', 'openImprovement', 'backToChat', 'startImprovement', 'queueImprovement', 'playMain', 'askNibbi', 'openShip', 'newCopy', 'catchUpCopy', 'playCopy']);
 async function handleMarginAction(action, id, value) {
   activity();
   if (['newProject', 'autoMode', 'spendCap'].includes(action) && S.busy) throw notice(NAME + ' is still working — one thing at a time.');
@@ -2139,7 +2169,7 @@ async function handleMarginAction(action, id, value) {
 }
 
 /* ------------------------------------------------------------------ the control panel's actions (docs/CONTROL-PANEL.md §5) */
-const DEMO_WORDS = { startImprovement: WORDS.demoStart, buildIssue: WORDS.demoStart, retryRun: WORDS.demoStart, playMain: WORDS.demoPlay, previewRun: WORDS.demoPlay };
+const DEMO_WORDS = { startImprovement: WORDS.demoStart, buildIssue: WORDS.demoStart, retryRun: WORDS.demoStart, playMain: WORDS.demoPlay, previewRun: WORDS.demoPlay, playCopy: WORDS.demoPlay };
 /** Every name the bar and the pages send. Only what starts an agent run waits for nibbi's reply; every
     daemon write, and play, is refused in demo. Existing calls are reused: handleProjectAction's command
     paths, /play's server core, the lobby's preview polling. */
@@ -2151,7 +2181,9 @@ async function handleControlPanelAction(action, project, value) {
   // from the drawer, a notification, a chip or a page, it moves to the page's heading.
   const focusPage = () => !$('#workspace-sidebar')?.contains(document.activeElement);
   switch (action) {
-    case 'openBuild': openProjectPage(project, 'build', MAIN, { focus: focusPage() }); return;
+    case 'openBuild': openProjectPage(project, 'build', String(value || MAIN), { focus: focusPage() }); return;
+    // the bar's ship to main: the copy's page, with its ship question already open — the bar never ships
+    case 'openShip': openProjectPage(project, 'build', String(value || ''), { focus: focusPage(), intent: 'ship' }); return;
     case 'openImprovement': openProjectPage(project, 'ticket', String(value || ''), { focus: focusPage() }); return;
     case 'backToChat': closeProjectView(true); return;
     case 'repository': openProjectPage(project, 'repository'); return;
@@ -2161,15 +2193,22 @@ async function handleControlPanelAction(action, project, value) {
     case 'buildEvidence': case 'githubRead': case 'githubCommand': case 'githubRefresh': return handleProjectAction(action, project, value);
     case 'playMain': return playProject(project, value?.action);
     case 'previewRun': return runPreview(project, value?.runId, value?.action);
+    // + improvement, up next and build it now aim at a copy when they carry its id; without one, main (phase 1's payloads)
     case 'startImprovement': {
       const text = String(value?.text || '').trim(), { title } = splitImprovementText(text);   // says, in words, what the daemon would refuse
-      return runCommand(project, 'run.dispatch', undefined, { issue: text, title: title.slice(0, 80) });
+      return runCommand(project, 'run.dispatch', undefined, { issue: text, title: title.slice(0, 80), ...copyArg(value) });
     }
     case 'queueImprovement': {
       const { title, description } = splitImprovementText(value?.text);
-      return issueCommand(project, revision => ({ action: 'issue.create', title, description, expectedRevision: revision }), { retry: true });
+      return issueCommand(project, revision => ({ action: 'issue.create', title, description, expectedRevision: revision, ...copyArg(value) }), { retry: true });
     }
-    case 'buildIssue': return issueCommand(project, revision => ({ action: 'issue.build', id: value?.issueId, expectedRevision: revision }), { retry: true });   // duplicate-safe on the daemon
+    case 'buildIssue': return issueCommand(project, revision => ({ action: 'issue.build', id: value?.issueId, expectedRevision: revision, ...copyArg(value) }), { retry: true });   // duplicate-safe on the daemon
+    // copies (docs/BUILDS-AS-COPIES.md §4.6): commands take the copy's id, never its name
+    case 'newCopy': return copyCommand(project, COPY_COMMANDS.newCopy, { name: String(value?.name || '') });
+    case 'shipCopy': { const result = await copyCommand(project, COPY_COMMANDS.shipCopy, { id: value?.copyId, expectedHead: value?.expectedHead }); sound('land'); void refreshProjects(); return result; }   // main's head moved: its last commit is read again
+    case 'catchUpCopy': return copyCommand(project, COPY_COMMANDS.catchUpCopy, { id: value?.copyId, expectedHead: value?.expectedHead, stopPlay: value?.stopPlay === true });
+    case 'retireCopy': return copyCommand(project, COPY_COMMANDS.retireCopy, { id: value?.copyId, expectedHead: value?.expectedHead });
+    case 'playCopy': return playCopyFlow(project, value?.copyId, value?.action);
     // against the list as the words were read: a change since then is a conflict, and the words stay on the page
     case 'editImprovement': return issueCommand(project, revision => ({ action: 'issue.edit', id: value?.issueId, title: String(value?.title || '').trim(), description: String(value?.description ?? ''), expectedRevision: value?.revision || revision }), { retry: false });
     case 'completeImprovement': return issueCommand(project, revision => ({ action: 'issue.complete', id: value?.issueId, expectedRevision: revision }), { retry: true });
@@ -2182,6 +2221,48 @@ async function handleControlPanelAction(action, project, value) {
     case 'discardRun': return runCommand(project, 'run.discard', value?.runId);
     default: throw new Error('This control is not available.');
   }
+}
+const copyArg = value => typeof value?.copyId === 'string' && new RegExp(COPY.idPattern).test(value.copyId) ? { copyId: value.copyId } : {};
+/** A copy command: the daemon's answer is merged into the copies read at once, then everything is read
+    again. A refusal throws the daemon's own words; "busy" ones (it is shipping, catching up…) are a notice. */
+async function copyCommand(project, name, args) {
+  if (!projectRow(project)) throw new Error('This project is no longer available.');
+  let result;
+  try { result = await api.command(name, args, project); }
+  catch (error) { void refreshControlPanel(project); const busyNow = / is busy — /.test(String(error?.message)); throw busyNow ? notice(error.message) : error; }
+  acceptCopy(project, result?.copy ?? result);
+  void refreshControlPanel(project); void refreshStatus();
+  return result;
+}
+/** A copy's own preview (one plays at a time: starting it stops main's and every other copy's). start: wait
+    for its address and open it; open: open it again; stop: wait until it has stopped. Main's play is read
+    again after, since it may have been stopped. */
+async function playCopyFlow(project, copyId, action) {
+  if (!projectRow(project)) throw new Error('This project is no longer available.');
+  const view = S.cp.get(project)?.copies?.copies?.find(c => c.id === copyId);
+  if (!view) throw new Error(WORDS.copy.gone);
+  const previewId = COPY.preview.replace('{project}', project).replace('{copyId}', copyId);
+  const status = () => api.get('/api/preview?id=' + encodeURIComponent(previewId)).catch(() => null);
+  const after = () => Promise.all([refreshControlPanel(project), refreshPlay(project)]);
+  if (action === 'open') { const st = view.play?.url ? view.play : await status(); if (!st?.url) throw notice('it’s still starting — open it again in a moment'); openUrl(st.url); return; }
+  if (action === 'stop') {
+    try { await api.command(COPY_COMMANDS.playCopy.stop, { id: copyId }, project); for (let i = 0; i < 40; i++) { const st = await status(); if (!st?.running) break; await sleep(250); } }
+    finally { await after(); }
+    return;
+  }
+  if (action !== 'start') throw new Error('This control is not available.');
+  const e = cpEntry(project);
+  const mark = (starting) => { if (!e.copies) return; e.copies = { ...e.copies, copies: e.copies.copies.map(c => c.id === copyId ? { ...c, play: { ...(c.play || {}), starting } } : c) }; syncMargins(); };
+  mark(true);
+  try {
+    const started = await api.command(COPY_COMMANDS.playCopy.start, { id: copyId }, project);
+    let st = started?.url ? { running: true, url: started.url } : null;
+    for (let i = 0; i < 120 && !st?.url; i++) { st = await status(); if (st?.url || st?.error || !st?.running) break; await sleep(500); }
+    if (st?.error && !st?.url) throw new Error(st.error);
+    if (!st?.url && !st?.running) throw new Error('it stopped before it was ready — check its play command and try again');
+    if (!st?.url) throw notice('it’s still starting — press play again to check on it');
+    openUrl(st.url);
+  } finally { mark(false); await after(); }
 }
 async function runCommand(project, command, runId, args = {}) {
   if (command !== 'run.dispatch' && !runId) throw new Error('This build is no longer available.');
@@ -2235,7 +2316,7 @@ async function playProject(project, action) {
   try {
     const r = await playServer(project, action);
     if (action === 'start') { if (!r.url) throw new Error(r.error || 'it didn’t come up — check the play command in settings'); openUrl(r.url); }
-  } finally { await refreshPlay(project); }
+  } finally { await refreshPlay(project); if (action === 'start') void refreshControlPanel(project); }   // one plays at a time: a copy may have stopped
 }
 /** A staged try's own preview (the lobby's Play build, moved): start it and open it when it answers,
     open it again, or stop it and wait until it has. */
@@ -2261,12 +2342,13 @@ async function runPreview(project, runId, action) {
 
 /** Where the main area is (docs/CONTROL-PANEL.md §6): a build's page, an improvement's ticket, or
     Repository & GitHub. The chat is S.projectView === null. */
-function openProjectPage(id, page, pageId = null, { focus = true } = {}) {
+function openProjectPage(id, page, pageId = null, { focus = true, intent = null } = {}) {
   if (!['build', 'ticket', 'repository'].includes(page)) return;
   const project = projectRow(id);
   if (!project) { toast('This project is no longer available.'); return; }
   selectMarginProject(id); margins.close();
-  S.projectView = { project: id, page, id: page === 'build' ? MAIN : page === 'ticket' ? String(pageId) : null }; body.classList.add('project-view');
+  // a build page is main's or a copy's, by name; intent 'ship' opens a copy's page with its ship question open
+  S.projectView = { project: id, page, id: page === 'build' ? String(pageId || MAIN) : page === 'ticket' ? String(pageId) : null, ...(intent ? { intent } : {}) }; body.classList.add('project-view');
   closeDock(false); hideChips(); paletteEl.hidden = true;
   if (page === 'repository') { projectPages.close(); projectWorkspace.open({ project: id, kind: project.kind, section: 'repository' }); }
   else { projectWorkspace.showPage(true); const model = pagesModel(); if (model) projectPages.open(model, { focus }); }

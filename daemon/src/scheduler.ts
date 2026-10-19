@@ -67,7 +67,8 @@ export async function schedulerCycle(notify: (message: string) => Promise<void>)
       if (cfg.spendCap && (autoSpend(project) >= cfg.spendCap || recent.some(run => ['staged', 'done', 'merged'].includes(run.status) && run.costUsd === undefined))) {
         setAuto(project, { mode: 'off', note: 'Spend cap reached, or provider cost is unavailable. Review before resuming.' }); continue;
       }
-      if (cfg.mode === 'ship') for (const run of stagedFor(project)) {
+      // Auto ship lands main's runs only: a copy's runs land on their own, and nothing but the owner's confirm ships a copy (D15).
+      if (cfg.mode === 'ship') for (const run of stagedFor(project).filter(run => !run.copyId)) {
         const result = await integrate(run);
         if (!result.ok) { setAuto(project, { mode: 'stage', note: 'Merge paused: ' + result.detail }); break; }
         await notify('Merged ' + (run.title ?? run.id) + ' on ' + project);

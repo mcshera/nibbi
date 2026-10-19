@@ -31,6 +31,7 @@ import { listProposals, inspectProposal } from './proposals.js';
 import { githubProjectView, githubBuildView, githubBuildSummary, githubPrDraft } from './github-builds.js';
 import { localChangesView } from './build-attempts.js';
 import { projectSection, projectSummaries, projectCommand } from './project-workspace.js';
+import { copiesView } from './project-copies.js';
 import { webStatus } from './web-tools.js';
 import { mcpServers, mcpHealthAll } from './mcp-clients.js';
 import { proposePlan, inspectProposal as inspectPlan, listProposals as listPlans } from './plan-proposals.js';
@@ -157,6 +158,7 @@ export async function api(req: IncomingMessage, res: ServerResponse, url: URL): 
     case '/api/github/build': json(res, 200, githubBuildView(q.get('id') ?? '')); break;
     case '/api/github/changes': json(res, 200, await localChangesView(q.get('project') ?? '', { buildId: q.get('buildId') ?? undefined })); break;
     case '/api/project-section': json(res, 200, projectSection(q.get('project') ?? '', q.get('section') ?? '')); break;
+    case '/api/project-copies': json(res, 200, await copiesView(q.get('project') ?? '')); break;
     case '/api/project-summaries': json(res, 200, projectSummaries((q.get('projects') ?? '').split(',').filter(Boolean))); break;
     case '/api/snapshot': json(res, 200, snapshot()); break;
     case '/api/status': json(res, 200, status()); break;

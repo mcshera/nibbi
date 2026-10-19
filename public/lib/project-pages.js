@@ -1,15 +1,21 @@
-/** The control panel's two pages, phase 1 (docs/CONTROL-PANEL.md §2.2, §5 and §6.4 bind; the lab's
- *  round five Console, design/sidebar-lab/options/tree-console.mjs, is the look):
+/** The control panel's two pages (docs/CONTROL-PANEL.md §2.2, §5 and §6.4 bind for phase 1, and
+ *  docs/BUILDS-AS-COPIES.md §4.4 for phase 2; the lab's round five Console,
+ *  design/sidebar-lab/options/tree-console.mjs, is the look):
  *
  *    the build page   main: live · what ships — the preview card with play main, three tiles, the
- *                     improvements grouped the one way the bar groups them, and what landed in it.
+ *                     improvements grouped the one way the bar groups them, its copies, and what landed
+ *                     in it. A copy (dev, dev1 …): its headline, "copy of main · N ahead · M behind",
+ *                     Ship to main as the confirmed step on the page (what ships, the checks, then yes),
+ *                     the preview (one plays at a time), tiles with catch up, its improvements, its
+ *                     history and a quiet retire. A copy that is gone keeps only its ×.
  *    the ticket page  one improvement: a big status (its word, the one fact that explains it, its keys
  *                     and a strip of facts), then every try as a card on a run log (steps on a rail,
  *                     checks beside them, the log, the changes and GitHub as tabs), then what you asked.
  *
  *  It draws view models (control-panel-contract.js BuildVM / TicketVM, made by builds-model.js) and
  *  sends every choice as onAction(name, projectId, value). It computes no state of its own beyond what
- *  a page holds open: a confirm, a form and its words, which tries are open, each try's tab, and the
+ *  a page holds open: a confirm (on a copy: the ship panel, the catch-up question or the retire strip —
+ *  one at a time), a form and its words, which tries are open, each try's tab, and the
  *  evidence it has read (the log, the diff). An update redraws in place and keeps all of that, the
  *  scroll and the focus; a loaded log or diff is the same node across updates, so a selection, an
  *  open entry and the live tail survive a record refresh.
@@ -24,6 +30,8 @@ import { describeToolEvent, inputLine, eventToLogEntry } from './transcript.js';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const GLYPHS = {
   trunk: ['M12 3v5.25', 'M12 15.75V21', 'M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z'],
+  branch: ['M6 3v12.5', 'M20.5 6a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z', 'M8.5 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z', 'M18 8.5a9.5 9.5 0 0 1-9.5 9.5'],
+  pull: ['M12 4v11', 'm7.5 10.5 4.5 4.5 4.5-4.5', 'M6 20h12'],
   play: ['M8 5.5v13l10.5-6.5L8 5.5Z'],
   stop: ['M7 7h10v10H7z'],
   retry: ['M4 12a8 8 0 1 0 2.4-5.7', 'M4 4v4.5h4.5'],
@@ -96,6 +104,9 @@ function dayClock(value, now) {
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const whenText = (when, now) => when ? [when.verb, ago(when.at, now)].filter(Boolean).join(' ') : '';
+/** The contract's words, with their {…} filled. */
+const fill = (text, values = {}) => String(text ?? '').replace(/\{(\w+)\}/g, (_, k) => values[k] ?? '');
+const sha7 = sha => String(sha || '').slice(0, 7);
 
 /* ------------------------------------------------------------------------------------------ the Log, moved from project-workspace.js */
 const LOG_INPUT_MAX = 2048;
@@ -157,7 +168,7 @@ const FAILED = 'that didn’t go through — try again';
 const CONFLICT = 'the list changed — your words are still here; save again';
 const TAB_LABELS = { log: 'log', changes: 'changes', github: 'github', summary: 'summary', checks: 'checks' };
 const STEP_WORDS = { done: ['done', 'quiet'], running: ['now', 'active'], waiting: ['next', 'quiet'], failed: ['failed', 'error'] };
-const STARTS = ['startImprovement', 'buildIssue', 'retryRun'], PLAYS = ['playMain', 'previewRun'];
+const STARTS = ['startImprovement', 'buildIssue', 'retryRun'], PLAYS = ['playMain', 'previewRun', 'playCopy'];
 const demoWords = action => STARTS.includes(action) ? WORDS.demoStart : PLAYS.includes(action) ? WORDS.demoPlay : WORDS.demoChange;
 const WAITING = new Set(GROUPS.find(g => g.id === 'waiting')?.states || []);
 // a check not judged yet: still coming while the try runs or GitHub is still checking it; otherwise it never ran
@@ -165,6 +176,12 @@ const PENDING_ON_GITHUB = new Set(['to_push', 'pull_request', 'pr_ready', 'needs
 const unjudged = a => a.live || PENDING_ON_GITHUB.has(a.state) ? 'waiting' : 'not run';
 const pageKey = page => `${page?.project ?? ''}\u0000${page?.page ?? ''}\u0000${page?.id ?? ''}`;
 const isConflict = r => r?.code === 'REVISION_CONFLICT' || r?.status === 409;
+/* phase 2: a copy's page holds at most one question open — the ship panel, the catch-up question (only
+   while it plays) or the retire strip — each the key that opened it, and the action its yes sends */
+const QUESTION_KEY = { ship: 'ship', 'catch-up': 'catch-up', retire: 'retire' };
+const QUESTION_ACTION = { ship: 'shipCopy', 'catch-up': 'catchUpCopy', retire: 'retireCopy' };
+const HIST_VERB = { started: 'started', landed: 'landed', failed: 'failed' };
+const SEE_MAIN = 'see main';
 
 /** installProjectPages({ host, onAction, renderMarkdown, renderDiff }) → { open, update, close, noteRunEvent, setBusy, snapshot, destroy }
  *  host            div.cp-page-host inside #project-workspace (the frame keeps its head, ×, and Escape)
@@ -181,7 +198,7 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
   const call = (name, value, project = pid()) => Promise.resolve().then(() => onAction?.(name, project, value));
   /** Why a key can't go now, in words: the model's first; the app's busy and demo rules as a backstop. */
   function blockedWords(action, payload) {
-    const opens = (action === 'previewRun' || action === 'playMain') && payload?.action === 'open';
+    const opens = PLAYS.includes(action) && payload?.action === 'open';
     if (M?.demo && REFUSED_IN_DEMO.includes(action) && !opens) return demoWords(action);
     if (busy && WAITS_FOR_REPLY.includes(action)) return WORDS.busy;
     return '';
@@ -205,6 +222,9 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
       adding: false, addForm: null,                  // the build page's + improvement
       open: new Set(), latest: null,                 // tries drawn open beside the latest; the latest last drawn
       foldFailed: false,
+      question: null,                                // a copy's page: 'ship' | 'catch-up' | 'retire' (one at a time)
+      shipHead: null, shipMoved: false,              // the head the ship panel listed, and whether it changed under it
+      revealShip: false, retireError: '',            // bring the panel into view once; retire's refusal, said where it was asked
     };
     root.addEventListener('keydown', event => onKeydown(s, event));
     root.addEventListener('pointerdown', () => { pointer = true; clearTimeout(release); }, true);
@@ -274,11 +294,14 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     if (onClick) b.addEventListener('click', event => { if (P?.pending.has(k) || b.disabled) { event.preventDefault(); return; } onClick(event); });
     return b;
   }
+  /** The crumb to the build the ticket lives in: main's trunk, or a copy's branch and its name. */
   function crumb(k) {
+    const t = M?.ticket, name = t?.build || MAIN;
+    const copy = (t?.buildKind || (name === MAIN ? 'main' : 'copy')) === 'copy';
     const b = button('cp-crumb', k);
-    const pill = node('span', 'cp-crumb-pill'); pill.append(glyph('trunk'), node('span', '', MAIN));
-    b.append(pill); b.title = 'open main’s build page';
-    b.addEventListener('click', () => go('openBuild', MAIN));
+    const pill = node('span', 'cp-crumb-pill'); pill.append(glyph(copy ? 'branch' : 'trunk'), node('span', '', name));
+    b.append(pill); b.title = `open ${name}’s build page`;
+    b.addEventListener('click', () => go('openBuild', name));
     return b;
   }
   function closeKey() {
@@ -305,12 +328,19 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
   /** A key that was sent holds aria-busy and stops taking presses; it stays focusable (a native disabled
       key would drop focus to the body mid-press). */
   const busyKey = (el, on) => { if (on) { el.setAttribute('aria-busy', 'true'); el.setAttribute('aria-disabled', 'true'); } else { el.removeAttribute('aria-busy'); el.removeAttribute('aria-disabled'); } };
+  /** The page's one notice: a failure in the verdict colour, anything else in ink; `link` adds one quiet
+      way on ("see main" after a ship). */
   function noticeEl() {
     const n = P.notice;
     return keep('notice', JSON.stringify(n), () => {
       const el = node('div', 'project-notice cp-notice'); el.setAttribute('role', 'status');
       el.hidden = !n?.text; el.dataset.kind = n?.kind || '';
       if (n?.text) el.append(node('span', '', n.text));
+      if (n?.text && n.link) {
+        const l = button('cp-link cp-notice-link', n.link.key); l.textContent = n.link.label;
+        l.addEventListener('click', () => go(n.link.action, n.link.value));
+        el.append(l);
+      }
       return el;
     });
   }
@@ -373,7 +403,7 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
   }
   const glyphFor = a => a.action === 'buildIssue' ? 'play' : a.action === 'retryRun' ? 'retry' : a.action === 'editImprovement' ? 'pencil'
     : a.action === 'talkAbout' ? 'thread' : a.action === 'stopRun' && a.confirm ? 'stop'
-    : a.action === 'previewRun' ? (a.payload?.action === 'open' ? 'out' : a.payload?.action === 'stop' ? 'stop' : 'play') : undefined;
+    : a.action === 'previewRun' || a.action === 'playCopy' ? (a.payload?.action === 'open' ? 'out' : a.payload?.action === 'stop' ? 'stop' : 'play') : undefined;
 
   function drawTicket() {
     const t = M.ticket;
@@ -399,11 +429,12 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
       d.append(h1); return d;
     });
     reconcile(P.head, [title, closeKey()]);
-    reconcile(P.body, [keep('gone-body', '', () => node('p', 'cp-quiet cp-gone', 'it isn’t in main’s list anymore — there’s nothing left here to act on'))]);
+    const where = M.ticket?.build || MAIN;
+    reconcile(P.body, [keep('gone-body', where, () => node('p', 'cp-quiet cp-gone', `it isn’t in ${where}’s list anymore — there’s nothing left here to act on`))]);
   }
   function ticketTitle(t) {
     const title = t.improvement.title;
-    const n = keep('title', JSON.stringify([title, P.editing]), () => {
+    const n = keep('title', JSON.stringify([title, P.editing, t.build, t.buildKind]), () => {
       const d = node('div', 'cp-title');
       const kicker = node('p', 'cp-kicker'); kicker.append(node('span', '', WORDS.ticketKicker), crumb('crumb'));
       d.append(kicker);
@@ -480,7 +511,7 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     return strip;
   }
   function factsStrip(t) {
-    return keep('facts', JSON.stringify(t.facts || []), () => {
+    return keep('facts', JSON.stringify([t.facts || [], t.build, t.buildKind]), () => {
       const dl = node('dl', 'cp-facts');
       for (const f of t.facts || []) {
         const cell = node('div', 'cp-fact'); const dd = node('dd', 'cp-fact-value');
@@ -653,8 +684,8 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
   function workMeta(tries, live, last) {
     if (!tries.length) return '';
     const n = plural(tries.length, 'try', 'tries');
-    if (live) return `${n} · try ${live.n} running now`;
-    if (WAITING.has(last.state) || last.state === 'up_next') return `${n} · try ${last.n} ${last.word}`;
+    if (live) return `${n} · try ${live.n} ${live.state === 'landing' ? live.word : 'running now'}`;
+    if (WAITING.has(last.state) || ['up_next', 'landing', 'waiting_to_land'].includes(last.state)) return `${n} · try ${last.n} ${last.word}`;
     const verb = last.state === 'in' ? 'landed' : last.state === 'interrupted' ? 'stopped' : last.word;
     return `${n} · last ${verb} ${ago(last.endedAt || last.startedAt, M.now)}`.trim();
   }
@@ -924,10 +955,15 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
   }
 
   /* ---------------------------------------------------------------------------------------- build page */
+  const isCopy = b => b?.kind === 'copy';
+  /** main: phase 1's page, and its copies (phase 2). A copy: drawCopy. null: the copy is gone. */
   function drawBuild() {
     const b = M.build;
+    if (!b) { drawGoneBuild(); return; }
+    if (isCopy(b)) { drawCopy(b); return; }
     P.root.className = 'cp-page cp-build';
     delete P.root.dataset.state;
+    P.question = null;
     const title = keep('build-title', JSON.stringify([b.name, b.line]), () => {
       const d = node('div', 'cp-title');
       const kicker = node('p', 'cp-kicker'); kicker.append(glyph('trunk'), node('span', '', WORDS.mainKicker));
@@ -937,38 +973,84 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     });
     reconcile(P.head, [title, closeKey()]);
     if (P.foldFailed && !(b.improvements || []).some(i => i.group === 'failed')) P.foldFailed = false;
-    reconcile(P.body, [noticeEl(), previewCard(b), tiles(b), improvementsSection(b), historySection(b)]);
+    const ink = inkKey(b);
+    reconcile(P.body, [noticeEl(), previewCard(b, ink), tiles(b), improvementsSection(b, ink), copiesSection(b), historySection(b)]);
   }
-  const playBlocked = b => b.blocked?.play || b.play?.blocked || blockedWords('playMain', { action: 'start' });
+  /** A copy retired (or gone) while its page was open: it says so and keeps only its ×. */
+  function drawGoneBuild() {
+    P.root.className = 'cp-page cp-build cp-copy-page';
+    P.root.dataset.state = 'gone';
+    P.question = null; P.shipMoved = false; P.adding = false; P.foldFailed = false;
+    const title = keep('gone-build-title', P.id ?? '', () => {
+      const d = node('div', 'cp-title');
+      const kicker = node('p', 'cp-kicker'); kicker.append(glyph('branch'), node('span', '', [WORDS.copy.kicker, P.id].filter(Boolean).join(' · ')));
+      const h1 = node('h1', '', WORDS.copy.gone); h1.tabIndex = -1; h1.dataset.cpKey = 'title';
+      d.append(kicker, h1);
+      return d;
+    });
+    reconcile(P.head, [title, closeKey()]);
+    reconcile(P.body, [keep('gone-build-body', '', () => node('p', 'cp-quiet cp-gone', WORDS.copy.goneNote))]);
+  }
+  /** The page's one ink key (BUILDS-AS-COPIES §4.4), first that applies. A copy: the ship panel's yes when
+      it can ship · Ship to main when it can and the panel is closed · an open question's yes (catch up while
+      it plays; an armed one — retire — leaves the page with no ink, as the ticket's stop) · play · the
+      + improvement form's start now. main (phase 1): play, else the form's start now. */
+  function inkKey(b) {
+    if (!isCopy(b)) return playInk(b) ? 'play' : P.adding ? 'add-start' : '';
+    const ready = !shipWhy(b), q = P.question;
+    if (q === 'ship' && ready) return 'ship-yes';
+    if (q === 'catch-up') return b.catchUp?.confirm?.armed ? '' : 'catch-up-yes';
+    if (q === 'retire') return '';
+    if (q !== 'ship' && ready) return 'ship';
+    if (playInk(b)) return 'play';
+    return P.adding ? 'add-start' : '';
+  }
+  const playAction = b => isCopy(b) ? 'playCopy' : 'playMain';
+  const playValue = (b, action) => isCopy(b) ? { copyId: b.copyId, action } : { action };
+  const playBlocked = b => b.blocked?.play || b.play?.blocked || blockedWords(playAction(b), { action: 'start' });
   const playInk = b => { const p = b.play || {}; return !!p.playable && !p.running && !p.starting && !playBlocked(b); };
-  function previewCard(b) {
-    const p = b.play || {}, blocked = playBlocked(b), ink = playInk(b);
+  function previewCard(b, ink) {
+    const p = b.play || {}, blocked = playBlocked(b), lit = ink === 'play', copy = isCopy(b), name = b.name || MAIN, now = M.now;
     const pend = ['play', 'play-open', 'play-stop'].map(k => P.pending.has(k));
-    return keep('preview', JSON.stringify([p, blocked, ink, pend, b.name]), () => {
+    const stopWords = blockedWords(playAction(b), { action: 'stop' });
+    // one plays at a time: the hint says what Play would stop; a copy also says when it was last played
+    const said = copy ? headSays(b) : new Set();   // a copy's head already says it (one reason stops ship and play): the key keeps it as its title
+    const hint = p.starting ? 'starting it — a moment' : blocked ? (said.has(blocked) ? '' : blocked) : [copy ? (p.playedAt ? `last played ${ago(p.playedAt, now)}` : 'not played yet') : '',
+      p.stops ? fill(WORDS.copy.oneAtATime, { other: p.stops }) : ''].filter(Boolean).join(' · ');
+    const made = copy ? [b.madeAt ? fill(WORDS.copy.madeFrom, { ago: ago(b.madeAt, now) }) : '', sha7(b.madeFrom?.sha)] : null;
+    return keep('preview', JSON.stringify([p, blocked, lit, pend, name, copy, hint, made, stopWords, [...said]]), () => {
       const card = node('section', 'cp-preview'); card.dataset.playing = String(!!p.running);
-      card.setAttribute('aria-label', `play ${b.name || MAIN}`);
+      card.setAttribute('aria-label', copy ? fill(WORDS.copy.play, { name }) : `play ${name}`);
       const bar = node('div', `cp-preview-bar${p.url ? '' : ' is-bare'}`);
       bar.append(dot(p.running ? 'active' : 'quiet', !!p.starting));
       if (p.url) { const u = mono(String(p.url).replace(/^https?:\/\//, '').replace(/\/$/, '')); u.title = p.url; bar.append(u); }
       bar.append(node('span', 'cp-preview-state', p.running ? 'playing' : p.starting ? 'starting' : 'not running'));
       const stage = node('div', 'cp-preview-stage');
-      if (!p.playable) stage.append(node('p', 'cp-preview-big', 'this one can’t be played'), node('p', 'cp-preview-hint', blocked || WORDS.noPlay.replace('{project}', M.project?.name || pid())));
+      if (!p.playable) {
+        stage.append(node('p', 'cp-preview-big', 'this one can’t be played'));
+        const why = blocked || (copy ? fill(WORDS.copy.nothingToPlay, { name }) : WORDS.noPlay.replace('{project}', M.project?.name || pid()));
+        if (!said.has(why)) stage.append(node('p', 'cp-preview-hint', why));
+      }
       else if (p.running) {
-        stage.append(node('p', 'cp-preview-big', `${b.name || MAIN} is playing`));
+        stage.append(node('p', 'cp-preview-big', `${name} is playing`));
         const keys = node('div', 'cp-preview-keys');
         keys.append(
-          key('play-open', WORDS.keys.open, { glyph: 'out', pending: pend[1], onClick: () => void send('play-open', 'playMain', { action: 'open' }) }),
-          key('play-stop', WORDS.keys.stopPlaying, { glyph: 'stop', pending: pend[2], disabled: !!blockedWords('playMain', { action: 'stop' }), title: blockedWords('playMain', { action: 'stop' }), onClick: () => void play('stop') }),
+          key('play-open', WORDS.keys.open, { glyph: 'out', pending: pend[1], onClick: () => void send('play-open', playAction(b), playValue(b, 'open')) }),
+          key('play-stop', WORDS.keys.stopPlaying, { glyph: 'stop', pending: pend[2], disabled: !!stopWords, title: stopWords, onClick: () => void play(b, 'stop') }),
         );
         stage.append(keys);
       } else {
-        stage.append(key('play', WORDS.keys.playMain, { tone: ink ? 'ink' : 'seated', glyph: 'play', cls: 'cp-preview-play', disabled: !!blocked, title: blocked, pending: pend[0] || !!p.starting, onClick: () => void play('start') }));
-        if (p.starting) stage.append(node('p', 'cp-preview-hint', 'starting it — a moment'));
-        else if (blocked) stage.append(node('p', 'cp-preview-hint', blocked));
+        stage.append(key('play', copy ? fill(WORDS.copy.play, { name }) : WORDS.keys.playMain, { tone: lit ? 'ink' : 'seated', glyph: 'play', cls: 'cp-preview-play', disabled: !!blocked, title: blocked, pending: pend[0] || !!p.starting, onClick: () => void play(b, 'start') }));
+        if (hint) stage.append(node('p', 'cp-preview-hint', hint));
       }
       const foot = node('div', 'cp-preview-foot');
       if (p.note) foot.append(node('span', 'cp-preview-note', p.note));
-      if (p.lastCommit) {
+      if (made && (made[0] || made[1])) {
+        const from = node('span', 'cp-preview-commit'); from.title = made.filter(Boolean).join(' · ');
+        if (made[0]) from.append(made[0]);
+        if (made[1]) from.append(made[0] ? ' · ' : '', mono(made[1]));
+        foot.append(from);
+      } else if (!copy && p.lastCommit) {
         const [sha, ...rest] = String(p.lastCommit).split(' ');
         const last = node('span', 'cp-preview-commit'); last.title = p.lastCommit;
         last.append(mono(sha), rest.length ? ` ${rest.join(' ')}` : '');
@@ -979,7 +1061,17 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
       return card;
     });
   }
-  function play(action) { return send(action === 'start' ? 'play' : 'play-stop', 'playMain', { action }); }
+  function play(b, action) { return send(action === 'start' ? 'play' : 'play-stop', playAction(b), playValue(b, action)); }
+  /** One status tile: its label, its value (a word, or a node), the line under it, and an extra (a key). */
+  function tileEl(label, value, sub, extra, note) {
+    const t = node('div', 'cp-tile'); const v = node('dd', 'cp-tile-value');
+    v.append(typeof value === 'string' ? node('span', 'cp-tile-word', value) : value);
+    t.append(node('dt', 'cp-tile-label', label), v);
+    if (sub) t.append(node('dd', 'cp-tile-sub', sub));
+    if (note) { const n = node('dd', 'cp-tile-note', note.text); n.dataset.tone = note.tone || 'quiet'; t.append(n); }
+    if (extra) { const e = node('dd', 'cp-tile-extra'); e.append(extra); t.append(e); }
+    return t;
+  }
   function tiles(b) {
     const imps = b.improvements || [], now = M.now, c = b.counts || {};
     const waiting = imps.filter(i => i.group === 'waiting');
@@ -991,34 +1083,27 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     const sig = JSON.stringify([c.waiting ?? waiting.length, waitSub, check, week.length, Number.isFinite(lastIn) ? ago(lastIn, now) : '', !!b.github]);
     return keep('tiles', sig, () => {
       const dl = node('dl', 'cp-tiles');
-      const tile = (label, value, sub, extra) => {
-        const t = node('div', 'cp-tile'); const v = node('dd', 'cp-tile-value');
-        v.append(typeof value === 'string' ? node('span', 'cp-tile-word', value) : value);
-        t.append(node('dt', 'cp-tile-label', label), v);
-        if (sub) t.append(node('dd', 'cp-tile-sub', sub));
-        if (extra) { const e = node('dd', 'cp-tile-extra'); e.append(extra); t.append(e); }
-        return t;
-      };
-      dl.append(tile('waiting on you', String(c.waiting ?? waiting.length), waitSub));
+      dl.append(tileEl('waiting on you', String(c.waiting ?? waiting.length), waitSub));
       const cmd = check.real && check.command ? (() => { const m = mono(check.command); m.classList.add('cp-tile-command'); m.title = check.command; return m; })() : 'none set';
-      dl.append(tile('checks', cmd, check.real ? 'every improvement is checked before it lands' : WORDS.noCheck));
+      dl.append(tileEl('checks', cmd, check.real ? 'every improvement is checked before it lands' : WORDS.noCheck));
       let repo = null;
       if (b.github) { repo = button('cp-link', 'repository'); repo.textContent = 'repository & github'; repo.addEventListener('click', () => go('repository')); }
-      dl.append(tile('landed this week', String(week.length), Number.isFinite(lastIn) ? `last ${ago(lastIn, now)}` : 'nothing yet', repo));
+      dl.append(tileEl('landed this week', String(week.length), Number.isFinite(lastIn) ? `last ${ago(lastIn, now)}` : 'nothing yet', repo));
       return dl;
     });
   }
-  function improvementsSection(b) {
+  function improvementsSection(b, ink) {
     const s = section('improvements', 'improvements', 'cp-improvements', 'improvements');
-    const imps = b.improvements || [];
+    const imps = b.improvements || [], copy = isCopy(b);
     setText(s._meta, imps.length ? String(imps.length) : '');
     const addKey = keep('add-key', JSON.stringify([P.adding]), () => key('add', WORDS.keys.improvement, { glyph: 'plus', expanded: P.adding, onClick: () => toggleAdd() }));
     reconcile(s._tools, [addKey]);
     const form = P.adding ? addForm(b) : null;
-    if (form) syncAddForm(b);
+    if (form) syncAddForm(b, ink);
     const now = M.now;
     const rows = imps.map(i => [i.id, i.state, i.word, i.tone, i.live, i.title, i.group, rowSub(i, now)]);
-    const list = keep('imps', JSON.stringify([rows, P.foldFailed, b.list]), () => {
+    const empty = copy ? WORDS.copy.emptyImprovements : WORDS.emptyImprovements;
+    const list = keep('imps', JSON.stringify([rows, P.foldFailed, b.list, empty]), () => {
       const box = node('div', 'cp-imps-wrap');
       if (b.list === 'unavailable') {
         const why = node('div', 'cp-imps-note'); why.setAttribute('role', 'status');
@@ -1042,11 +1127,12 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
         }
         list.append(group);
       }
-      if (!list.childElementCount) list.append(node('p', 'cp-imps-empty', b.list === 'loading' ? 'reading the list of improvements…' : WORDS.emptyImprovements));
+      if (!list.childElementCount) list.append(node('p', 'cp-imps-empty', b.list === 'loading' ? 'reading the list of improvements…' : empty));
       box.append(list);
       return box;
     });
-    reconcile(s, [s._head, form, form && keep('add-hint', '', () => node('p', 'cp-add-hint', WORDS.form.hint)), list]);
+    const hint = copy ? fill(WORDS.copy.formHint, { name: b.name }) : WORDS.form.hint;
+    reconcile(s, [s._head, form, form && keep('add-hint', hint, () => node('p', 'cp-add-hint', hint)), list]);
     return s;
   }
   function rowSub(i, now) {
@@ -1062,19 +1148,29 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     row.addEventListener('click', () => go('openImprovement', i.id));
     return row;
   }
+  /** main's timeline: what landed in it (and, phase 2, each ship from a copy, where it falls in time),
+      then the settled ones in quiet ink. */
   function historySection(b) {
     const s = section('history', `landed in ${b.name || MAIN}`, 'cp-history', 'history');
     const landed = (b.improvements || []).filter(i => i.state === 'in').slice(0, PAGE_LIMITS.inKept);
     const settled = (b.settled || []).slice(0, PAGE_LIMITS.settledKept);
-    const now = M.now, items = [...landed, ...settled].map(i => [i.id, i.state, i.word, i.tone, i.title, dayClock(i.when?.at, now), ago(i.when?.at, now)]);
+    const shipped = (b.history || []).filter(h => h.kind === 'shipped').slice(0, PAGE_LIMITS.inKept);
+    const t = x => Number.isFinite(x) ? x : -Infinity;
+    const rows = shipped.length
+      ? [...landed.map(i => ({ i, at: toMs(i.when?.at) })), ...shipped.map(h => ({ h, at: toMs(h.at) }))].sort((x, y) => (t(y.at) > t(x.at)) - (t(y.at) < t(x.at)))
+      : landed.map(i => ({ i }));
+    rows.push(...settled.map(i => ({ i })));
+    const now = M.now;
+    const items = rows.map(({ i, h }) => i ? [i.id, i.state, i.word, i.tone, i.title, i.when?.verb, dayClock(i.when?.at, now), ago(i.when?.at, now)] : [h.kind, h.at, h.text, h.tone, h.sha, dayClock(h.at, now), ago(h.at, now)]);
     setText(s._meta, landed.length ? String(landed.length) : '');
     const list = keep('timeline', JSON.stringify(items), () => {
       const ol = node('ol', 'cp-timeline');
-      for (const i of [...landed, ...settled]) {
+      for (const { i, h } of rows) {
+        if (h) { ol.append(historyRow(h, now)); continue; }
         const li = node('li', 'cp-hist'); li.dataset.state = i.state;
         const time = node('time', 'cp-hist-time', dayClock(i.when?.at, now)); if (i.when?.at) { time.dateTime = i.when.at; time.title = ago(i.when.at, now); }
         const what = node('div', 'cp-hist-what'), line = node('p', 'cp-hist-line');
-        const verb = i.state === 'in' ? 'landed' : i.word;
+        const verb = i.state === 'in' ? (i.when?.verb === 'shipped' ? 'shipped' : 'landed') : i.word;
         const link = button('cp-link cp-hist-link', `hist-${i.id}`); link.textContent = i.title; link.title = i.title;
         link.addEventListener('click', () => go('openImprovement', i.id));
         line.append(word(verb, i.state === 'in' ? 'pass' : 'quiet', { cls: 'cp-hist-word' }), link);
@@ -1088,8 +1184,323 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     reconcile(s, [s._head, list]);
     return s;
   }
+  /** One HistoryVM row: a try (its verb in its verdict's colour and the improvement as a link), or what
+      happened to the build itself (made · shipped · caught up · couldn’t catch up) with its sha in mono. */
+  function historyRow(h, now) {
+    const li = node('li', 'cp-hist'); li.dataset.kind = h.kind;
+    const live = h.kind === 'started' && h.tone === 'active';
+    const time = node('time', 'cp-hist-time', dayClock(h.at, now)); if (h.at) { time.dateTime = h.at; time.title = ago(h.at, now); }
+    const what = node('div', 'cp-hist-what'), line = node('p', 'cp-hist-line');
+    if (h.improvementId) {
+      line.append(word(HIST_VERB[h.kind] || h.kind, h.tone, { live, cls: 'cp-hist-word' }));
+      const link = button('cp-link cp-hist-link', `hist-${h.kind}-${h.improvementId}-${h.at}`); link.textContent = h.text; link.title = h.text;
+      link.addEventListener('click', () => go('openImprovement', h.improvementId));
+      line.append(link);
+    } else {
+      const text = node('span', 'cp-hist-text'), sha = sha7(h.sha), cut = sha ? String(h.text).lastIndexOf(sha) : -1;
+      if (cut >= 0) text.append(h.text.slice(0, cut), mono(sha), h.text.slice(cut + sha.length));
+      else { text.append(h.text); if (sha) text.append(' ', mono(sha)); }
+      line.append(text);
+    }
+    what.append(line);
+    li.append(time, dot(h.tone || 'quiet', live), what);
+    return li;
+  }
+  /** main: its copies, each a row that opens its page; with none, how one is made — or, where copies
+      can't be made here (a GitHub-mode project, no real check), why. */
+  function copiesSection(b) {
+    if (!Array.isArray(b.copies)) return null;   // a phase-1 view model: no copies section
+    const s = section('copies', WORDS.copy.copiesTitle, 'cp-copies', 'copies');
+    const copies = b.copies, project = M.project?.name || pid();
+    const why = b.github?.mode === 'github' ? fill(WORDS.copy.githubMode, { project }) : b.check && !b.check.real ? WORDS.copy.noCheck : '';
+    setText(s._meta, copies.length ? String(copies.length) : '');
+    const list = keep('copies-list', JSON.stringify([copies.map(c => [c.name, c.copyId, c.word, c.tone, c.live, c.note]), why]), () => {
+      const box = node('div', 'cp-imps cp-copies-list');
+      for (const c of copies) {
+        const row = button('cp-imp cp-copy', `copy-${c.name}`); row.title = `open ${c.name}’s build page`;
+        const words = node('span', 'cp-imp-words');
+        words.append(node('span', 'cp-imp-text', c.name));
+        if (c.note) words.append(node('span', 'cp-imp-sub', c.note));
+        row.append(glyph('branch', 'cp-icon cp-copy-glyph'), words, word(c.word, c.tone, { live: c.live, cls: 'cp-imp-state' }), glyph('chevron', 'cp-icon cp-imp-chevron'));
+        row.addEventListener('click', () => go('openBuild', c.name));
+        box.append(row);
+      }
+      if (!copies.length) box.append(node('p', 'cp-imps-empty', why || WORDS.copy.copiesEmpty));
+      return box;
+    });
+    const note = why && copies.length ? keep('copies-why', why, () => node('p', 'cp-copies-why', why)) : null;
+    reconcile(s, [s._head, list, note]);
+    return s;
+  }
 
-  // ---- + improvement on the build page: start now or up next
+  /* ---------------------------------------------------------------------------------------- a copy's page */
+  /** Why it can't ship now ('' when it can): the model's words, and demo as the backstop. */
+  function shipWhy(b) {
+    const s = b.ship, nothing = fill(WORDS.copy.shipNothing, { name: b.name });
+    const why = !s ? b.blocked?.ship || nothing : s.ready ? '' : s.why || b.blocked?.ship || nothing;
+    return why || blockedWords('shipCopy', {});
+  }
+  const catchUpWhy = b => b.catchUp?.blocked || b.blocked?.catchUp || blockedWords('catchUpCopy', {});
+  const retireWhy = b => b.retire?.blocked || b.blocked?.retire || blockedWords('retireCopy', {});
+  function drawCopy(b) {
+    P.root.className = 'cp-page cp-build cp-copy-page';
+    delete P.root.dataset.state;
+    settleQuestion(b);
+    if (P.foldFailed && !(b.improvements || []).some(i => i.group === 'failed')) P.foldFailed = false;
+    const ink = inkKey(b);
+    reconcile(P.head, [copyTitle(b), shipKey(b, ink), closeKey()]);
+    reconcile(P.body, [noticeEl(), shipPanel(b, ink), previewCard(b, ink), copyTiles(b), catchUpStrip(b, ink), improvementsSection(b, ink), copyHistory(b), retireRow(b)]);
+  }
+  /** What a copy's page holds open goes when its reason does; while its yes is out, it stays as it was.
+      The ship panel follows a head that moved under it: it lists the new head, says so, and focus goes
+      back to its "not yet" (only when focus is on the page — a refresh never pulls it out of the bar). */
+  function settleQuestion(b) {
+    const q = P.question;
+    if (!q || ['ship-yes', 'catch-up-yes', 'retire-yes'].some(k => P.pending.has(k))) return;
+    const onPage = () => { const a = document.activeElement; return !a || a === document.body || P.root.contains(a); };
+    if (q === 'ship' && !b.ship) P.question = null;
+    else if (q === 'catch-up' && !(b.catchUp?.needed && b.catchUp.confirm && !catchUpWhy(b))) { P.question = null; if (onPage()) P.focusKey = 'catch-up'; }
+    else if (q === 'retire' && (!b.retire || retireWhy(b))) { P.question = null; if (onPage()) P.focusKey = 'retire'; }
+    else if (q === 'ship') {
+      const head = b.ship.payload?.expectedHead ?? null;
+      if (head !== P.shipHead) { P.shipHead = head; P.shipMoved = true; if (onPage()) P.focusKey = 'ship-no'; }
+    }
+  }
+  function openQuestion(q) {
+    const b = M.build;
+    P.question = q; P.retireError = '';
+    if (q === 'ship') { P.shipHead = b?.ship?.payload?.expectedHead ?? null; P.shipMoved = false; P.revealShip = true; }
+    P.focusKey = `${q}-no`;
+    draw();
+  }
+  function closeQuestion() {
+    const q = P.question; if (!q) return;
+    P.question = null; P.shipMoved = false; P.focusKey = QUESTION_KEY[q];
+    draw();
+  }
+  /** What the headline already says in other words: nothing to ship yet, main moved on, or the copy is
+      busy (being made, shipping, catching up, retiring, or it couldn't be made). */
+  function headImplied(b) {
+    const name = b.name;
+    return b.state === 'nothing' ? fill(WORDS.copy.shipNothing, { name }) : b.state === 'behind' ? fill(WORDS.copy.shipBehind, { name })
+      : ['making', 'shipping', 'catching_up', 'retiring', 'broken'].includes(b.state) ? fill(WORDS.copy.notReady, { name, status: WORDS.copy.statusWords[b.status] || '' }) : '';
+  }
+  /** The lines under the copy line: what is wrong with the copy on disk (healthWords: missing, moved, dirty,
+      couldn't be made), then ship's why — each unless the headline already says it. */
+  function headLines(b) {
+    const implied = headImplied(b), why = shipWhy(b);
+    return [...new Set([b.healthWords || '', why].filter(w => w && w !== implied))];
+  }
+  /** Every reason the head says, so a key further down keeps its reason as its title and doesn't say it again. */
+  const headSays = b => new Set([headImplied(b), ...headLines(b)].filter(Boolean));
+  function copyTitle(b) {
+    const lines = headLines(b);
+    return keep('copy-title', JSON.stringify([b.name, b.word, b.tone, b.live, b.detail, b.copyLine, lines]), () => {
+      const d = node('div', 'cp-title');
+      const kicker = node('p', 'cp-kicker'); kicker.append(glyph('branch'), node('span', '', WORDS.copy.kicker));
+      const row = node('div', 'cp-title-row');
+      const h1 = node('h1', '', b.name); h1.tabIndex = -1; h1.dataset.cpKey = 'title';
+      row.append(h1, word(b.word, b.tone, { live: b.live, cls: 'cp-head-state' }));
+      if (b.detail) row.append(node('span', 'cp-head-detail', b.detail));
+      d.append(kicker, row, node('p', 'cp-copyline', b.copyLine || WORDS.copy.line));
+      for (const line of lines) d.append(node('p', 'cp-head-why', line));
+      return d;
+    });
+  }
+  /** Ship to main, top right: ink when it can ship and nothing else claims the ink; disabled with its why
+      when it can't — except while its panel is open (openShip), when it is the key that closes it. */
+  function shipKey(b, ink) {
+    const open = P.question === 'ship', why = shipWhy(b), lit = ink === 'ship';
+    return keep('ship-key', JSON.stringify([open, why, lit, b.name]), () => key('ship', WORDS.copy.shipKey, {
+      tone: lit ? 'ink' : 'seated', glyph: 'pull', disabled: !!why && !open, title: why || fill(WORDS.copy.shipTitle, { name: b.name }),
+      expanded: open, cls: 'cp-head-ship', onClick: () => toggleShip(),
+    }));
+  }
+  function toggleShip() {
+    if (P.question === 'ship') { closeQuestion(); return; }
+    if (!M.build?.ship || shipWhy(M.build)) return;
+    openQuestion('ship');
+  }
+  /** The confirmed step: what goes into main, what stays, the checks on the head, whether it was played,
+      then yes. Nothing is sent until its yes; while the yes is out the panel stays exactly as it was asked. */
+  function shipPanel(b, ink) {
+    if (P.question !== 'ship' || !b.ship) return null;
+    const s = b.ship, name = b.name, now = M.now, why = shipWhy(b), pending = P.pending.has('ship-yes');
+    const ships = s.ships || [], stays = s.stays || [];
+    const sig = JSON.stringify([name, s.lead, why, ink === 'ship-yes', P.shipMoved, s.checks, s.checksLine, s.facts, s.yes, s.no,
+      ships.map(i => [i.id, i.title, i.word, i.tone, whenText(i.when, now)]), stays.map(i => [i.id, i.title, i.word])]);
+    const held = pending ? P.cache.get('ship-panel') : null;
+    const panel = keep('ship-panel', held ? held.sig : sig, () => {
+      const sec = node('section', 'cp-ship'); sec.setAttribute('aria-labelledby', 'cp-ship-title');
+      const h2 = node('h2', 'cp-ship-title', fill(WORDS.copy.shipTitle, { name })); h2.id = 'cp-ship-title';
+      sec.append(h2, node('p', 'cp-ship-lead', s.lead || why));
+      if (ships.length) {
+        const ol = node('ol', 'cp-ship-list');
+        for (const i of ships) {
+          const li = node('li', 'cp-ship-item');
+          const open = button('cp-ship-open', `ship-${i.id}`); open.title = i.title;
+          open.append(word(i.word || 'in', i.tone || 'pass', { cls: 'cp-ship-word' }), node('span', 'cp-ship-text', i.title), node('span', 'cp-ship-meta', whenText(i.when, now)));
+          open.addEventListener('click', () => go('openImprovement', i.id));
+          li.append(open); ol.append(li);
+        }
+        sec.append(ol);
+      }
+      if (stays.length) sec.append(node('p', 'cp-ship-stays', fill(WORDS.copy.shipStays, { name, list: stays.map(i => `“${i.title}” (${i.word})`).join(', ') })));
+      const checks = node('div', 'cp-ship-checks'), cl = s.checks || [];
+      checks.append(node('h3', 'cp-sub', `checks on ${name}`));
+      if (cl.length) {
+        const ul = node('ul', 'cp-checks');
+        for (const c of cl) {
+          const li = node('li', 'cp-check'); li.dataset.ok = String(c.ok);
+          const [w, tone] = c.ok === true ? ['passed', 'pass'] : c.ok === false ? ['failed', 'error'] : ['not run yet', 'quiet'];
+          li.append(node('span', 'cp-check-name', c.name), word(w, tone));
+          if (c.note) li.append(node('span', 'cp-check-note', c.note));
+          ul.append(li);
+        }
+        checks.append(ul);
+      }
+      if (s.checksLine) checks.append(node('p', 'cp-ship-check-line', s.checksLine));
+      sec.append(checks);
+      if (s.facts?.length) sec.append(node('p', 'cp-ship-facts', s.facts.join(' · ')));
+      if (P.shipMoved) { const n = node('p', 'cp-page-note cp-ship-moved', fill(WORDS.copy.headMoved, { name })); n.setAttribute('role', 'status'); sec.append(n); }
+      const keys = node('div', 'cp-ship-keys');
+      keys.append(
+        key('ship-no', s.no || WORDS.copy.shipNo, { onClick: () => closeQuestion() }),
+        key('ship-yes', s.yes || WORDS.copy.shipKey, { tone: ink === 'ship-yes' ? 'ink' : 'seated', glyph: 'pull', cls: 'cp-act-main', disabled: !!why, title: why, onClick: () => void shipYes() }),
+      );
+      sec.append(keys);
+      return sec;
+    });
+    const yes = panel.querySelector('[data-cp-key="ship-yes"]'); if (yes) busyKey(yes, pending);
+    if (P.revealShip) { P.revealShip = false; P.reveal = panel; }
+    return panel;
+  }
+  async function shipYes() {
+    const b = M.build, s = b?.ship; if (!s || shipWhy(b)) return;
+    const n = (s.ships || []).length, page = P;
+    const r = await send('ship-yes', 'shipCopy', { ...(s.payload || {}) });
+    if (page !== P) return;
+    if (r.ok) {
+      page.question = null; page.shipMoved = false;
+      page.notice = { text: n > 1 ? fill(WORDS.copy.shipDoneMany, { n }) : WORDS.copy.shipDone, kind: '', link: { label: SEE_MAIN, key: 'see-main', action: 'openBuild', value: MAIN } };
+      page.focusKey = 'see-main';
+    } else page.focusKey = 'ship-no';
+    draw();
+  }
+  /** improvements · checks on <name> · against main (with catch up when main moved on, and the last
+      catch-up that didn't go through, in words). */
+  function copyTiles(b) {
+    const c = b.counts || {}, imps = b.improvements || [], name = b.name, cu = b.catchUp;
+    const parts = [[c.in, 'in'], [c.building, 'building'], [c.upNext, 'up next'], [c.waiting, 'waiting on you'], [c.failed, 'failed'], [c.interrupted, 'interrupted']]
+      .filter(([n]) => n > 0).map(([n, w]) => `${n} ${w}`);
+    const check = b.checks?.[0] || null, real = b.check?.real !== false;
+    const [value, tone] = !real ? ['none set', 'quiet'] : b.verified || check?.ok === true ? ['passed', 'pass'] : check?.ok === false ? ['failed', 'error'] : ['not run yet', 'quiet'];
+    const checkSub = !real ? WORDS.noCheck : value === 'not run yet' ? `${b.check?.command || 'the check'} runs when an improvement lands or ${name} catches up`
+      : check?.note || (b.verified ? `verified ${ago(b.verified.at, M.now)} on ${sha7(b.verified.sha)}` : '');
+    const ahead = Number(b.ahead) || 0, behind = Number(b.behind) || 0;
+    const needed = !!cu?.needed, blocked = needed ? catchUpWhy(b) : '';
+    const pending = P.pending.has('catch-up') || P.pending.has('catch-up-yes'), asking = P.question === 'catch-up';
+    const last = cu?.last && !cu.last.ok && cu.last.words ? cu.last.words : '';
+    const sig = JSON.stringify([parts, imps.length, name, value, tone, checkSub, ahead, behind, needed, blocked, pending, asking, !!cu?.confirm, last]);
+    return keep('copy-tiles', sig, () => {
+      const dl = node('dl', 'cp-tiles');
+      dl.append(tileEl('improvements', String(imps.length), parts.join(' · ') || 'none yet'));
+      dl.append(tileEl(`checks on ${name}`, word(value, tone, { cls: 'cp-tile-word' }), checkSub));
+      const catchKey = needed ? key('catch-up', WORDS.copy.catchUpKey, { disabled: !!blocked, title: blocked, pending, expanded: cu.confirm ? asking : undefined, onClick: () => pressCatchUp() }) : null;
+      dl.append(tileEl('against main', `${ahead} ahead`, behind ? `${behind} behind — main moved on` : '0 behind — main hasn’t moved on', catchKey, last ? { text: last, tone: 'error' } : null));
+      return dl;
+    });
+  }
+  /** Catch up goes at once, unless the copy plays: then the page asks first (it stops playing it). */
+  function pressCatchUp() {
+    const b = M.build, cu = b?.catchUp; if (!cu?.needed || catchUpWhy(b)) return;
+    if (cu.confirm) { if (P.question === 'catch-up') closeQuestion(); else openQuestion('catch-up'); return; }
+    void catchUp('catch-up');
+  }
+  async function catchUp(k) {
+    const b = M.build, cu = b?.catchUp; if (!cu || catchUpWhy(b)) return;
+    const page = P, name = b.name;
+    const r = await send(k, 'catchUpCopy', { ...(cu.payload || {}) });
+    if (page !== P) return;
+    if (k === 'catch-up-yes') { page.question = null; page.focusKey = 'catch-up'; }
+    if (r.ok) page.notice = { text: fill(WORDS.copy.catchUpDone, { name }), kind: '' };
+    draw();
+  }
+  function catchUpStrip(b, ink) {
+    const pending = P.pending.has('catch-up-yes'), held = pending ? P.cache.get('catch-up-confirm') : null;
+    const c = b.catchUp?.confirm;
+    if (P.question !== 'catch-up' || (!c && !held)) return null;
+    const strip = keep('catch-up-confirm', held ? held.sig : JSON.stringify([c, ink === 'catch-up-yes']), () => {
+      const strip = node('div', 'cp-confirm cp-catch-confirm'); strip.setAttribute('role', 'group'); strip.setAttribute('aria-label', WORDS.copy.catchUpRow);
+      const keys = node('div', 'cp-confirm-keys');
+      keys.append(
+        key('catch-up-no', c.no || WORDS.copy.catchUpNo, { onClick: () => closeQuestion() }),
+        key('catch-up-yes', c.yes || WORDS.copy.catchUpYes, { tone: c.armed ? 'armed' : ink === 'catch-up-yes' ? 'ink' : 'seated', cls: 'cp-act-main', onClick: () => void catchUp('catch-up-yes') }),
+      );
+      strip.append(node('p', 'cp-confirm-words', c.words), keys);
+      return strip;
+    });
+    const yes = strip.querySelector('[data-cp-key="catch-up-yes"]'); if (yes) busyKey(yes, pending);
+    return strip;
+  }
+  /** The copy's history, newest first: made · started · landed · failed · shipped · caught up. */
+  function copyHistory(b) {
+    const s = section('history', 'history', 'cp-history', 'history');
+    const now = M.now, items = (b.history || []).slice(0, 30);
+    setText(s._meta, items.length ? String(items.length) : '');
+    const list = keep('copy-timeline', JSON.stringify(items.map(h => [h.kind, h.at, h.text, h.tone, h.improvementId, h.sha, dayClock(h.at, now), ago(h.at, now)])), () => {
+      const ol = node('ol', 'cp-timeline');
+      for (const h of items) ol.append(historyRow(h, now));
+      if (!ol.childElementCount) ol.append(node('li', 'cp-quiet cp-hist-empty', 'nothing has happened here yet'));
+      return ol;
+    });
+    reconcile(s, [s._head, list]);
+    return s;
+  }
+  /** Retire, quiet at the foot: the note and a link; pressed, an armed strip asks; blocked, the link is
+      disabled and its words show. A refusal is said here, where it was asked. */
+  function retireRow(b) {
+    const r = b.retire; if (!r) return null;
+    const name = b.name, open = P.question === 'retire', why = retireWhy(b), pending = P.pending.has('retire-yes'), said = why && headSays(b).has(why);
+    const c = r.confirm || { words: fill(WORDS.copy.retireConfirm, { name, unshipped: '' }), yes: fill(WORDS.copy.retireYes, { name }), no: fill(WORDS.copy.retireNo, { name }), armed: true };
+    const held = pending ? P.cache.get('retire') : null;
+    const row = keep('retire', held ? held.sig : JSON.stringify([open, r.note, c, why, said, P.retireError, name]), () => {
+      const wrap = node('div', 'cp-retire');
+      if (open) {
+        const strip = node('div', 'cp-confirm'); strip.setAttribute('role', 'group'); strip.setAttribute('aria-label', fill(WORDS.copy.retireKey, { name }));
+        const keys = node('div', 'cp-confirm-keys');
+        keys.append(
+          key('retire-no', c.no, { onClick: () => closeQuestion() }),
+          key('retire-yes', c.yes, { tone: c.armed === false ? 'seated' : 'armed', cls: 'cp-act-main', onClick: () => void retireYes() }),
+        );
+        strip.append(node('p', 'cp-confirm-words', c.words), keys);
+        wrap.append(strip);
+        return wrap;
+      }
+      wrap.append(node('p', 'cp-quiet cp-retire-note', r.note || fill(WORDS.copy.retireNote, { name })));
+      const link = button('cp-link cp-retire-key', 'retire'); link.textContent = fill(WORDS.copy.retireKey, { name });
+      if (why) { link.disabled = true; link.title = why; }
+      link.addEventListener('click', () => { if (!link.disabled && M.build && !retireWhy(M.build)) openQuestion('retire'); });
+      wrap.append(link);
+      if (why && !said) wrap.append(node('p', 'cp-retire-why', why));
+      if (P.retireError) { const e = node('p', 'cp-page-note cp-retire-error', P.retireError); e.dataset.kind = 'error'; e.setAttribute('role', 'status'); wrap.append(e); }
+      return wrap;
+    });
+    const yes = row.querySelector('[data-cp-key="retire-yes"]'); if (yes) busyKey(yes, pending);
+    return row;
+  }
+  async function retireYes() {
+    const b = M.build, r = b?.retire; if (!r) return;
+    const page = P;
+    const res = await send('retire-yes', 'retireCopy', { ...(r.payload || {}) }, { quiet: true });
+    if (page !== P) return;
+    // answered, focus goes back to retire (the next model makes the page gone, and its title takes it)
+    page.question = null; page.focusKey = 'retire';
+    if (!res.ok) page.retireError = res.error;
+    draw();
+  }
+
+  // ---- + improvement on the build page: start now or up next (on a copy, it lands there: { text, copyId })
   const startBlocked = b => b.blocked?.start || blockedWords('startImprovement', {});
   const queueBlocked = b => b.blocked?.queue || blockedWords('queueImprovement', {});
   function addForm() {
@@ -1112,11 +1523,12 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     P.addForm = form;
     return form;
   }
-  function syncAddForm(b) {
+  function syncAddForm(b, ink) {
     const f = P.addForm?._fields; if (!f) return;
     const sw = startBlocked(b), qw = queueBlocked(b);
-    const tone = !playInk(b) ? 'ink' : 'seated';
-    f.start.className = `cp-act cp-act-${tone} cp-act-main`;
+    const placeholder = isCopy(b) ? fill(WORDS.copy.formPlaceholder, { name: b.name }) : WORDS.form.placeholder;
+    if (f.field.placeholder !== placeholder) f.field.placeholder = placeholder;
+    f.start.className = `cp-act cp-act-${ink === 'add-start' ? 'ink' : 'seated'} cp-act-main`;
     for (const [el, words, k] of [[f.start, sw, 'add-start'], [f.queue, qw, 'add-queue']]) { el.disabled = !!words; el.title = words; busyKey(el, P.pending.has(k)); }
   }
   function toggleAdd(open = !P.adding) {
@@ -1125,7 +1537,7 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     draw();
   }
   async function submitAdd(which) {
-    const b = M.build, f = P.addForm?._fields; if (!f) return;
+    const b = M.build, f = P.addForm?._fields; if (!f || !b) return;
     const k = `add-${which}`; if (P.pending.has('add-start') || P.pending.has('add-queue')) return;
     const words = which === 'start' ? startBlocked(b) : queueBlocked(b);
     if (words) { f.setNote(words); return; }
@@ -1133,11 +1545,12 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     if (!text) { f.field.focus(); return; }
     f.setNote('');
     const page = P;
-    const r = await send(k, which === 'start' ? 'startImprovement' : 'queueImprovement', { text }, { quiet: true });
+    const value = isCopy(b) && b.copyId ? { text, copyId: b.copyId } : { text };
+    const r = await send(k, which === 'start' ? 'startImprovement' : 'queueImprovement', value, { quiet: true });
     if (page !== P) return;
     if (r.ok) { f.field.value = ''; f.setNote(''); toggleAdd(false); return; }
     f.setNote(r.error, 'error');
-    syncAddForm(M.build);
+    if (M.build) syncAddForm(M.build, inkKey(M.build));
   }
 
   /* ---------------------------------------------------------------------------------------- Escape */
@@ -1148,6 +1561,7 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     if (P.confirm) { const k = P.confirm; P.confirm = null; P.focusKey = k; }
     else if (P.steerKey) { const k = P.steerKey; P.steerKey = null; P.focusKey = k; }
     else if (P.editing) { closeEdit(); event.preventDefault(); event.stopPropagation(); return; }
+    else if (P.question) { const q = P.question; P.question = null; P.shipMoved = false; P.focusKey = QUESTION_KEY[q]; }   // a copy's ship panel, catch-up question or retire strip
     else if (P.adding) { P.adding = false; P.focusKey = 'add'; }
     else if (P.foldFailed && P.kind === 'build') { P.foldFailed = false; P.focusKey = 'failed-more'; }
     else return;
@@ -1169,13 +1583,17 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     if (destroyed || !model?.page || !['build', 'ticket'].includes(model.page.page)) return;
     const next = stateFor(model.page);
     const switching = next !== P;
-    if (P && switching) { P.scroll = P.body.scrollTop; P.confirm = null; }
+    if (P && switching) { P.scroll = P.body.scrollTop; P.confirm = null; P.question = null; P.shipMoved = false; }
     P = next; M = model; busy = !!model.busy;
     pointer = false; deferred = false; clearTimeout(release);
+    // openShip (the bar's ship to main): a copy's page with its ship panel already open — on open only,
+    // so an update carrying the same intent never opens it again once it was closed
+    const shipIntent = model.page.intent === 'ship' && isCopy(model.build) && !!model.build.ship;
+    if (shipIntent) { P.question = 'ship'; P.shipHead = model.build.ship.payload?.expectedHead ?? null; P.shipMoved = false; P.retireError = ''; }
     if (host.childNodes.length !== 1 || host.firstChild !== P.root) host.replaceChildren(P.root);
     draw();
-    if (switching) P.body.scrollTop = P.scroll;
-    if (focus) P.root.querySelector('h1')?.focus({ preventScroll: true });
+    if (shipIntent) P.body.scrollTop = 0; else if (switching) P.body.scrollTop = P.scroll;
+    if (focus && !(shipIntent && focusKey('ship-no'))) P.root.querySelector('h1')?.focus({ preventScroll: true });
   }
   return {
     /** Show a page ({ page: PageRef, project, build, ticket, busy, demo, now }). focus: the h1 takes focus. */
@@ -1188,7 +1606,7 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
       draw();
     },
     close() {
-      if (P) { P.scroll = P.body.scrollTop; P.confirm = null; }
+      if (P) { P.scroll = P.body.scrollTop; P.confirm = null; P.question = null; P.shipMoved = false; }
       P = null; M = null; pointer = false; deferred = false; clearTimeout(release);
       host.replaceChildren();
     },
@@ -1219,7 +1637,7 @@ export function installProjectPages({ host, onAction, renderMarkdown, renderDiff
     },
     snapshot() {
       if (!P) return null;
-      return { page: P.kind, id: P.id, project: P.project, hasDraft: hasDraft(P), confirming: P.confirm ? findAction(P.confirm)?.action || P.confirm : null };
+      return { page: P.kind, id: P.id, project: P.project, hasDraft: hasDraft(P), confirming: P.confirm ? findAction(P.confirm)?.action || P.confirm : P.question ? QUESTION_ACTION[P.question] : null };
     },
     destroy() {
       destroyed = true; clearTimeout(release);
