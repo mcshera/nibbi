@@ -172,7 +172,7 @@ test('the app narrates each verified delivery event once, only from live events,
     assert.equal(stream.after, 10, 'a first visit subscribes from the snapshot cursor');
     // Replay before ready: an old merge is summarized by the away line, never narrated as if it just happened.
     stream.emit(event('run.updated', { run: oldMerged }, { runId: 'build-old' })); stream.ready(id - 1);
-    await page.waitForFunction(() => document.querySelector('#sidebar-progress')?.textContent === 'Nothing merged yet today · 3 this week · 2-day streak');
+    await page.waitForFunction(() => document.querySelector('#sidebar-progress')?.textContent === 'nothing merged yet today · 3 this week · 2-day streak');
     await page.waitForTimeout(500);
     assert.equal(await count(/merged into/), 0, 'replayed events never narrate');
     assert.equal(await count(/While you were away/), 1, 'the replay buffer still feeds the away summary');

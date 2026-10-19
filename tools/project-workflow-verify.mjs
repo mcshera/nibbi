@@ -45,7 +45,7 @@ try{
  if(report.scope!=='responsive'){
  const {page,context}=await createPage();let draftProject;
  try{
-  await check('a page close preserves the active conversation and work while Nibbi is busy, and starting waits in words',async()=>{
+  await check('a page close preserves the active conversation and work while Nibbi is busy, and starting does not wait',async()=>{
    const release=fixture.holdChat();
    try {
     await page.locator('#ask').fill('Keep working while I browse');await page.locator('#ask').press('Enter');
@@ -53,16 +53,16 @@ try{
     await page.locator('#ask').fill('An unsent follow-up');await attachFixture(page);
     const before=await page.evaluate(()=>({thread:nibbiApp.state().thread,run:nibbiApp.state().activeRunId,turns:nibbiApp.state().turns.map(t=>t.text)}));
     const current=await page.evaluate(()=>nibbiApp.state().project);const writes=posts();
-    // main's page opens while nibbi answers; what would start a run waits for the reply, in words, and up next does not (D8)
+    // main's page opens while nibbi answers, and nothing on it waits for the reply: not up next, and not what starts a run (D8, reversed: docs/CONTROL-PANEL.md §12.2)
     const build=await open(page,current,'build');
     await build.locator('[data-cp-key="add"]').click();
     const start=build.locator('[data-cp-key="add-start"]'),queue=build.locator('[data-cp-key="add-queue"]');
-    assert.equal(await start.isDisabled(),true,'start now waits for the reply');assert.equal(await start.getAttribute('title'),WORDS.busy);
+    assert.equal(await start.isDisabled(),false,'start now does not wait for the reply');assert.equal(await start.getAttribute('title')||'','','and no words say it does');
     assert.equal(await queue.isDisabled(),false,'up next does not wait');
     await build.locator('[data-cp-key="add-cancel"]').click();
-    // and an up-next issue's ticket, where the project has one: build it now waits too
+    // and an up-next issue's ticket, where the project has one: build it now goes too
     const upNext=page.locator('#workspace-sidebar [data-bar-improvement^="issue:"][data-state="up_next"]').first();
-    if(await upNext.count()){const id=await upNext.getAttribute('data-bar-improvement');const ticket=await open(page,current,'ticket',id);const now=ticket.locator('[data-cp-key="build-now"]');assert.equal(await now.isDisabled(),true,'build it now waits for the reply');assert.equal(await now.getAttribute('title'),WORDS.busy);}
+    if(await upNext.count()){const id=await upNext.getAttribute('data-bar-improvement');const ticket=await open(page,current,'ticket',id);const now=ticket.locator('[data-cp-key="build-now"]');assert.equal(await now.isDisabled(),false,'build it now does not wait for the reply');assert.equal(await now.getAttribute('title')||'','');}
     await open(page,current,'build');
     // Another project is refused while nibbi answers: the reply, its chips and its errors belong to the one it started in.
     {const other=(await page.evaluate(()=>nibbiApp.state().projects.map(p=>p.id||p.name))).find(id=>id&&id!==current&&id!=='vault');if(other){await sidebarOpen(page);await chooseProject(page,other);await closeSwitcher(page);assert.equal(await page.evaluate(()=>nibbiApp.state().project),current,'a project switch waits for the reply');await page.locator('.margin-error').filter({hasText:/answering in/}).waitFor();}};

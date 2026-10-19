@@ -2,6 +2,49 @@
 
 ## 0.9.0 — Unreleased
 
+### The progress line speaks like the rest of the bar
+
+The foot says `nothing merged yet today` and `progress not available` now, in lowercase like every other
+state line in the bar; the counted forms (`2 merged today · 5 this week · 3-day streak`) already were.
+
+### The keys that start a run don't wait for nibbi's reply
+
+**start now**, **build it now** and **try again** used to be refused while nibbi was answering, with
+*nibbi’s answering — this can start once the reply lands*. A run is a background agent in its own
+folder, not the chat's turn, and the daemon already keeps it honest — one live try per improvement,
+the project's capacity, the spend cap — so they start now, and the words are gone. Each key still holds
+while it is sending, and a second press sends nothing. A new conversation, and switching away from
+the one that is answering, still wait: those share the turn.
+
+### Automation works the Improvements list
+
+**It picks up up next.** Phase 1 took Plans out of the bar, so the Automation modes on the project card
+were draining a roadmap nobody could see, and nothing moved an up-next improvement on its own. Now
+**stage** takes the top of up next, in issues.md order, and builds it through the same `issue.build`
+as build it now — while the project has room (its running and queued tries count against the most at
+once) and under the spend cap, as before. No model chooses what goes next. **ship** does the same and,
+into main, merges as it did. **suggest** asks nibbi for up to three improvements and puts each in up
+next marked *nibbi suggested*, for you to build or mark done; it builds nothing, and asks again only
+once you've answered the last ones. stage and ship don't build them either: a suggestion waits for your
+build it now.
+
+**It builds into the copy you choose.** With a copy, the card has a **builds into** segment: main, dev,
+dev1… Into a copy, a try lands there on its own and ship merges nothing into main — Ship to main stays
+your confirm. If that copy is retired, or couldn't be made, automation builds into main again, in
+stage, and says so; a copy that couldn't be made is not offered.
+
+**A set /goal keeps the roadmap**, exactly as before: its lead builds on main and ship merges it,
+whichever copy up next builds into, and the card hides **builds into** until the goal is done. The
+card says which it is working (`automation picks up up next · builds into dev`), with its last note
+under it; an up-next ticket says automation will build it, and a try you stopped or discarded isn't
+started again by itself.
+
+**Checked.** `daemon/test/automation.test.ts` drives each mode in temp repos (15 tests: capacity and
+a queued try, the spend cap, suggest and its suggestions left for you, ship into dev and into main, a
+retired or broken target, a target not ready yet, another copy's list, GitHub mode, a try orphaned by
+a retire, a goal, and a goal in ship with a copy chosen); control-panel check 22
+turns stage on from the card and watches the top two up-next rows start building while the third waits.
+
 ### The control panel, phase 2: builds are copies
 
 **A build is a clone of the app.** `+ New build` on the builds card makes one — `dev`, then `dev1` — and
@@ -31,8 +74,8 @@ preview, and playing main stops the copies'.
 
 **Defaults the owner can change.** An improvement on a copy is done when the copy ships; copies are
 made from main only; five at most; a copy needs a real project check; GitHub-connected projects keep
-copies local for now, and the `+` says so; automation and the lead still build on main
-(`docs/BUILDS-AS-COPIES.md` §1 lists all sixteen).
+copies local for now, and the `+` says so; the lead still builds on main, and automation did until
+it learned to build into a copy, above (`docs/BUILDS-AS-COPIES.md` §1 lists all sixteen).
 
 **Checked.** `daemon/test/project-copies.test.ts` proves the rules in temp repos — main moves only
 through the verified merge, a copy's branch only by `--ff-only` inside its own folder, nothing moves a

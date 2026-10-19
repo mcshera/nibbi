@@ -12,7 +12,7 @@ import { emptyLine } from './lib/empty.js';
 import { installProjectWorkspace } from './lib/project-workspace.js';
 import { installProjectPages } from './lib/project-pages.js';
 import { buildsCard, ticketOf, improvementIdForRun, mergeRuns, conversationsFor, splitImprovementText } from './lib/builds-model.js';
-import { MAIN, WAITS_FOR_REPLY, REFUSED_IN_DEMO, WORDS, COPY, COPY_COMMANDS } from './lib/control-panel-contract.js';
+import { MAIN, REFUSED_IN_DEMO, WORDS, COPY, COPY_COMMANDS } from './lib/control-panel-contract.js';
 import { projectCommand, loadProjectSection, loadProjectCopies, loadGithubProject, loadGithubBuild, loadGithubChanges, loadGithubPrDraft, githubCommand } from './lib/project-data.js';
 import { marginMetadata } from './lib/margin-metadata.js';
 import { localReplyMetadata, localReplyLabel, updateLocalReply, settleLocalReply, rateLimitNotice } from './lib/local-fallback.js';
@@ -1994,15 +1994,18 @@ function refreshControlPanel(project) {
 /** What builds-model.js takes for one project (CpInput). */
 function cpInput(p, now = Date.now()) {
   const e = S.cp.get(p.name);
+  const a = S.auto?.[p.name], goal = S.goals?.[p.name];
   return { project: p, runs: runsOf(p.name), sectionRuns: e?.builds ?? null, issues: e?.issues ?? null, list: e?.list ?? 'loading', play: e?.play ?? null,
-    copies: e?.copies ?? null, maxConcurrent: S.auto?.[p.name]?.maxConcurrent ?? 2, busy: S.busy, demo: S.demo, now };
+    copies: e?.copies ?? null, maxConcurrent: a?.maxConcurrent ?? 2, busy: S.busy, demo: S.demo, now,
+    // automation picks up up next (stage/ship, no /goal), into main or the copy chosen on the card
+    auto: a ? { mode: autoOf(p.name).mode, copyId: a.copyId ?? null, goal: !!goal && !goal.done, onAt: a.onAt ?? null } : null };
 }
 /* The builds card (main, then its copies) is made again only when something it is made from changed (or a
    minute passed): syncMargins runs on every busy flip, thread event and status read, for every project in
    the switcher (cardMemo, at the top). */
 function cardFor(p, now = Date.now()) {
   const e = S.cp.get(p.name);
-  const key = [S.fixers, e?.builds, e?.issues, e?.list, e?.play, e?.copies, S.auto?.[p.name], p, S.busy, S.demo, Math.floor(now / 60000)];
+  const key = [S.fixers, e?.builds, e?.issues, e?.list, e?.play, e?.copies, S.auto?.[p.name], S.goals?.[p.name], p, S.busy, S.demo, Math.floor(now / 60000)];
   const memo = cardMemo.get(p.name);
   if (memo && memo.key.every((value, i) => value === key[i])) return memo.card;
   const card = buildsCard(cpInput(p, now)); cardMemo.set(p.name, { key, card });
@@ -2046,6 +2049,7 @@ function syncMargins() {
     cards.set(p.name, card);
     return { id: p.name, name: p.name, active: p.name === active, branch: p.branch || '',
       goal: [goal?.focus, goal?.text].filter(Boolean).join(' · '), mode: a ? autoOf(p.name).mode : 'unknown',
+      autoTarget: a?.copyId ?? null, goalActive: !!goal && !goal.done, autoNote: typeof a?.note === 'string' ? a.note : '',
       spend: liveNumber(a?.spend), spendCap: a ? (liveNumber(a.spendCap) ?? 0) : null,
       attention: card.attention,
       conversations: conversationsFor(S.threadsByProject.get(p.name) || [], { activeId: open ? S.thread.id : null, liveText: open ? liveConversationText() : null, project: p.name }),
@@ -2095,7 +2099,7 @@ const notice = (message) => Object.assign(new Error(message), { kind: 'notice' }
 const PANEL_FROM_BAR = new Set(['openBuild', 'openImprovement', 'backToChat', 'startImprovement', 'queueImprovement', 'playMain', 'askNibbi', 'openShip', 'newCopy', 'catchUpCopy', 'playCopy']);
 async function handleMarginAction(action, id, value) {
   activity();
-  if (['newProject', 'autoMode', 'spendCap'].includes(action) && S.busy) throw notice(NAME + ' is still working — one thing at a time.');
+  if (['newProject', 'autoMode', 'spendCap', 'autoTarget'].includes(action) && S.busy) throw notice(NAME + ' is still working — one thing at a time.');
   if (PANEL_FROM_BAR.has(action)) return handleControlPanelAction(action, id, value);
   switch (action) {
     case 'selectProject': {
@@ -2126,6 +2130,17 @@ async function handleMarginAction(action, id, value) {
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('Enter a cap of zero or more.');
       await api.post('/api/auto', { project: id, spendCap: value });
       await refreshStatus(); toast(value ? 'cap $' + value + ' on ' + id : 'no spend cap on ' + id); return;
+    }
+    case 'autoTarget': {
+      // where stage and ship build what is up next: main, or one of the project's copies (the daemon checks it is live)
+      if (!(S.projects || []).some(p => p.name === id && p.kind !== 'brain')) throw new Error('This project is no longer available.');
+      if (S.demo) throw new Error('Leave demo mode to change project settings.');
+      const copyId = value === MAIN ? null : value;
+      if (copyId !== null && !new RegExp(COPY.idPattern).test(String(copyId))) throw new Error('That build is gone — choose another.');
+      await api.post('/api/auto', { project: id, copyId });
+      await refreshStatus();
+      const name = copyId ? (S.cp.get(id)?.copies?.copies || []).find(c => c.id === copyId)?.name || 'the copy' : MAIN;
+      toast(WORDS.auto.intoToast.replace('{name}', name).replace('{project}', id)); return;
     }
     case 'providers': selectMarginProject(id); margins.close(); openPlatform('Providers'); return;
     case 'model': case 'advancedSettings': margins.close(); openPlatform('Providers'); return;
@@ -2170,12 +2185,11 @@ async function handleMarginAction(action, id, value) {
 
 /* ------------------------------------------------------------------ the control panel's actions (docs/CONTROL-PANEL.md §5) */
 const DEMO_WORDS = { startImprovement: WORDS.demoStart, buildIssue: WORDS.demoStart, retryRun: WORDS.demoStart, playMain: WORDS.demoPlay, previewRun: WORDS.demoPlay, playCopy: WORDS.demoPlay };
-/** Every name the bar and the pages send. Only what starts an agent run waits for nibbi's reply; every
-    daemon write, and play, is refused in demo. Existing calls are reused: handleProjectAction's command
+/** Every name the bar and the pages send. None waits for nibbi's reply — a run is a background agent in its own
+    worktree, and the daemon bounds it (D8, reversed 2026-09-29: §12.2); every daemon write, and play, is refused in demo. Existing calls are reused: handleProjectAction's command
     paths, /play's server core, the lobby's preview polling. */
 async function handleControlPanelAction(action, project, value) {
   activity();
-  if (WAITS_FOR_REPLY.includes(action) && S.busy) throw notice(WORDS.busy);
   if (S.demo && REFUSED_IN_DEMO.includes(action) && value?.action !== 'open') throw notice(DEMO_WORDS[action] || WORDS.demoChange);
   // Opened from the docked bar, focus stays on its row (a control panel: click down the rows and read);
   // from the drawer, a notification, a chip or a page, it moves to the page's heading.
@@ -2385,8 +2399,7 @@ async function handleProjectAction(action, project, value) {
   // running is worth reaching while Nibbi is mid-turn, and neither call changes anything.
   if (action === 'previewStatus') return api.get('/api/preview?id=' + encodeURIComponent(value.id));
   if (action === 'openUrl') { openUrl(value.url); return true; }
-  // A daemon command never contends with the lead turn; what waits for the reply is decided by the
-  // control panel (WAITS_FOR_REPLY), before it gets here.
+  // A daemon command never contends with the lead turn, and nothing the control panel sends waits for the reply (§12.2).
   if (S.demo && ['projectCommand','buildCommand','githubCommand'].includes(action)) throw new Error('Leave demo mode before changing project work.');
   selectMarginProject(project);
   if (action === 'githubCommand') {
