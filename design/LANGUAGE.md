@@ -13,7 +13,8 @@ Companion file: **`public/tokens.css`** — the same system as custom properties
 | character | shipped, contracted | `design/character-lab/CONTRACT.md`, `public/nibbi.js` |
 | motion / poses | shipped, contracted | `public/pocket-motion.js`, 24 poses, 8 moods |
 | voice / copy | shipped, contracted | `docs/PERSONALITY.md` |
-| sidebar shape | shipped (PR #14), lab retained | `design/sidebar-lab/` |
+| sidebar shape | the Cards bar, control panel phase 1 (PR #24); lab retained | `public/lib/margin-ui.js`, `public/margins.css`, `design/sidebar-lab/` round six |
+| project pages | the Console pages: main's build page, an improvement's ticket (PR #24) | `public/lib/project-pages.js`, `public/project-pages.css`, `docs/CONTROL-PANEL.md` |
 | **colour, type, shape, elevation** | **shipped, contracted** | this document + `public/tokens.css` |
 | space | declared, 0 uses | `--space-*` in `public/tokens.css` |
 
@@ -406,7 +407,11 @@ Three durations, one curve, applied consistently across every file. **This is th
 
 ### 7.3 Press feedback
 
-`scale(1.05)` on hover, `scale(.96)` on active, `--t1`, `--ease`. On the send button only. Extend to any new primary action; never to secondary ones.
+**Every control shows the press, and it shows it in colour and shadow**, on `--t1` and `--ease` for `background-color`, `color` and `box-shadow` — never `transition: all`. A row goes from nothing to `--veil-hover` to `--veil-press`; a current (lifted) row presses to `--bed-press` and its shadow collapses to the edge; a seated key presses to `--bed-press` on a firmer ring; a quiet icon key (`+`, a caret, Settings, collapse, a gear) goes from nothing to `--veil-press`, and stays there while what it opened is open.
+
+`scale(.96)` pressed belongs to **the one primary of a surface only**: the send button, the bar's open form's **start now**, a page's one ink key. Nothing else scales. New primaries get no hover scale; send keeps its own `scale(1.05)`, which predates this rule.
+
+Measured, not assumed: `tools/control-panel-verify.mjs` presses a conversation row, main's row, an improvement row, `+ improvement`, ▶, the conversations `+`, Settings, collapse and a page key with the pointer held down, and fails when the held background equals the resting one or the transition is not `background-color` at 120ms.
 
 ### 7.4 Reduced motion
 
@@ -457,7 +462,16 @@ The parts vocabulary as it stands. A new surface should be assembled from these 
 | **toast** | pill, solid ink | `--type-control` | `--e-floating` | z below an open dock panel |
 | **diff** | `--r-card` wells, mono | `--type-fine` | none | `--pass-*` added, `--fail-*` removed, per-file `<details>` |
 | **plan review** | `--r-panel`, `--veil-edge` border | `--type-body` | none | state badge is `--type-micro` uppercase in a pill |
-| **margin card** | `--r-panel`, `--measure-card` | `--type-fine` | `--e-lifted` | no ink fork: the derived ramp serves the bar (§2.5) |
+| **margin card** | `--r-panel`, `--measure-card` | `--type-fine` | `--e-lifted` | no ink fork: the derived ramp serves the bar (§2.5). Settings opens from the top, beside its key in the bar's head, with 12px to spare at the bottom (arrive rises 10px) |
+| **bar card** | `--r-card`, `--paper` on `--paper-bar`, 4px inset | — | an inner hairline edge, no lift | **the Cards rule:** everything in the bar is one of three identical cards — the project, its conversations, its builds — with one header, one row and one key between them. The head (`nibbi` · Settings · collapse) is not a card, and the foot is a quiet line, the scroll's last item |
+| **card header** | a 44px row that is the card's own top | title (`--type-body` 600) or group label (`--type-fine` 600, `--ink-2`), badge `--type-meta` | none; stuck, a hairline under it | label · one badge word on the right-hand edge · a quiet key on the trailing column. It sticks while its rows scroll, and still draws the card's top corners |
+| **two-line row** | `--r-well`, 44px everywhere | line one `--type-control` (the owner's words, wrap to two then clamp), line two `--type-meta` `--ink-3` | none; current lifts (`--paper-raised`, edge, `--e-seated`, `--e-highlight`) | a 16px glyph column at 24–40, words on 48, state words on the right-hand edge at 207, a trailing column for a key. The same row for a conversation, main and an improvement; an improvement sits one step (16) in, on main's trunk |
+| **fold row** | the one-line row, 36px docked, 44 in the drawer | `--type-control` | none | stands in for what it hides, in words (`14 failed`, `3 more up next`), `aria-expanded`, a caret that turns without a motion; open, it says `show fewer`. The row whose ticket is open always shows, folded or not |
+| **bar key** | `--r-well`, 32px docked, 44 in the drawer and at a coarse pointer | `--type-control` | none | three kinds only: the well (▶, up next: `--veil-well`), the quiet icon key (nothing at rest), and the one ink key (the open form's **start now**). "playing" is a word beside ▶, never a filled chip |
+| **page key** | `--r-control`, 36px, 44 at ≤640px and a coarse pointer | `--type-control`, lowercase | seated: `--paper-raised` + ring + `--e-seated` + `--e-highlight` | seated, **ink** (one per page, the first ink `ActionVM`) or **armed** (`--fail-solid`: a destructive key asking twice). A blocked key stays, disabled, with its reason as its `title` and once as a quiet line under the keys |
+| **ask-twice strip** | `--r-well` on `--notice-bed`, under the keys | `--type-control` | none | merge, discard and stop ask on the page before anything is sent: the words say what happens, then **no** (focused) and **yes** (armed red for discard and stop, ink for merge). Escape or no closes it and gives focus back to the key that asked |
+| **status panel** | `--r-panel`, `--paper-raised`, ring | the state word at `--type-display`, the status line `--type-body` | `--e-raised` + `--e-highlight` | a ticket's big status: dot + word (pulses while building), the one fact that explains it, its keys, then a strip of facts. Its ring takes `--fail-edge` / `--pass-edge` only through `[data-status]` |
+| **try card** | `--r-panel`, `--paper-raised`, ring | head `--type-control`, mono for sha and branches | `--e-highlight` | one run on the ticket's run log: steps on a rail, checks beside them, then the log (on `--ink-terminal`), the changes and GitHub as tabs. The latest is open; an earlier try folds to one line |
 | **notice bubble** | the bubble on `--notice-bed`, `--veil-strong` border, `--ink-3` dot | `--type-read` | `--e-raised` | something was unreachable, not judged |
 | **platform panel** | `--r-surface`, `760px` | `--type-body` | `--e-dialog` | `::backdrop` is `--veil-press` + `--glass-scrim` |
 | **jump to latest** | pill | `--type-fine` | `--e-floating` | tracks `--feed-bottom` |
@@ -503,7 +517,8 @@ Governed by `docs/PERSONALITY.md`, which is more thorough than most product voic
 - **Chips come from meaning or from state, never from a regex.** This is the hardest-won rule in the project (`docs/IMPROVEMENT-PLAN.md` §A) and it is a design rule as much as a model rule: an action that appears must be an action that exists.
 - **Labels are lowercase sentence case.** `new thread`, `jump to latest`, `plan first`. Uppercase appears only at `--type-micro` with tracking, for machine categories (`TOOL`, `EXECUTED`).
 - **Numbers, not adjectives.** `4 files · +82 −14`, not "several changes".
-- **A state line says one fact once.** A section tab's headline is its badge; the lines under it add only what the badge lacks, as lowercase fragments with no period (`2 in flight · 1 staged`, `nothing queued`), and nothing at all when it has nothing to add. A status shown on its own names its subject: `Notifications are blocked in system or browser settings`, not `Blocked in system or browser settings`.
+- **A state line says one fact once.** A card's badge is its headline, the first fact that wants you (`1 needs you`, `2 failed`, `1 pull request open`), and a row's words add only what the badge lacks, as lowercase fragments with no period (`queued 4m ago`, `landed 2h ago`), and nothing at all when there is nothing to add. A status shown on its own names its subject: `Notifications are blocked in system or browser settings`, not `Blocked in system or browser settings`.
+- **Words carry state.** An improvement says `up next`, `building`, `needs you`, `ready to review`, `in`, `failed` or `interrupted` in words; a mark may sit beside a word, never replace it. Only the machine verdicts take colour (`in` and passed: `--pass-*`; failed and needs a look: `--fail-*`). An interrupted run is not a verdict and stays in ink. Keys on a page are lowercase too: `try again`, `approve & merge`.
 - **A truncated string always carries a `title`.** Taken from the sidebar lab's reading of Cursor's live complaint about untitled truncated repo names.
 - **Drafts are per conversation.** A half-written message stays with the thread it was written in, survives a reload, and a quote is added under it, never over it. A file that cannot be attached says why, with the number (`4 images is the most per message`).
 
@@ -517,7 +532,7 @@ Already met, and worth stating so it stays met:
 |---|---|
 | focus visible | `outline: var(--focus-ring)` (`2px solid var(--ink)`), `offset: 3px` (2px inside dense panels), on every interactive element; on ink (a toast's action, a code block's copy) `var(--focus-ring-inverse)`, the same ring in `--ink-inverse`, since the ink ring cannot be seen there; `tools/style-verify.mjs` fails any other ring |
 | disabled | `opacity: var(--dim-disabled)` (`.45`), everywhere; a control that must not dim says `opacity: 1` and shows it another way (the outlined Settings badge) |
-| touch targets | 44px minimum at `≤640px` and `pointer: coarse` |
+| touch targets | 44px minimum at `≤640px` and `pointer: coarse`; the bar holds 44 for every row and key at `≤899px`, where it is a drawer, and a two-line row is 44 everywhere (`tools/control-panel-verify.mjs` measures the drawer and a ticket at 390 touch) |
 | reduced motion | global 1ms override + per-surface + character-level static poses |
 | screen reader | `.sr` clip pattern, `aria-expanded` on the `+`, `aria-pressed` on toggles, `aria-describedby` on the field |
 | hover-only content | every hover reveal also fires on keyboard focus. The agent card opens on `:focus-visible` on the agent or inside the card (`:has(.card :focus-visible)`), so focus in its guide box keeps it open; not on `:focus-within`, which a click also satisfies, and which held an unpinned card open over the hero |
@@ -583,6 +598,8 @@ Two families were found while applying the register and are now documented rathe
 Round 2 (0.8.1) closed two more of the same kind. Builds showed `To push 0` and `Pull requests 0` on every project, GitHub or not: those two now hide as a group when no run delivers through GitHub (`github.mode` or `workflowMode` is `github`) and neither counts anything (a local merge on a GitHub-connected project is mode `local` and still to push), while `Needs attention` stays, because that is where a local project's failed builds are.
 
 Three tokens joined the file, `--dim-disabled`, `--focus-ring` and `--focus-ring-inverse` (the same ring on ink, where the ink one cannot be seen), replacing six disabled opacities (`.35`, `.4`, `.42`, `.45`, `.45`, `.5`) and every hand-drawn ring (`--ink-2` in the workspace and `--margin-muted` on the card's scroller among them). `--track-micro` is adopted at its two exact sites. 28 `!important` flags are retired — 16 in `margins.css` and 11 in `project-workspace.css`, where the button resets sat at (0,1,1) and outranked every control's own class (they are under `:where()` now), and the palette's one, which a `max-width` does without. What remains is `[hidden]` and the reduced-motion kill switch (7 in `styles.css`, 3 in `margins.css`), and `tools/style-verify.mjs`, first in `npm run verify`, holds each file to that budget. Two things came back once the resets stopped winning: the section's `×` renders at its declared `--type-title` (21px, as the card's close does; it was 16), and a disabled Settings preference keeps full opacity with its outlined badge, as §12's shape-not-colour rule always asked.
+
+Round 3 (0.9.0, the control panel, phase 1) applied the same test to the bar and the project pages. The bar spoke four container languages in one column — a raised switcher card, flat conversation rows, builds rows with a trunk, raised `+` squares heavier than anything near them — and it is now **one card three times** (§9: bar card, card header, two-line row, fold row, bar key), on the bar's own local geometry (`--cp-*` in `margins.css`, all of it built from `--space-*` and `--touch`). The section tabs, the Builds lobby, the Issues board and Plans left the UI; main's build page and an improvement's ticket replaced them, in their own stylesheet (`project-pages.css`, every rule under `.cp-page`, tokens only). `tools/style-verify.mjs` gives `project-pages.css` a `!important` budget of 0 and accepts `[data-tone="pass"]` as a verdict hook beside `[data-tone="error"]`. §7.3 changed: the press is colour and shadow on every control, and scale is the one primary's. The Settings card moved from the bar's foot to its head and opens from the top; its narrow foot keeps 12px, the other edges' margin, after it was found arriving 2px past the bottom of a 568px phone.
 
 ## 16. References
 

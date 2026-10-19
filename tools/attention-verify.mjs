@@ -76,9 +76,11 @@ async function verdicts(browser) {
   await page.waitForFunction(() => __qaMocks.notifications.length > 1);
   assert.equal(await page.evaluate(() => __qaMocks.notifications[1].title), 'Needs your input');
   await page.waitForFunction(() => / is waiting on you\.$/.test([...document.querySelectorAll('#feed .turn .said')].at(-1)?.innerText.trim() || ''));
-  assert.deepEqual(await page.evaluate(() => [...[...document.querySelectorAll('#feed .turn')].at(-1).querySelectorAll('.chip')].map(c => c.textContent)), ['steer', 'stop', 'open build', 'ask nibbi']);
+  // "open it": the chip opens the run's ticket now, not a build in the lobby (docs/CONTROL-PANEL.md §6.2).
+  assert.deepEqual(await page.evaluate(() => [...[...document.querySelectorAll('#feed .turn')].at(-1).querySelectorAll('.chip')].map(c => c.textContent)), ['steer', 'stop', 'open it', 'ask nibbi']);
   await page.waitForFunction(() => document.title === '(2) Nibbi');
-  await page.waitForFunction(() => document.querySelector('.margin-tab[data-margin-tab="builds"]')?.getAttribute('aria-label') === 'Builds. 1 needs input', null, { timeout: 10000 });
+  // The builds card says the one fact that wants you first, in the words the ticket uses ("needs you").
+  await page.waitForFunction(() => document.querySelector('.cp-group[data-cp-group="builds"] .cp-badge')?.textContent === '1 needs you', null, { timeout: 10000 });
   await page.screenshot({ path: out + 'verdict-waiting-1180x820.png' });
 
   // Answered, then asked again: the second question is news as well, not a repeat of the first.
@@ -94,16 +96,19 @@ async function verdicts(browser) {
   assert.equal(await asked(), 2, 'one line per question');
   assert.equal(await page.evaluate(() => __qaMocks.notifications.length), 3, 'and one notification per question');
 
-  // A notification is a way back to the build it is about.
+  // A notification is a way back to what it is about: the ticket of the improvement the run is a try
+  // of. A retry is a new try on the same ticket, so the failing run is try 2 of fixture-3's.
   await page.evaluate(() => __qaMocks.notifications[0].onclick());
   await page.locator('#project-workspace:not([hidden])').waitFor();
-  await page.locator(`[data-build-id="${failing}"]`).first().waitFor();
+  const ticket = page.locator('#project-workspace .cp-page[data-cp-page="ticket"][data-cp-id="run:fixture-3"]');
+  await ticket.locator(`article.cp-try[data-cp-run="${failing}"]`).waitFor();
+  assert.equal(await ticket.getAttribute('data-state'), 'failed', 'the ticket says what the notification said');
   assert.equal(await page.evaluate(() => __qaMocks.notifications[0].closed), true, 'clicking it closes it');
   await context.close();
 
   // On a phone the closed bar says it on its toggle, and a focused window gets no notification.
   const phone = await open(browser, { width: 390, height: 844, mobile: true, init: () => { window.__qaMocks = { notifications: [] }; class N { static permission = 'granted'; static async requestPermission() { return 'granted'; } constructor(title) { __qaMocks.notifications.push(title); } } Object.defineProperty(window, 'Notification', { value: N, configurable: true }); document.hasFocus = () => true; } });
-  await phone.page.waitForFunction(() => document.querySelector('#sidebar-toggle .sidebar-toggle-count')?.textContent === '1 needs input', null, { timeout: 10000 });
+  await phone.page.waitForFunction(() => document.querySelector('#sidebar-toggle .sidebar-toggle-count')?.textContent === '1 needs you', null, { timeout: 10000 });
   assert.equal(await phone.page.locator('#sidebar-toggle').getAttribute('aria-label'), 'Open sidebar');
   assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'the wider toggle stays on the page');
   await phone.page.screenshot({ path: out + 'toggle-count-390x844.png' });
@@ -118,11 +123,11 @@ async function verdicts(browser) {
 
 // The toggle's words beside the character. In the talk pose it sits top-centre, and on a narrow phone the
 // words wrap before they reach it rather than painting the toggle over its face. Uses the build verdicts()
-// left asking, so the words are "1 needs input".
+// left asking, so the words are "1 needs you".
 async function toggleWords(browser) {
   for (const [width, height] of [[320, 568], [360, 740], [390, 844]]) {
     const { context, page } = await open(browser, { width, height, mobile: true });
-    await page.waitForFunction(() => document.querySelector('#sidebar-toggle .sidebar-toggle-count')?.textContent === '1 needs input', null, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelector('#sidebar-toggle .sidebar-toggle-count')?.textContent === '1 needs you', null, { timeout: 10000 });
     await page.evaluate(() => window.nibbiApp.send('/help'));
     await page.waitForFunction(() => document.body.dataset.mode === 'talk' && document.querySelectorAll('#feed .turn .nib').length > 0);
     await page.waitForTimeout(1200);   // the character springs to its pose; measure and shoot the settled room
@@ -139,51 +144,77 @@ async function toggleWords(browser) {
   }
 }
 
-// The Builds lobby while builds change under you. Uses fixture-7..9; verdicts() owns 3..6.
-async function lobby(browser) {
+// Tickets and the build page while runs change under you (the lobby's hard-won property, moved onto
+// the pages: docs/CONTROL-PANEL.md §2.2.3). Uses fixture-7..9; verdicts() owns 3..6.
+async function pages(browser) {
   const { context, page } = await open(browser);
   const notices = () => page.getByRole('button', { name: 'Show updates', exact: true }).count();
-  await page.locator('.margin-tab[data-margin-tab="builds"]').click();
-  await page.locator('#project-workspace [data-build-id="fixture-0"].is-selected').waitFor();
-  const staged = page.locator('[data-build-id="fixture-0"]');
-  await staged.getByRole('button', { name: 'Log', exact: true }).click();
-  await staged.locator('.project-evidence-panel').getByText('No log entries have been reported.').waitFor();
-  await staged.getByRole('button', { name: 'Log', exact: true }).focus();
+  // The failed fold in the bar says how many are failed; it moving is the sign a read landed and every
+  // open page was drawn again from it (syncMargins → syncPage).
+  const fold = () => page.locator('#workspace-sidebar [data-cp-fold="failed"] .cp-primary').innerText();
+  const foldMoves = async was => page.waitForFunction(was => document.querySelector('#workspace-sidebar [data-cp-fold="failed"] .cp-primary')?.textContent !== was, was, { timeout: 8000 });
+  const ticket = id => page.locator(`#project-workspace .cp-page[data-cp-page="ticket"][data-cp-id="${id}"]`);
+  const openTicket = async id => {
+    const row = page.locator(`#workspace-sidebar [data-bar-improvement="${id}"]`);
+    if (!await row.count()) await page.locator('#workspace-sidebar [data-cp-fold="failed"]').click();
+    await row.click();
+    await ticket(id).waitFor();
+  };
 
-  // A tab holds nothing back: the rows update, and focus comes back to the tab.
+  // A focused tab holds nothing back: the ticket is drawn again, and focus is still on the tab.
+  await openTicket('run:fixture-0');
+  const staged = ticket('run:fixture-0').locator('article.cp-try[data-cp-run="fixture-0"]');
+  const logTab = staged.locator('.project-evidence-tabs button[data-kind="log"]');
+  await logTab.click();
+  await page.waitForFunction(() => { const p = document.querySelector('article.cp-try[data-cp-run="fixture-0"] .project-evidence-panel'); return p && p.textContent.trim() && !/^reading/.test(p.textContent.trim()); });
+  await logTab.focus();
+  await logTab.evaluate(el => { window.heldTab = el; });
+  let was = await fold();
   assert.match((await command('run.discard', { id: 'fixture-7' })).text || '', /discard/i);
-  await page.waitForFunction(() => document.querySelector('[data-build-id="fixture-7"] .project-build-status')?.textContent === 'Discarded', null, { timeout: 8000 });
+  await foldMoves(was);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await notices(), 0, 'no "Show updates" under a focused tab');
-  assert.deepEqual(await page.evaluate(() => ({ kind: document.activeElement.dataset.kind, build: document.activeElement.closest('[data-build-id]')?.dataset.buildId })), { kind: 'log', build: 'fixture-0' }, 'focus is back on the tab it was on');
+  assert.deepEqual(await page.evaluate(() => ({ same: document.activeElement === window.heldTab, kind: document.activeElement.dataset.kind, run: document.activeElement.closest('[data-cp-run]')?.dataset.cpRun })), { same: true, kind: 'log', run: 'fixture-0' }, 'focus is still on the tab it was on, the same node');
 
-  // Typing does: with the search box focused a read waits behind a notice.
-  await page.locator('.margin-tab[data-margin-tab="issues"]').click();
-  await page.getByLabel('Search issues', { exact: true }).focus();
+  // Typing too: the build page's improvement field keeps its words, its node and its focus through a read.
+  await page.locator('#workspace-sidebar [data-bar-build="main"]').click();
+  const build = page.locator('#project-workspace .cp-page[data-cp-page="build"][data-cp-id="main"]');
+  await build.waitFor();
+  await build.locator('[data-cp-key="add"]').click();
+  const field = build.locator('[data-cp-key="add-field"]');
+  await field.waitFor();
+  await field.focus();
+  await page.keyboard.type('Give the seedlings more room');
+  await field.evaluate(el => { window.heldField = el; });
+  was = await fold();
   await command('run.discard', { id: 'fixture-8' });
-  await page.getByRole('button', { name: 'Show updates', exact: true }).waitFor({ timeout: 8000 });
-  await page.screenshot({ path: out + 'lobby-held-1180x820.png' });
+  await foldMoves(was);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.deepEqual(await page.evaluate(() => ({ connected: window.heldField.isConnected, focused: document.activeElement === window.heldField, value: window.heldField.value })), { connected: true, focused: true, value: 'Give the seedlings more room' }, 'the field is the same node, with its words and its focus');
+  assert.equal(await notices(), 0, 'and nothing waits behind a notice');
+  await page.screenshot({ path: out + 'pages-held-1180x820.png' });
+  await field.fill('');
 
-  // An open Log follows its build: the next event joins the list on screen, and the lobby's own read keeps it.
-  await page.locator('.margin-tab[data-margin-tab="builds"]').click();
-  await page.locator('[data-build-id="fixture-9"] > summary').click();
-  await page.locator('[data-build-id="fixture-9"].is-selected').waitFor();
+  // An open Log follows its run: the next event joins the list on screen, and the page's own read keeps it.
   settle('fixture-9', { summary: 'Fixture: an event for the log to start from.' });
   await page.waitForTimeout(700);
-  const building = page.locator('[data-build-id="fixture-9"]');
-  await building.getByRole('button', { name: 'Log', exact: true }).click();
-  await building.locator('.project-log-entry').first().waitFor();
-  const before = await page.evaluate(() => { window.heldLog = document.querySelector('[data-build-id="fixture-9"] .project-log'); return window.heldLog.children.length; });
+  await openTicket('run:fixture-9');
+  const failed = ticket('run:fixture-9').locator('article.cp-try[data-cp-run="fixture-9"]');
+  await failed.locator('.project-evidence-tabs button[data-kind="log"][aria-pressed="true"]').waitFor();
+  await failed.locator('.project-log-entry').first().waitFor();
+  const before = await page.evaluate(() => { window.heldLog = document.querySelector('article.cp-try[data-cp-run="fixture-9"] .project-log'); return window.heldLog.children.length; });
   assert.match((await command('run.retry', { id: 'fixture-9' })).text || '', /Queued/);
   await page.waitForFunction(n => window.heldLog.isConnected && window.heldLog.children.length > n, before, { timeout: 8000 });
   assert.match(await page.evaluate(() => window.heldLog.lastElementChild.innerText), /superseded/, 'the new row is the status change');
-  await page.waitForTimeout(1200);   // the lobby's own read lands 400ms after the event
-  assert.equal(await page.evaluate(() => window.heldLog.isConnected), true, 'the lobby read did not rebuild the open log');
+  await ticket('run:fixture-9').locator('article.cp-try').nth(1).waitFor({ timeout: 8000 });   // the page's own read: try 2 arrives
+  await page.waitForTimeout(1200);
+  assert.equal(await page.evaluate(() => window.heldLog.isConnected), true, 'the page read did not rebuild the open log');
   assert.equal(await page.evaluate(() => window.heldLog.children.length), before + 1, 'and did not add the row twice');
-  await page.screenshot({ path: out + 'lobby-log-tail-1180x820.png' });
+  await page.screenshot({ path: out + 'pages-log-tail-1180x820.png' });
   await context.close();
 }
 
-const scenarios = [['fixer verdicts, notifications and what is waiting on you', verdicts], ['the toggle\'s words stay clear of the character at 320, 360 and 390', toggleWords], ['a Builds lobby that stays live under focus and an open log', lobby]];
+const scenarios = [['fixer verdicts, notifications and what is waiting on you', verdicts], ['the toggle\'s words stay clear of the character at 320, 360 and 390', toggleWords], ['a ticket and the build page that stay live under focus and an open log', pages]];
 let browser, failed = 0;
 try {
   browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' });

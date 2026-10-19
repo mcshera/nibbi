@@ -14,7 +14,7 @@ const root = fileURLToPath(new URL('../public/', import.meta.url));
 // setting and body.calm); margins.css carries its own copy of each for the bar. Everything else is a
 // specificity problem, and the resets are under :where() so a class can win on its own. A budget can
 // only go down: lower it here when a file sheds one.
-const BUDGET = { 'styles.css': 7, 'margins.css': 3, 'project-workspace.css': 0, 'platform.css': 0, 'project-composer.css': 0, 'voice.css': 0, 'tokens.css': 0 };
+const BUDGET = { 'styles.css': 7, 'margins.css': 3, 'project-workspace.css': 0, 'project-pages.css': 0, 'platform.css': 0, 'project-composer.css': 0, 'voice.css': 0, 'tokens.css': 0 };
 
 // A selector may reach for --fail-* or --pass-* only if it names a verdict. A hook matches as a whole
 // token: .step is a step and .steps is not, .fail is not .failover. The first line is the list the
@@ -23,7 +23,7 @@ const BUDGET = { 'styles.css': 7, 'margins.css': 3, 'project-workspace.css': 0, 
 const cls = name => new RegExp(`\\.${name}(?![\\w-])`);
 const VERDICT = [
   /\[data-status(?![\w-])/, /\[data-kind="error"\]/, cls('fail'), cls('error'), cls('diffv'), cls('step'), /\.planr(?:\[|:is\(\[)data-state(?![\w-])/, cls('warn'), cls('prwarn'), cls('armed'),
-  /\[data-tone="error"\]/, /\[data-ok=/, cls('margin-error'), cls('project-form-error'), cls('prerr'),
+  /\[data-tone="error"\]/, /\[data-tone="pass"\]/, /\[data-ok=/, cls('margin-error'), cls('project-form-error'), cls('prerr'),
 ];
 const namesVerdict = part => VERDICT.some(hook => hook.test(part));
 // Not verdicts, and recorded rather than swept: each is a decision for its owner, and any new one fails.
